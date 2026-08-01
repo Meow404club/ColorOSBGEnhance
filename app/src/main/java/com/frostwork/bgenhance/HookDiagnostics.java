@@ -7,6 +7,7 @@ import android.util.Log;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -38,6 +39,7 @@ public final class HookDiagnostics {
         return thread;
     });
     private static volatile int sLastReportedRevision = Integer.MIN_VALUE;
+    private static volatile ConfigReportKey sLastReportedConfig;
     private static volatile long sLastConfigReportAt;
     private static volatile String sLastConfigSource = "";
     private static volatile String sLastConfigPath = "";
@@ -72,12 +74,14 @@ public final class HookDiagnostics {
         reportConfigInternal(revision, source, path, reloadLatencyMs, error, true);
     }
 
-    private static void reportConfigInternal(int revision, String source, String path,
-                                             long reloadLatencyMs, String error,
-                                             boolean force) {
+    private static synchronized void reportConfigInternal(
+            int revision, String source, String path,
+            long reloadLatencyMs, String error, boolean force) {
         String sourceValue = source == null ? "" : source;
         String pathValue = path == null ? "" : path;
         String errorValue = error == null ? "" : error;
+        ConfigReportKey reportKey = new ConfigReportKey(
+                revision, sourceValue, pathValue, errorValue);
         sLastConfigSource = sourceValue;
         sLastConfigPath = pathValue;
         sLastConfigLatencyMs = reloadLatencyMs;
@@ -85,9 +89,10 @@ public final class HookDiagnostics {
 
         long now = SystemClock.elapsedRealtime();
         boolean failed = !errorValue.isEmpty();
-        if (!force && !failed && revision == sLastReportedRevision
+        if (!force && !failed && reportKey.equals(sLastReportedConfig)
                 && now - sLastConfigReportAt < 30_000L) return;
         sLastReportedRevision = revision;
+        sLastReportedConfig = reportKey;
         sLastConfigReportAt = now;
 
         Set<String> processIds = new HashSet<>();
@@ -291,6 +296,36 @@ public final class HookDiagnostics {
             counter.observed.addAndGet(observed);
             counter.blocked.addAndGet(blocked);
             counter.failOpen.addAndGet(failOpen);
+        }
+    }
+
+    static final class ConfigReportKey {
+        final int revision;
+        final String source;
+        final String path;
+        final String error;
+
+        ConfigReportKey(int revision, String source, String path, String error) {
+            this.revision = revision;
+            this.source = Objects.requireNonNull(source, "source");
+            this.path = Objects.requireNonNull(path, "path");
+            this.error = Objects.requireNonNull(error, "error");
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) return true;
+            if (!(other instanceof ConfigReportKey)) return false;
+            ConfigReportKey that = (ConfigReportKey) other;
+            return revision == that.revision
+                    && source.equals(that.source)
+                    && path.equals(that.path)
+                    && error.equals(that.error);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(revision, source, path, error);
         }
     }
 }
