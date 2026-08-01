@@ -41,8 +41,13 @@ public final class ResidencyDecisionEngine {
     }
 
     public KillDecision decideKill(KillContext context) {
+        return decideKill(context, "", true);
+    }
+
+    public KillDecision decideKill(
+            KillContext context, String featureKey, boolean defaultEnabled) {
         Objects.requireNonNull(context, "context");
-        Evaluation evaluation = evaluate(context);
+        Evaluation evaluation = evaluate(context, featureKey, defaultEnabled);
         if (!evaluation.active()) {
             return new KillDecision(
                     KillDecision.Action.ALLOW_SYSTEM,
@@ -230,6 +235,11 @@ public final class ResidencyDecisionEngine {
     }
 
     private Evaluation evaluate(ResidencyContext context) {
+        return evaluate(context, "", true);
+    }
+
+    private Evaluation evaluate(
+            ResidencyContext context, String featureKey, boolean defaultEnabled) {
         ResidencyIdentityResolution notEvaluated =
                 ResidencyIdentityResolution.notEvaluated(context.target());
         if (!snapshot.available()) {
@@ -252,6 +262,15 @@ public final class ResidencyDecisionEngine {
                     notEvaluated,
                     DecisionDisposition.FAIL_OPEN,
                     DecisionReason.RESIDENCY_DISABLED));
+        }
+        if (featureKey != null
+                && !featureKey.isEmpty()
+                && !snapshot.featureEnabled(featureKey, defaultEnabled)) {
+            return Evaluation.stop(trace(
+                    context,
+                    notEvaluated,
+                    DecisionDisposition.PASS_THROUGH,
+                    DecisionReason.FEATURE_DISABLED));
         }
         if (snapshot.policyRevision() != identityIndex.policyRevision()) {
             return Evaluation.stop(trace(

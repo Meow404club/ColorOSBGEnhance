@@ -98,6 +98,10 @@ public final class HookResidencyRuntime {
     public static KillDecision decideKill(KillContext context) {
         return decisionEngine().decideKill(context);
     }
+    public static KillDecision decideKill(
+            KillContext context, String featureKey, boolean defaultEnabled) {
+        return decisionEngine().decideKill(context, featureKey, defaultEnabled);
+    }
     public static FreezeDecision decideFreeze(FreezeContext context) {
         return decisionEngine().decideFreeze(context);
     }

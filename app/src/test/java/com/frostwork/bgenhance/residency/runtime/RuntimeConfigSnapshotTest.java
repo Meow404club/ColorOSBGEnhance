@@ -1,6 +1,7 @@
 package com.frostwork.bgenhance.residency.runtime;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 
@@ -32,6 +33,27 @@ public final class RuntimeConfigSnapshotTest {
         assertThrows(
                 UnsupportedOperationException.class,
                 () -> snapshot.policiesByPackage().clear());
+    }
+
+    @Test
+    public void copiesAndLocksFeatureFlags() {
+        Map<String, Boolean> mutable = new LinkedHashMap<>();
+        mutable.put("block_example", false);
+
+        RuntimeConfigSnapshot snapshot = RuntimeConfigSnapshot.available(
+                12L,
+                true,
+                true,
+                false,
+                mutable,
+                34L,
+                new LinkedHashMap<>());
+        mutable.clear();
+
+        assertFalse(snapshot.featureEnabled("block_example", true));
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> snapshot.featureFlags().clear());
     }
 
     @Test

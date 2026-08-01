@@ -124,7 +124,9 @@ public final class HookDiagnostics {
         Counter counter = COUNTERS.computeIfAbsent(event.feature, key -> new Counter());
         counter.observed.incrementAndGet();
         if ("blocked".equals(result)) counter.blocked.incrementAndGet();
-        if ("config_unavailable".equals(result)) counter.failOpen.incrementAndGet();
+        if ("config_unavailable".equals(result) || "fail_open".equals(result)) {
+            counter.failOpen.incrementAndGet();
+        }
         counter.last.set(new LastEvent(event, result, System.currentTimeMillis()));
         int pending = PENDING_EVENTS.incrementAndGet();
         scheduleFlush(pending >= FLUSH_EVENT_THRESHOLD ? 0L : FLUSH_INTERVAL_MS);

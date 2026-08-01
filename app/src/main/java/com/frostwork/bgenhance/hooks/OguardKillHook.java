@@ -1,12 +1,16 @@
 package com.frostwork.bgenhance.hooks;
 
-import com.frostwork.bgenhance.Decision;
 import com.frostwork.bgenhance.FeatureHook;
 import com.frostwork.bgenhance.FeatureIds;
 import com.frostwork.bgenhance.HookEvent;
+import com.frostwork.bgenhance.HookResidencyRuntime;
 import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.HookUtils;
 import com.frostwork.bgenhance.ModuleSettings;
+import com.frostwork.bgenhance.ResidencyDecisionReporter;
+import com.frostwork.bgenhance.hooks.oguard.OguardTargetAdapter;
+import com.frostwork.bgenhance.residency.decision.KillContext;
+import com.frostwork.bgenhance.residency.decision.KillDecision;
 import java.lang.reflect.Method;
 
 public final class OguardKillHook implements FeatureHook {
@@ -22,7 +26,16 @@ public final class OguardKillHook implements FeatureHook {
             String pkg = HookUtils.stringArg(chain, 1);
             String reason = HookUtils.stringArg(chain, 2);
             HookEvent event = new HookEvent(FeatureIds.OGUARD_KILL, 502, uid, pkg, pkg, reason);
-            if (Decision.shouldBlock(prefKey(), event)) return true;
+            KillDecision decision = HookResidencyRuntime.decideKill(
+                    new KillContext(
+                            OguardTargetAdapter.from(pkg, uid),
+                            KillContext.Path.OGUARD_KILL,
+                            FeatureIds.OGUARD_KILL,
+                            HookTargetIds.OGUARD_KILL),
+                    prefKey(),
+                    ModuleSettings.defaultFor(prefKey()));
+            ResidencyDecisionReporter.recordKill(event, decision);
+            if (decision.blocksAction()) return true;
             return chain.proceed();
         });
         return status(count);

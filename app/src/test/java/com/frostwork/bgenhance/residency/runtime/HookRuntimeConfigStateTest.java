@@ -19,7 +19,12 @@ public final class HookRuntimeConfigStateTest {
                 RuntimeConfigDocument.CURRENT_SCHEMA_VERSION,
                 17L,
                 100L,
-                new GlobalFeatureConfig(true, true, false, "custom", Map.of()),
+                new GlobalFeatureConfig(
+                        true,
+                        true,
+                        false,
+                        "custom",
+                        Map.of("block_oguard_kill", false)),
                 ResidencyPolicyDocument.empty());
 
         HookRuntimeConfigState state = HookRuntimeConfigState.available(
@@ -30,6 +35,7 @@ public final class HookRuntimeConfigStateTest {
         assertEquals(17L, state.snapshot().configRevision());
         assertTrue(state.snapshot().available());
         assertTrue(state.snapshot().dryRun());
+        assertFalse(state.snapshot().featureEnabled("block_oguard_kill", true));
         assertEquals("runtime_envelope", state.source());
     }
 

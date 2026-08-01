@@ -380,6 +380,7 @@ public final class DiagnosticsActivity extends AppCompatActivity {
         if ("blocked".equals(result)) return getString(R.string.result_blocked);
         if ("observed".equals(result)) return getString(R.string.result_observed);
         if ("passed".equals(result)) return getString(R.string.result_passed);
+        if ("fail_open".equals(result)) return getString(R.string.result_fail_open);
         if ("config_unavailable".equals(result)) return getString(R.string.result_config_unavailable);
         return getString(R.string.result_unknown, result);
     }

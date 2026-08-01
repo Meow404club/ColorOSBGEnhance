@@ -37,6 +37,7 @@ public final class HookRuntimeConfigState {
                 value.revision(),
                 value.global().masterEnabled(),
                 value.global().dryRun(),
+                value.global().legacyFeatures(),
                 value.residency());
         return new HookRuntimeConfigState(
                 true,

@@ -14,6 +14,7 @@ public final class RuntimeConfigSnapshot {
     private final boolean masterEnabled;
     private final boolean residencyEnabled;
     private final boolean dryRun;
+    private final Map<String, Boolean> featureFlags;
     private final long policyRevision;
     private final Map<String, AppResidencyPolicy> policiesByPackage;
 
@@ -23,6 +24,7 @@ public final class RuntimeConfigSnapshot {
             boolean masterEnabled,
             boolean residencyEnabled,
             boolean dryRun,
+            Map<String, Boolean> featureFlags,
             long policyRevision,
             Map<String, AppResidencyPolicy> policiesByPackage) {
         if (configRevision < 0L) throw new IllegalArgumentException("configRevision < 0");
@@ -32,6 +34,7 @@ public final class RuntimeConfigSnapshot {
         this.masterEnabled = masterEnabled;
         this.residencyEnabled = residencyEnabled;
         this.dryRun = dryRun;
+        this.featureFlags = immutableFeatureMap(featureFlags);
         this.policyRevision = policyRevision;
         this.policiesByPackage = immutablePolicyMap(policiesByPackage);
     }
@@ -40,6 +43,20 @@ public final class RuntimeConfigSnapshot {
             long configRevision,
             boolean masterEnabled,
             boolean dryRun,
+            ResidencyPolicyDocument document) {
+        return available(
+                configRevision,
+                masterEnabled,
+                dryRun,
+                Collections.emptyMap(),
+                document);
+    }
+
+    public static RuntimeConfigSnapshot available(
+            long configRevision,
+            boolean masterEnabled,
+            boolean dryRun,
+            Map<String, Boolean> featureFlags,
             ResidencyPolicyDocument document) {
         Objects.requireNonNull(document, "document");
         Map<String, AppResidencyPolicy> policies = new LinkedHashMap<>();
@@ -56,6 +73,7 @@ public final class RuntimeConfigSnapshot {
                 masterEnabled,
                 document.enabled(),
                 dryRun,
+                featureFlags,
                 document.policyRevision(),
                 policies);
     }
@@ -73,6 +91,26 @@ public final class RuntimeConfigSnapshot {
                 masterEnabled,
                 residencyEnabled,
                 dryRun,
+                Collections.emptyMap(),
+                policyRevision,
+                policiesByPackage);
+    }
+
+    public static RuntimeConfigSnapshot available(
+            long configRevision,
+            boolean masterEnabled,
+            boolean residencyEnabled,
+            boolean dryRun,
+            Map<String, Boolean> featureFlags,
+            long policyRevision,
+            Map<String, AppResidencyPolicy> policiesByPackage) {
+        return new RuntimeConfigSnapshot(
+                true,
+                configRevision,
+                masterEnabled,
+                residencyEnabled,
+                dryRun,
+                featureFlags,
                 policyRevision,
                 policiesByPackage);
     }
@@ -84,8 +122,21 @@ public final class RuntimeConfigSnapshot {
                 false,
                 false,
                 false,
+                Collections.emptyMap(),
                 0L,
                 Collections.emptyMap());
+    }
+
+    private static Map<String, Boolean> immutableFeatureMap(
+            Map<String, Boolean> source) {
+        Objects.requireNonNull(source, "featureFlags");
+        Map<String, Boolean> copy = new LinkedHashMap<>();
+        for (Map.Entry<String, Boolean> entry : source.entrySet()) {
+            copy.put(
+                    Objects.requireNonNull(entry.getKey(), "feature flag key"),
+                    Objects.requireNonNull(entry.getValue(), "feature flag value"));
+        }
+        return Collections.unmodifiableMap(copy);
     }
 
     private static Map<String, AppResidencyPolicy> immutablePolicyMap(
@@ -109,6 +160,11 @@ public final class RuntimeConfigSnapshot {
     public boolean masterEnabled() { return masterEnabled; }
     public boolean residencyEnabled() { return residencyEnabled; }
     public boolean dryRun() { return dryRun; }
+    public Map<String, Boolean> featureFlags() { return featureFlags; }
+    public boolean featureEnabled(String key, boolean defaultValue) {
+        Boolean configured = featureFlags.get(key);
+        return configured != null ? configured : defaultValue;
+    }
     public long policyRevision() { return policyRevision; }
     public Map<String, AppResidencyPolicy> policiesByPackage() { return policiesByPackage; }
     public AppResidencyPolicy policyForPackage(String packageName) {
