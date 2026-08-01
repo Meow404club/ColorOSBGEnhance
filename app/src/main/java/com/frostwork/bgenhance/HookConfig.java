@@ -90,6 +90,7 @@ public final class HookConfig {
         } catch (Throwable t) {
             Log.w(ModuleSettings.TAG, "diagnostics context attach failed", t);
         }
+        HookResidencyRuntime.attach(resolverContext);
         reportCurrentConfig();
     }
 
@@ -229,6 +230,7 @@ public final class HookConfig {
             HookRuntimeConfigState next = HookRuntimeConfigState.available(
                     document, source, SystemClock.elapsedRealtime());
             STATE.set(next);
+            HookResidencyRuntime.updateConfig(next);
             HookDiagnostics.reportConfig(diagnosticRevision(document.revision()), source,
                     ModuleApplication.REMOTE_CONFIG_GROUP,
                     SystemClock.elapsedRealtime() - started, "");
@@ -243,6 +245,7 @@ public final class HookConfig {
         HookRuntimeConfigState unavailable = HookRuntimeConfigState.unavailable(
                 message, previous.lastGoodRevision(), SystemClock.elapsedRealtime());
         STATE.set(unavailable);
+        HookResidencyRuntime.updateConfig(unavailable);
         HookDiagnostics.reportConfig(diagnosticRevision(unavailable.lastGoodRevision()),
                 "remote_preferences", ModuleApplication.REMOTE_CONFIG_GROUP,
                 latencyMs, message);
