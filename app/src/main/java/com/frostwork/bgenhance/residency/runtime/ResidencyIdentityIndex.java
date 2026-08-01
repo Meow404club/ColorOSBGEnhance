@@ -1,6 +1,8 @@
 package com.frostwork.bgenhance.residency.runtime;
 
 import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
+import com.frostwork.bgenhance.residency.model.FreezePolicy;
+import com.frostwork.bgenhance.residency.model.FreezeSource;
 import com.frostwork.bgenhance.residency.model.ResidencyMode;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -23,16 +25,19 @@ public final class ResidencyIdentityIndex {
     private final Map<String, AppResidencyPolicy> policiesByPackage;
     private final Map<String, Integer> packageAppIds;
     private final Map<Integer, Set<String>> appIdPackages;
+    private final Map<Integer, Set<String>> uidPackages;
 
     private ResidencyIdentityIndex(
             long policyRevision,
             Map<String, AppResidencyPolicy> policiesByPackage,
             Map<String, Integer> packageAppIds,
-            Map<Integer, Set<String>> appIdPackages) {
+            Map<Integer, Set<String>> appIdPackages,
+            Map<Integer, Set<String>> uidPackages) {
         this.policyRevision = policyRevision;
         this.policiesByPackage = policiesByPackage;
         this.packageAppIds = packageAppIds;
         this.appIdPackages = appIdPackages;
+        this.uidPackages = uidPackages;
     }
 
     /** Sentinel used while package identities are unavailable or being rebuilt. */
@@ -41,41 +46,99 @@ public final class ResidencyIdentityIndex {
                 INVALIDATED_POLICY_REVISION,
                 Collections.emptyMap(),
                 Collections.emptyMap(),
+                Collections.emptyMap(),
                 Collections.emptyMap());
     }
 
     public static ResidencyIdentityIndex build(
             RuntimeConfigSnapshot snapshot,
             Map<String, Integer> packageUids) {
+        Objects.requireNonNull(packageUids, "packageUids");
+        Map<Integer, Set<String>> verifiedUidPackages = new TreeMap<>();
+        for (Map.Entry<String, Integer> entry : packageUids.entrySet()) {
+            String packageName = Objects.requireNonNull(entry.getKey(), "packageName");
+            Integer uid = Objects.requireNonNull(entry.getValue(), "uid");
+            verifiedUidPackages
+                    .computeIfAbsent(uid, ignored -> new TreeSet<>())
+                    .add(packageName);
+        }
+        return build(snapshot, packageUids, verifiedUidPackages);
+    }
+
+    static ResidencyIdentityIndex build(
+            RuntimeConfigSnapshot snapshot,
+            Map<String, Integer> packageUids,
+            Map<Integer, Set<String>> verifiedUidPackages) {
         Objects.requireNonNull(snapshot, "snapshot");
         Objects.requireNonNull(packageUids, "packageUids");
+        Objects.requireNonNull(verifiedUidPackages, "verifiedUidPackages");
 
         Map<String, Integer> packageAppIdCopy = new TreeMap<>();
         Map<Integer, Set<String>> mutableAppIdPackages = new TreeMap<>();
         for (Map.Entry<String, Integer> entry : packageUids.entrySet()) {
             String packageName = Objects.requireNonNull(entry.getKey(), "packageName");
             Integer uid = Objects.requireNonNull(entry.getValue(), "uid");
-            if (packageName.isEmpty()) throw new IllegalArgumentException("empty packageName");
-            if (uid < 0) throw new IllegalArgumentException("uid < 0 for " + packageName);
-            int appId = appId(uid);
-            packageAppIdCopy.put(packageName, appId);
-            mutableAppIdPackages
-                    .computeIfAbsent(appId, ignored -> new TreeSet<>())
-                    .add(packageName);
+            addPackageIdentity(
+                    packageAppIdCopy, mutableAppIdPackages, packageName, uid);
         }
 
-        Map<Integer, Set<String>> immutableAppIdPackages = new LinkedHashMap<>();
-        for (Map.Entry<Integer, Set<String>> entry : mutableAppIdPackages.entrySet()) {
-            immutableAppIdPackages.put(
-                    entry.getKey(),
-                    Collections.unmodifiableSet(new LinkedHashSet<>(entry.getValue())));
+        Map<Integer, Set<String>> mutableUidPackages = new TreeMap<>();
+        for (Map.Entry<Integer, Set<String>> entry : verifiedUidPackages.entrySet()) {
+            Integer uid = Objects.requireNonNull(entry.getKey(), "uid");
+            if (uid < 0) throw new IllegalArgumentException("uid < 0");
+            Set<String> packages = Objects.requireNonNull(entry.getValue(), "uid packages");
+            if (packages.isEmpty()) {
+                throw new IllegalArgumentException("empty package set for uid " + uid);
+            }
+            Set<String> uidPackageCopy = new TreeSet<>();
+            for (String packageName : packages) {
+                addPackageIdentity(
+                        packageAppIdCopy, mutableAppIdPackages, packageName, uid);
+                uidPackageCopy.add(packageName);
+            }
+            mutableUidPackages.put(uid, uidPackageCopy);
         }
+
+        Map<Integer, Set<String>> immutableAppIdPackages =
+                immutablePackageSets(mutableAppIdPackages);
+        Map<Integer, Set<String>> immutableUidPackages =
+                immutablePackageSets(mutableUidPackages);
 
         return new ResidencyIdentityIndex(
                 snapshot.policyRevision(),
                 snapshot.policiesByPackage(),
                 Collections.unmodifiableMap(new LinkedHashMap<>(packageAppIdCopy)),
-                Collections.unmodifiableMap(immutableAppIdPackages));
+                immutableAppIdPackages,
+                immutableUidPackages);
+    }
+
+    private static void addPackageIdentity(
+            Map<String, Integer> packageAppIds,
+            Map<Integer, Set<String>> appIdPackages,
+            String packageName,
+            int uid) {
+        Objects.requireNonNull(packageName, "packageName");
+        if (packageName.isEmpty()) throw new IllegalArgumentException("empty packageName");
+        if (uid < 0) throw new IllegalArgumentException("uid < 0 for " + packageName);
+        int appId = appId(uid);
+        Integer previous = packageAppIds.putIfAbsent(packageName, appId);
+        if (previous != null && previous != appId) {
+            throw new IllegalStateException("conflicting appId for " + packageName);
+        }
+        appIdPackages
+                .computeIfAbsent(appId, ignored -> new TreeSet<>())
+                .add(packageName);
+    }
+
+    private static Map<Integer, Set<String>> immutablePackageSets(
+            Map<Integer, Set<String>> source) {
+        Map<Integer, Set<String>> result = new LinkedHashMap<>();
+        for (Map.Entry<Integer, Set<String>> entry : source.entrySet()) {
+            result.put(
+                    entry.getKey(),
+                    Collections.unmodifiableSet(new LinkedHashSet<>(entry.getValue())));
+        }
+        return Collections.unmodifiableMap(result);
     }
 
     public ResidencyIdentityResolution resolve(ResidencyTarget target) {
@@ -134,8 +197,90 @@ public final class ResidencyIdentityIndex {
                     null);
         }
 
-        Set<String> uidCandidates = appIdPackages.get(targetAppId);
-        if (uidCandidates == null || uidCandidates.isEmpty()) {
+        return resolveUidCandidates(
+                target, packagesForUid(target.uid()), UidPolicyScope.FULL);
+    }
+
+    /** Resolves policy for a UID-wide vendor action without trusting one package hint. */
+    public ResidencyIdentityResolution resolveUidScoped(ResidencyTarget target) {
+        return resolveUidScoped(target, UidPolicyScope.FULL);
+    }
+
+    /** Resolves one behavior projection across every known package sharing the target UID. */
+    public ResidencyIdentityResolution resolveUidScoped(
+            ResidencyTarget target, UidPolicyScope policyScope) {
+        Objects.requireNonNull(target, "target");
+        Objects.requireNonNull(policyScope, "policyScope");
+        if (isInvalidated()) return ResidencyIdentityResolution.notEvaluated(target);
+
+        String packageName = target.packageName();
+        if (!target.hasUid()) {
+            return resolution(
+                    IdentityResolutionStatus.UNKNOWN,
+                    target,
+                    null,
+                    packageName == null
+                            ? Collections.emptySet()
+                            : Collections.singleton(packageName),
+                    null);
+        }
+
+        int targetAppId = appId(target.uid());
+        Set<String> uidCandidates = packagesForUid(target.uid());
+        Integer indexedAppId = packageName == null ? null : packageAppIds.get(packageName);
+        if (indexedAppId != null && targetAppId != indexedAppId) {
+            return resolution(
+                    IdentityResolutionStatus.UID_MISMATCH,
+                    target,
+                    null,
+                    Collections.singleton(packageName),
+                    null);
+        }
+        if (isSystemUid(targetAppId)) {
+            return resolution(
+                    IdentityResolutionStatus.SYSTEM_UID,
+                    target,
+                    null,
+                    packageName == null
+                            ? packagesForUid(target.uid())
+                            : Collections.singleton(packageName),
+                    null);
+        }
+        if (packageName != null) {
+            if (!policiesByPackage.containsKey(packageName)) {
+                return resolution(
+                        IdentityResolutionStatus.UNMANAGED,
+                        target,
+                        null,
+                        Collections.singleton(packageName),
+                        null);
+            }
+            if (indexedAppId == null) {
+                return resolution(
+                        IdentityResolutionStatus.UNKNOWN,
+                        target,
+                        null,
+                        Collections.singleton(packageName),
+                        null);
+            }
+            if (!uidCandidates.isEmpty() && !uidCandidates.contains(packageName)) {
+                return resolution(
+                        IdentityResolutionStatus.UID_MISMATCH,
+                        target,
+                        null,
+                        Collections.singleton(packageName),
+                        null);
+            }
+        }
+        return resolveUidCandidates(
+                target, uidCandidates, policyScope);
+    }
+
+    private ResidencyIdentityResolution resolveUidCandidates(
+            ResidencyTarget target,
+            Set<String> uidCandidates,
+            UidPolicyScope policyScope) {
+        if (uidCandidates.isEmpty()) {
             return resolution(
                     IdentityResolutionStatus.UNKNOWN,
                     target,
@@ -157,6 +302,14 @@ public final class ResidencyIdentityIndex {
                     uidCandidates,
                     null);
         }
+        if (managedPolicies.size() != uidCandidates.size()) {
+            return resolution(
+                    IdentityResolutionStatus.SHARED_UID_CONFLICT,
+                    target,
+                    null,
+                    uidCandidates,
+                    null);
+        }
         if (managedPolicies.size() == 1) {
             AppResidencyPolicy policy = managedPolicies.get(0);
             return resolution(
@@ -169,7 +322,8 @@ public final class ResidencyIdentityIndex {
 
         AppResidencyPolicy representative = managedPolicies.get(0);
         for (int i = 1; i < managedPolicies.size(); i++) {
-            if (!sameEffectivePolicy(representative, managedPolicies.get(i))) {
+            if (!sameEffectivePolicy(
+                    representative, managedPolicies.get(i), policyScope)) {
                 return resolution(
                         IdentityResolutionStatus.SHARED_UID_CONFLICT,
                         target,
@@ -191,6 +345,11 @@ public final class ResidencyIdentityIndex {
         return packages == null ? Collections.emptySet() : packages;
     }
 
+    private Set<String> packagesForUid(int uid) {
+        Set<String> packages = uidPackages.get(uid);
+        return packages == null ? Collections.emptySet() : packages;
+    }
+
     private static ResidencyIdentityResolution resolution(
             IdentityResolutionStatus status,
             ResidencyTarget target,
@@ -203,7 +362,8 @@ public final class ResidencyIdentityIndex {
 
     private static boolean sameEffectivePolicy(
             AppResidencyPolicy first,
-            AppResidencyPolicy second) {
+            AppResidencyPolicy second,
+            UidPolicyScope policyScope) {
         boolean firstSystemManaged = first.mode() == ResidencyMode.SYSTEM;
         boolean secondSystemManaged = second.mode() == ResidencyMode.SYSTEM;
         if (first.enabled() != second.enabled()
@@ -211,11 +371,70 @@ public final class ResidencyIdentityIndex {
             return false;
         }
         if (!first.enabled() || firstSystemManaged) return true;
-        return first.killPolicy().equals(second.killPolicy())
-                && first.freezePolicy().equals(second.freezePolicy())
-                && first.wakePolicy().equals(second.wakePolicy())
-                && first.resourcePolicy().equals(second.resourcePolicy())
-                && first.refreezePolicy().equals(second.refreezePolicy());
+        switch (policyScope) {
+            case NORMAL_FREEZE:
+                return sameFreezeAction(
+                        first.freezePolicy(), second.freezePolicy(), FreezeSource.NORMAL);
+            case FAST_FREEZE:
+                return sameFreezeAction(
+                        first.freezePolicy(), second.freezePolicy(), FreezeSource.FAST);
+            case SUPER_FREEZE:
+                return sameFreezeAction(
+                        first.freezePolicy(), second.freezePolicy(), FreezeSource.SUPER);
+            case PRELOAD_FREEZE:
+                return sameFreezeAction(
+                        first.freezePolicy(), second.freezePolicy(), FreezeSource.PRELOAD);
+            case R_TO_M_TIMING:
+                return sameFreezeTiming(
+                        first.freezePolicy(), second.freezePolicy(), true);
+            case M_TO_F_TIMING:
+                return sameFreezeTiming(
+                        first.freezePolicy(), second.freezePolicy(), false);
+            case CORE_EXEMPTION:
+                return isCoreExempt(first.freezePolicy())
+                        == isCoreExempt(second.freezePolicy());
+            case LCD_ON_EXEMPTION:
+                return isLcdOnExempt(first.freezePolicy())
+                        == isLcdOnExempt(second.freezePolicy());
+            case FULL:
+            default:
+                return first.killPolicy().equals(second.killPolicy())
+                        && first.freezePolicy().equals(second.freezePolicy())
+                        && first.wakePolicy().equals(second.wakePolicy())
+                        && first.resourcePolicy().equals(second.resourcePolicy())
+                        && first.refreezePolicy().equals(second.refreezePolicy());
+        }
+    }
+
+    private static boolean sameFreezeAction(
+            FreezePolicy first, FreezePolicy second, FreezeSource source) {
+        if (first.fullExemption() != second.fullExemption()) return false;
+        if (first.fullExemption()) return true;
+        if (first.allows(source) != second.allows(source)) return false;
+        if (!first.allows(source)) return true;
+        if (first.customTiming() != second.customTiming()) return false;
+        if (!first.customTiming()) return true;
+        return first.rToMDelayMs() == second.rToMDelayMs()
+                && first.mToFDelayMs() == second.mToFDelayMs();
+    }
+
+    private static boolean sameFreezeTiming(
+            FreezePolicy first, FreezePolicy second, boolean rToM) {
+        boolean firstApplies = !first.fullExemption() && first.customTiming();
+        boolean secondApplies = !second.fullExemption() && second.customTiming();
+        if (firstApplies != secondApplies) return false;
+        if (!firstApplies) return true;
+        return rToM
+                ? first.rToMDelayMs() == second.rToMDelayMs()
+                : first.mToFDelayMs() == second.mToFDelayMs();
+    }
+
+    private static boolean isCoreExempt(FreezePolicy policy) {
+        return policy.fullExemption() || policy.coreExemption();
+    }
+
+    private static boolean isLcdOnExempt(FreezePolicy policy) {
+        return policy.fullExemption() || policy.lcdOnExemption();
     }
 
     public static boolean isSystemUid(int uid) {
@@ -232,4 +451,5 @@ public final class ResidencyIdentityIndex {
     public boolean isInvalidated() { return policyRevision == INVALIDATED_POLICY_REVISION; }
     public Map<String, Integer> packageAppIds() { return packageAppIds; }
     public Map<Integer, Set<String>> appIdPackages() { return appIdPackages; }
+    public Map<Integer, Set<String>> uidPackages() { return uidPackages; }
 }

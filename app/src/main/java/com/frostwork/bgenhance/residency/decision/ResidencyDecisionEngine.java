@@ -14,6 +14,7 @@ import com.frostwork.bgenhance.residency.runtime.IdentityResolutionStatus;
 import com.frostwork.bgenhance.residency.runtime.ResidencyIdentityIndex;
 import com.frostwork.bgenhance.residency.runtime.ResidencyIdentityResolution;
 import com.frostwork.bgenhance.residency.runtime.RuntimeConfigSnapshot;
+import com.frostwork.bgenhance.residency.runtime.UidPolicyScope;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Objects;
@@ -67,7 +68,8 @@ public final class ResidencyDecisionEngine {
 
     public FreezeDecision decideFreeze(FreezeContext context) {
         Objects.requireNonNull(context, "context");
-        Evaluation evaluation = evaluate(context);
+        Evaluation evaluation = evaluate(
+                context, "", true, UidPolicyScope.forFreezeSource(context.source()));
         if (!evaluation.active()) {
             return new FreezeDecision(
                     FreezeDecision.Action.ALLOW_SYSTEM,
@@ -240,6 +242,14 @@ public final class ResidencyDecisionEngine {
 
     private Evaluation evaluate(
             ResidencyContext context, String featureKey, boolean defaultEnabled) {
+        return evaluate(context, featureKey, defaultEnabled, null);
+    }
+
+    private Evaluation evaluate(
+            ResidencyContext context,
+            String featureKey,
+            boolean defaultEnabled,
+            UidPolicyScope uidPolicyScope) {
         ResidencyIdentityResolution notEvaluated =
                 ResidencyIdentityResolution.notEvaluated(context.target());
         if (!snapshot.available()) {
@@ -280,7 +290,9 @@ public final class ResidencyDecisionEngine {
                     DecisionReason.STALE_IDENTITY_INDEX));
         }
 
-        ResidencyIdentityResolution identity = identityIndex.resolve(context.target());
+        ResidencyIdentityResolution identity = uidPolicyScope != null
+                ? identityIndex.resolveUidScoped(context.target(), uidPolicyScope)
+                : identityIndex.resolve(context.target());
         switch (identity.status()) {
             case UNKNOWN:
                 return Evaluation.stop(trace(

@@ -12,6 +12,8 @@ import com.frostwork.bgenhance.residency.decision.WakeContext;
 import com.frostwork.bgenhance.residency.decision.WakeDecision;
 import java.util.Collections;
 import java.util.Objects;
+import java.util.OptionalInt;
+import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -111,9 +113,24 @@ public final class ResidencyRuntimeController {
             RuntimeConfigSnapshot snapshot, PackageUidSource source, long token) {
         if (generation.get() != token) return;
         try {
-            PackageUidSource guardedSource = packageName -> {
-                if (generation.get() != token) throw STALE_IDENTITY_BUILD;
-                return source.findUid(packageName);
+            PackageUidSource guardedSource = new PackageUidSource() {
+                @Override
+                public boolean hasCompleteUidEnumeration() {
+                    throwIfStale(token);
+                    return source.hasCompleteUidEnumeration();
+                }
+
+                @Override
+                public OptionalInt findUid(String packageName) {
+                    throwIfStale(token);
+                    return source.findUid(packageName);
+                }
+
+                @Override
+                public Set<String> findPackagesForUid(int uid) {
+                    throwIfStale(token);
+                    return source.findPackagesForUid(uid);
+                }
             };
             ResidencyIdentityIndex index = new ResidencyIdentityIndexBuilder(
                     guardedSource).build(snapshot);
@@ -126,6 +143,10 @@ public final class ResidencyRuntimeController {
                     ResidencyRuntimeState.Status.IDENTITY_REBUILD_FAILED,
                     token, errorText(error));
         }
+    }
+
+    private void throwIfStale(long token) {
+        if (generation.get() != token) throw STALE_IDENTITY_BUILD;
     }
 
     private synchronized void publishIfCurrent(

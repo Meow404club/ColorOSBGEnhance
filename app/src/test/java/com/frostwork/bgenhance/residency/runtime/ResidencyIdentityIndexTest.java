@@ -8,10 +8,15 @@ import static org.junit.Assert.assertTrue;
 
 import com.frostwork.bgenhance.residency.decision.DecisionDisposition;
 import com.frostwork.bgenhance.residency.decision.DecisionReason;
+import com.frostwork.bgenhance.residency.decision.FreezeContext;
+import com.frostwork.bgenhance.residency.decision.FreezeDecision;
 import com.frostwork.bgenhance.residency.decision.KillContext;
 import com.frostwork.bgenhance.residency.decision.KillDecision;
 import com.frostwork.bgenhance.residency.decision.ResidencyDecisionEngine;
 import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
+import com.frostwork.bgenhance.residency.model.FreezeSource;
+import com.frostwork.bgenhance.residency.model.FreezePolicy;
+import com.frostwork.bgenhance.residency.model.KillPolicy;
 import com.frostwork.bgenhance.residency.model.ResidencyMode;
 import com.frostwork.bgenhance.residency.model.ResidencyPresets;
 import java.util.LinkedHashMap;
@@ -44,7 +49,271 @@ public final class ResidencyIdentityIndexTest {
     }
 
     @Test
-    public void resolvesUidWithOneManagedRule() {
+    public void uidScopedResolutionReportsConflictDespiteExactPackageHint() {
+        AppResidencyPolicy first = ResidencyPresets.create(FIRST, ResidencyMode.BALANCED);
+        AppResidencyPolicy second = ResidencyPresets.create(SECOND, ResidencyMode.LOW_POWER);
+        RuntimeConfigSnapshot snapshot = snapshot(7L, first, second);
+        ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
+                snapshot, packageUids(SHARED_UID, SHARED_UID));
+
+        ResidencyIdentityResolution result = index.resolveUidScoped(
+                new ResidencyTarget(FIRST, SHARED_UID, 20_201));
+
+        assertEquals(IdentityResolutionStatus.SHARED_UID_CONFLICT, result.status());
+        assertFalse(result.hasManagedPolicy());
+        assertFalse(result.matchedPackageName().isPresent());
+        assertEquals(2, result.candidatePackages().size());
+    }
+
+    @Test
+    public void uidScopedResolutionAcceptsSharedUidWithSameEffectivePolicy() {
+        AppResidencyPolicy first = ResidencyPresets.create(FIRST, ResidencyMode.LOW_POWER);
+        AppResidencyPolicy second = ResidencyPresets.create(SECOND, ResidencyMode.LOW_POWER);
+        RuntimeConfigSnapshot snapshot = snapshot(7L, first, second);
+        ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
+                snapshot, packageUids(SHARED_UID, SHARED_UID));
+
+        ResidencyIdentityResolution result = index.resolveUidScoped(
+                new ResidencyTarget(FIRST, SHARED_UID, 20_201));
+
+        assertEquals(IdentityResolutionStatus.SHARED_UID_SAME_POLICY, result.status());
+        assertTrue(result.hasManagedPolicy());
+        assertEquals(2, result.candidatePackages().size());
+    }
+
+    @Test
+    public void uidScopedResolutionFindsSingleManagedRule() {
+        AppResidencyPolicy first = ResidencyPresets.create(FIRST, ResidencyMode.BALANCED);
+        RuntimeConfigSnapshot snapshot = snapshot(7L, first);
+        ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
+                snapshot, Map.of(FIRST, FIRST_UID));
+
+        ResidencyIdentityResolution result = index.resolveUidScoped(
+                new ResidencyTarget(FIRST, FIRST_UID, 20_201));
+
+        assertEquals(IdentityResolutionStatus.UID_SINGLE_RULE, result.status());
+        assertSame(first, result.policy().orElse(null));
+        assertEquals(FIRST, result.matchedPackageName().orElse(null));
+        assertEquals(1, result.candidatePackages().size());
+    }
+
+    @Test
+    public void uidScopedResolutionFailsOpenForAnUnverifiedUserUid() {
+        AppResidencyPolicy first = ResidencyPresets.create(FIRST, ResidencyMode.BALANCED);
+        RuntimeConfigSnapshot snapshot = snapshot(7L, first);
+        ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
+                snapshot, Map.of(FIRST, FIRST_UID));
+
+        ResidencyIdentityResolution result = index.resolveUidScoped(
+                new ResidencyTarget(FIRST, USER_TEN_FIRST_UID, 20_201));
+
+        assertEquals(IdentityResolutionStatus.UNKNOWN, result.status());
+        assertFalse(result.hasManagedPolicy());
+        assertEquals(USER_TEN_FIRST_UID, result.target().uid());
+    }
+
+    @Test
+    public void uidScopedResolutionRejectsPackageHintUidMismatch() {
+        AppResidencyPolicy first = ResidencyPresets.create(FIRST, ResidencyMode.BALANCED);
+        AppResidencyPolicy second = ResidencyPresets.create(SECOND, ResidencyMode.BALANCED);
+        RuntimeConfigSnapshot snapshot = snapshot(7L, first, second);
+        ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
+                snapshot, packageUids(FIRST_UID, SHARED_UID));
+
+        ResidencyIdentityResolution result = index.resolveUidScoped(
+                new ResidencyTarget(FIRST, SHARED_UID, 20_201));
+
+        assertEquals(IdentityResolutionStatus.UID_MISMATCH, result.status());
+        assertFalse(result.hasManagedPolicy());
+    }
+
+    @Test
+    public void uidScopedResolutionRejectsHintOutsideVerifiedUserUidMembers() {
+        AppResidencyPolicy first = ResidencyPresets.create(FIRST, ResidencyMode.BALANCED);
+        AppResidencyPolicy second = ResidencyPresets.create(SECOND, ResidencyMode.BALANCED);
+        ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
+                snapshot(7L, first, second),
+                packageUids(FIRST_UID, USER_TEN_FIRST_UID));
+
+        ResidencyIdentityResolution result = index.resolveUidScoped(
+                new ResidencyTarget(SECOND, FIRST_UID, 20_201));
+
+        assertEquals(IdentityResolutionStatus.UID_MISMATCH, result.status());
+        assertFalse(result.hasManagedPolicy());
+    }
+
+    @Test
+    public void uidScopedResolutionRejectsSystemUid() {
+        AppResidencyPolicy first = ResidencyPresets.create(FIRST, ResidencyMode.BALANCED);
+        RuntimeConfigSnapshot snapshot = snapshot(7L, first);
+        ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
+                snapshot, Map.of(FIRST, 1_000));
+
+        ResidencyIdentityResolution result = index.resolveUidScoped(
+                new ResidencyTarget(FIRST, 101_000, 201));
+
+        assertEquals(IdentityResolutionStatus.SYSTEM_UID, result.status());
+        assertFalse(result.hasManagedPolicy());
+    }
+
+    @Test
+    public void uidScopedResolutionRequiresUid() {
+        AppResidencyPolicy first = ResidencyPresets.create(FIRST, ResidencyMode.BALANCED);
+        RuntimeConfigSnapshot snapshot = snapshot(7L, first);
+        ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
+                snapshot, Map.of(FIRST, FIRST_UID));
+
+        ResidencyIdentityResolution result = index.resolveUidScoped(
+                ResidencyTarget.forPackage(FIRST));
+
+        assertEquals(IdentityResolutionStatus.UNKNOWN, result.status());
+        assertFalse(result.hasManagedPolicy());
+    }
+
+    @Test
+    public void uidScopedResolutionRejectsManagedHintWithoutIdentityBinding() {
+        AppResidencyPolicy first = ResidencyPresets.create(FIRST, ResidencyMode.ACTIVE);
+        AppResidencyPolicy second = ResidencyPresets.create(SECOND, ResidencyMode.LOW_POWER);
+        RuntimeConfigSnapshot snapshot = snapshot(7L, first, second);
+        ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
+                snapshot, Map.of(SECOND, SHARED_UID));
+
+        ResidencyIdentityResolution result = index.resolveUidScoped(
+                new ResidencyTarget(FIRST, SHARED_UID, 20_201));
+
+        assertEquals(IdentityResolutionStatus.UNKNOWN, result.status());
+        assertFalse(result.hasManagedPolicy());
+        assertEquals(1, result.candidatePackages().size());
+        assertTrue(result.candidatePackages().contains(FIRST));
+    }
+
+    @Test
+    public void uidScopedResolutionPassesThroughUnmanagedPackageHint() {
+        AppResidencyPolicy first = ResidencyPresets.create(FIRST, ResidencyMode.BALANCED);
+        RuntimeConfigSnapshot snapshot = snapshot(7L, first);
+        ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
+                snapshot, Map.of(FIRST, FIRST_UID));
+
+        ResidencyIdentityResolution result = index.resolveUidScoped(
+                new ResidencyTarget(UNMANAGED, FIRST_UID, 20_201));
+
+        assertEquals(IdentityResolutionStatus.UNMANAGED, result.status());
+        assertFalse(result.hasManagedPolicy());
+    }
+
+    @Test
+    public void uidScopedResolutionComparesOnlyRequestedBehaviorProjection() {
+        AppResidencyPolicy first = ResidencyPresets.create(FIRST, ResidencyMode.BALANCED);
+        AppResidencyPolicy second = new AppResidencyPolicy(
+                SECOND,
+                true,
+                ResidencyMode.CUSTOM,
+                KillPolicy.none(),
+                first.freezePolicy(),
+                first.wakePolicy(),
+                first.resourcePolicy(),
+                first.refreezePolicy());
+        RuntimeConfigSnapshot snapshot = snapshot(7L, first, second);
+        ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
+                snapshot, packageUids(SHARED_UID, SHARED_UID));
+        ResidencyTarget target = new ResidencyTarget(FIRST, SHARED_UID, 20_201);
+
+        assertEquals(
+                IdentityResolutionStatus.SHARED_UID_CONFLICT,
+                index.resolveUidScoped(target, UidPolicyScope.FULL).status());
+        assertEquals(
+                IdentityResolutionStatus.SHARED_UID_SAME_POLICY,
+                index.resolveUidScoped(target, UidPolicyScope.NORMAL_FREEZE).status());
+    }
+
+    @Test
+    public void timingProjectionIgnoresUnrelatedFreezeSourceFlags() {
+        FreezePolicy firstFreeze = new FreezePolicy(
+                true, true, true, true, true, 60_000L, 120_000L,
+                false, false, false);
+        FreezePolicy secondFreeze = new FreezePolicy(
+                false, false, false, false, true, 60_000L, 180_000L,
+                false, false, false);
+        AppResidencyPolicy first = policyWithFreeze(FIRST, firstFreeze);
+        AppResidencyPolicy second = policyWithFreeze(SECOND, secondFreeze);
+        ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
+                snapshot(7L, first, second), packageUids(SHARED_UID, SHARED_UID));
+        ResidencyTarget target = new ResidencyTarget(FIRST, SHARED_UID, 20_201);
+
+        assertEquals(
+                IdentityResolutionStatus.SHARED_UID_CONFLICT,
+                index.resolveUidScoped(target, UidPolicyScope.NORMAL_FREEZE).status());
+        assertEquals(
+                IdentityResolutionStatus.SHARED_UID_SAME_POLICY,
+                index.resolveUidScoped(target, UidPolicyScope.R_TO_M_TIMING).status());
+        assertEquals(
+                IdentityResolutionStatus.SHARED_UID_CONFLICT,
+                index.resolveUidScoped(target, UidPolicyScope.M_TO_F_TIMING).status());
+    }
+
+    @Test
+    public void exemptionProjectionsCompareOnlyTheirEffectiveResult() {
+        FreezePolicy firstFreeze = new FreezePolicy(
+                true, true, true, true, false, 0L, 0L,
+                false, true, false);
+        FreezePolicy secondFreeze = new FreezePolicy(
+                false, false, false, false, false, 0L, 0L,
+                true, false, false);
+        AppResidencyPolicy first = policyWithFreeze(FIRST, firstFreeze);
+        AppResidencyPolicy second = policyWithFreeze(SECOND, secondFreeze);
+        ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
+                snapshot(7L, first, second), packageUids(SHARED_UID, SHARED_UID));
+        ResidencyTarget target = new ResidencyTarget(FIRST, SHARED_UID, 20_201);
+
+        assertEquals(
+                IdentityResolutionStatus.SHARED_UID_SAME_POLICY,
+                index.resolveUidScoped(target, UidPolicyScope.CORE_EXEMPTION).status());
+        assertEquals(
+                IdentityResolutionStatus.SHARED_UID_CONFLICT,
+                index.resolveUidScoped(target, UidPolicyScope.LCD_ON_EXEMPTION).status());
+        assertEquals(
+                IdentityResolutionStatus.SHARED_UID_SAME_POLICY,
+                index.resolveUidScoped(target, UidPolicyScope.R_TO_M_TIMING).status());
+        assertEquals(
+                IdentityResolutionStatus.SHARED_UID_SAME_POLICY,
+                index.resolveUidScoped(target, UidPolicyScope.M_TO_F_TIMING).status());
+    }
+
+    @Test
+    public void freezeProjectionComparesOnlyTheRequestedSource() {
+        FreezePolicy firstFreeze = new FreezePolicy(
+                true, true, true, true, false, 0L, 0L,
+                false, false, false);
+        FreezePolicy secondFreeze = new FreezePolicy(
+                true, false, true, true, false, 0L, 0L,
+                false, false, false);
+        AppResidencyPolicy first = policyWithFreeze(FIRST, firstFreeze);
+        AppResidencyPolicy second = policyWithFreeze(SECOND, secondFreeze);
+        ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
+                snapshot(7L, first, second), packageUids(SHARED_UID, SHARED_UID));
+        ResidencyTarget target = new ResidencyTarget(FIRST, SHARED_UID, 20_201);
+
+        assertEquals(
+                IdentityResolutionStatus.SHARED_UID_SAME_POLICY,
+                index.resolveUidScoped(target, UidPolicyScope.NORMAL_FREEZE).status());
+        assertEquals(
+                IdentityResolutionStatus.SHARED_UID_CONFLICT,
+                index.resolveUidScoped(target, UidPolicyScope.FAST_FREEZE).status());
+    }
+
+    @Test
+    public void invalidatedIndexDoesNotAttemptUidScopedResolution() {
+        ResidencyTarget target = new ResidencyTarget(FIRST, FIRST_UID, 20_201);
+
+        ResidencyIdentityResolution result =
+                ResidencyIdentityIndex.invalidated().resolveUidScoped(target);
+
+        assertEquals(IdentityResolutionStatus.NOT_EVALUATED, result.status());
+        assertFalse(result.hasManagedPolicy());
+    }
+
+    @Test
+    public void reportsConflictWhenManagedRuleSharesUidWithUnmanagedPackage() {
         AppResidencyPolicy first = ResidencyPresets.create(FIRST, ResidencyMode.BALANCED);
         RuntimeConfigSnapshot snapshot = snapshot(8L, first);
         Map<String, Integer> packageUids = packageUids(FIRST_UID, SHARED_UID);
@@ -53,13 +322,13 @@ public final class ResidencyIdentityIndexTest {
 
         ResidencyIdentityResolution result = index.resolve(ResidencyTarget.forUid(FIRST_UID));
 
-        assertEquals(IdentityResolutionStatus.UID_SINGLE_RULE, result.status());
-        assertSame(first, result.policy().orElse(null));
+        assertEquals(IdentityResolutionStatus.SHARED_UID_CONFLICT, result.status());
+        assertFalse(result.hasManagedPolicy());
         assertTrue(result.candidatePackages().contains(UNMANAGED));
     }
 
     @Test
-    public void normalizesFullUidsToAppIdsAcrossUsers() {
+    public void packageHintsNormalizeAppIdsButUidOnlyResolutionRequiresFullUid() {
         AppResidencyPolicy first = ResidencyPresets.create(FIRST, ResidencyMode.BALANCED);
         RuntimeConfigSnapshot snapshot = snapshot(8L, first);
         ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
@@ -72,8 +341,16 @@ public final class ResidencyIdentityIndexTest {
 
         assertEquals(IdentityResolutionStatus.EXACT_PACKAGE, packageResult.status());
         assertEquals(USER_TEN_FIRST_UID, packageResult.target().uid());
-        assertEquals(IdentityResolutionStatus.UID_SINGLE_RULE, uidResult.status());
+        assertEquals(IdentityResolutionStatus.UNKNOWN, uidResult.status());
         assertEquals(Integer.valueOf(FIRST_UID), index.packageAppIds().get(FIRST));
+
+        KillDecision decision = new ResidencyDecisionEngine(snapshot, index).decideKill(
+                new KillContext(
+                        ResidencyTarget.forUid(USER_TEN_FIRST_UID),
+                        KillContext.Path.OGUARD_KILL));
+        assertEquals(KillDecision.Action.ALLOW_SYSTEM, decision.effectiveAction());
+        assertEquals(DecisionDisposition.FAIL_OPEN, decision.trace().disposition());
+        assertEquals(DecisionReason.IDENTITY_UNKNOWN, decision.trace().reason());
     }
 
     @Test
@@ -118,7 +395,7 @@ public final class ResidencyIdentityIndexTest {
         AppResidencyPolicy second = ResidencyPresets.create(SECOND, ResidencyMode.LOW_POWER);
         RuntimeConfigSnapshot snapshot = snapshot(10L, first, second);
         ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
-                snapshot, packageUids(SHARED_UID, USER_TEN_SHARED_UID));
+                snapshot, packageUids(SHARED_UID, SHARED_UID));
 
         ResidencyIdentityResolution result = index.resolve(ResidencyTarget.forUid(SHARED_UID));
 
@@ -167,6 +444,9 @@ public final class ResidencyIdentityIndexTest {
         assertThrows(
                 UnsupportedOperationException.class,
                 () -> index.appIdPackages().get(FIRST_UID).add(UNMANAGED));
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> index.uidPackages().get(USER_TEN_FIRST_UID).add(UNMANAGED));
     }
 
     @Test
@@ -190,6 +470,28 @@ public final class ResidencyIdentityIndexTest {
                 decision.trace().identity().status());
     }
 
+    @Test
+    public void freezeDecisionFailsOpenForConflictingSharedUidDespitePackageHint() {
+        AppResidencyPolicy first = ResidencyPresets.create(FIRST, ResidencyMode.ACTIVE);
+        AppResidencyPolicy second = ResidencyPresets.create(SECOND, ResidencyMode.LOW_POWER);
+        RuntimeConfigSnapshot snapshot = snapshot(44L, first, second);
+        ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
+                snapshot, packageUids(SHARED_UID, SHARED_UID));
+        ResidencyDecisionEngine engine = new ResidencyDecisionEngine(snapshot, index);
+
+        FreezeDecision decision = engine.decideFreeze(new FreezeContext(
+                new ResidencyTarget(FIRST, SHARED_UID, 20_201), FreezeSource.NORMAL));
+
+        assertEquals(FreezeDecision.Action.ALLOW_SYSTEM, decision.effectiveAction());
+        assertEquals(FreezeDecision.Action.ALLOW_SYSTEM, decision.policyAction());
+        assertEquals(DecisionDisposition.FAIL_OPEN, decision.trace().disposition());
+        assertEquals(DecisionReason.SHARED_UID_CONFLICT, decision.trace().reason());
+        assertEquals(
+                IdentityResolutionStatus.SHARED_UID_CONFLICT,
+                decision.trace().identity().status());
+        assertFalse(decision.trace().changesSystemBehavior());
+    }
+
     private static RuntimeConfigSnapshot snapshot(
             long policyRevision,
             AppResidencyPolicy... policies) {
@@ -197,6 +499,21 @@ public final class ResidencyIdentityIndexTest {
         for (AppResidencyPolicy policy : policies) map.put(policy.packageName(), policy);
         return RuntimeConfigSnapshot.available(
                 1L, true, true, false, policyRevision, map);
+    }
+
+    private static AppResidencyPolicy policyWithFreeze(
+            String packageName, FreezePolicy freezePolicy) {
+        AppResidencyPolicy base =
+                ResidencyPresets.create(packageName, ResidencyMode.CUSTOM);
+        return new AppResidencyPolicy(
+                packageName,
+                true,
+                ResidencyMode.CUSTOM,
+                base.killPolicy(),
+                freezePolicy,
+                base.wakePolicy(),
+                base.resourcePolicy(),
+                base.refreezePolicy());
     }
 
     private static Map<String, Integer> packageUids(int firstUid, int secondUid) {

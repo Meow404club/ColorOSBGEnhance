@@ -13,7 +13,7 @@ public final class ResidencyPackageChangeFilterTest {
     private static final String MANAGED = "com.example.receiver.managed";
 
     @Test
-    public void onlyManagedOrUnknownPackageChangesInvalidateTheIndex() {
+    public void everyPackageChangeInvalidatesAnActiveIdentityIndex() {
         AppResidencyPolicy policy = ResidencyPresets.create(
                 MANAGED, ResidencyMode.BALANCED);
         RuntimeConfigSnapshot snapshot = RuntimeConfigSnapshot.available(
@@ -22,7 +22,16 @@ public final class ResidencyPackageChangeFilterTest {
         assertTrue(ResidencyPackageChangeFilter.shouldInvalidate(MANAGED, snapshot));
         assertTrue(ResidencyPackageChangeFilter.shouldInvalidate(null, snapshot));
         assertTrue(ResidencyPackageChangeFilter.shouldInvalidate("", snapshot));
-        assertFalse(ResidencyPackageChangeFilter.shouldInvalidate(
+        assertTrue(ResidencyPackageChangeFilter.shouldInvalidate(
                 "com.example.receiver.unmanaged", snapshot));
+    }
+
+    @Test
+    public void packageChangesDoNotRebuildAnEmptyIdentityIndex() {
+        RuntimeConfigSnapshot snapshot = RuntimeConfigSnapshot.available(
+                1L, true, true, false, 2L, Map.of());
+
+        assertFalse(ResidencyPackageChangeFilter.shouldInvalidate(MANAGED, snapshot));
+        assertFalse(ResidencyPackageChangeFilter.shouldInvalidate(null, snapshot));
     }
 }

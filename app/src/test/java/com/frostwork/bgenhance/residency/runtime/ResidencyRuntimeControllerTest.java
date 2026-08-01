@@ -16,8 +16,11 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.OptionalInt;
 import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import org.junit.Test;
 
 public final class ResidencyRuntimeControllerTest {
@@ -36,7 +39,7 @@ public final class ResidencyRuntimeControllerTest {
                 controller.state().status());
         assertFailOpen(controller);
 
-        controller.setPackageUidSource(packageName -> OptionalInt.of(UID));
+        controller.setPackageUidSource(source(packageName -> OptionalInt.of(UID)));
         assertEquals(
                 ResidencyRuntimeState.Status.IDENTITY_REBUILD_PENDING,
                 controller.state().status());
@@ -51,7 +54,7 @@ public final class ResidencyRuntimeControllerTest {
     public void globalOnlyUpdateReusesMatchingIdentityIndex() {
         QueuedExecutor executor = new QueuedExecutor();
         ResidencyRuntimeController controller = new ResidencyRuntimeController(executor);
-        controller.setPackageUidSource(packageName -> OptionalInt.of(UID));
+        controller.setPackageUidSource(source(packageName -> OptionalInt.of(UID)));
         controller.updateConfig(snapshot(1L, 2L, true));
         executor.runNext();
         ResidencyIdentityIndex firstIndex = controller.state().identityIndex();
@@ -69,10 +72,10 @@ public final class ResidencyRuntimeControllerTest {
         QueuedExecutor executor = new QueuedExecutor();
         ResidencyRuntimeController controller = new ResidencyRuntimeController(executor);
         AtomicInteger queries = new AtomicInteger();
-        controller.setPackageUidSource(packageName -> {
+        controller.setPackageUidSource(source(packageName -> {
             queries.incrementAndGet();
             return OptionalInt.of(UID);
-        });
+        }));
         controller.updateConfig(snapshot(1L, 3L, true));
         controller.updateConfig(snapshot(2L, 4L, true));
 
@@ -90,10 +93,51 @@ public final class ResidencyRuntimeControllerTest {
     }
 
     @Test
+    public void staleBuildStopsBeforeSharedUidEnumeration() {
+        QueuedExecutor executor = new QueuedExecutor();
+        ResidencyRuntimeController controller = new ResidencyRuntimeController(executor);
+        AtomicBoolean advanceGeneration = new AtomicBoolean(true);
+        AtomicInteger sharedUidQueries = new AtomicInteger();
+        controller.setPackageUidSource(new PackageUidSource() {
+            @Override
+            public boolean hasCompleteUidEnumeration() {
+                return true;
+            }
+
+            @Override
+            public OptionalInt findUid(String packageName) {
+                if (advanceGeneration.getAndSet(false)) {
+                    controller.updateConfig(snapshot(2L, 4L, true));
+                }
+                return OptionalInt.of(UID);
+            }
+
+            @Override
+            public Set<String> findPackagesForUid(int uid) {
+                sharedUidQueries.incrementAndGet();
+                return Set.of(PACKAGE);
+            }
+        });
+        controller.updateConfig(snapshot(1L, 3L, true));
+
+        executor.runNext();
+
+        assertEquals(0, sharedUidQueries.get());
+        assertEquals(
+                ResidencyRuntimeState.Status.IDENTITY_REBUILD_PENDING,
+                controller.state().status());
+        assertEquals(4L, controller.state().snapshot().policyRevision());
+
+        executor.runNext();
+        assertEquals(1, sharedUidQueries.get());
+        assertTrue(controller.state().ready());
+    }
+
+    @Test
     public void changedPolicyContentCannotReuseAnIndexWithTheSameRevision() {
         QueuedExecutor executor = new QueuedExecutor();
         ResidencyRuntimeController controller = new ResidencyRuntimeController(executor);
-        controller.setPackageUidSource(packageName -> OptionalInt.of(UID));
+        controller.setPackageUidSource(source(packageName -> OptionalInt.of(UID)));
         controller.updateConfig(snapshot(1L, 5L, true, ResidencyMode.BALANCED));
         executor.runNext();
         ResidencyIdentityIndex firstIndex = controller.state().identityIndex();
@@ -113,9 +157,9 @@ public final class ResidencyRuntimeControllerTest {
     public void identityFailureNeverPublishesAPartialEngine() {
         QueuedExecutor executor = new QueuedExecutor();
         ResidencyRuntimeController controller = new ResidencyRuntimeController(executor);
-        controller.setPackageUidSource(packageName -> {
+        controller.setPackageUidSource(source(packageName -> {
             throw new SecurityException("visibility denied");
-        });
+        }));
         controller.updateConfig(snapshot(1L, 5L, true));
 
         executor.runNext();
@@ -134,7 +178,7 @@ public final class ResidencyRuntimeControllerTest {
         ResidencyRuntimeController controller = new ResidencyRuntimeController(executor);
         AtomicInteger uid = new AtomicInteger(UID);
         controller.setPackageUidSource(
-                packageName -> OptionalInt.of(uid.get()));
+                source(packageName -> OptionalInt.of(uid.get())));
         controller.updateConfig(snapshot(1L, 6L, true));
         executor.runNext();
         assertTrue(controller.state().ready());
@@ -151,6 +195,26 @@ public final class ResidencyRuntimeControllerTest {
         assertEquals(
                 Integer.valueOf(UID + 1),
                 controller.state().identityIndex().packageAppIds().get(PACKAGE));
+    }
+
+    private static PackageUidSource source(
+            Function<String, OptionalInt> uidLookup) {
+        return new PackageUidSource() {
+            @Override
+            public boolean hasCompleteUidEnumeration() {
+                return true;
+            }
+
+            @Override
+            public OptionalInt findUid(String packageName) {
+                return uidLookup.apply(packageName);
+            }
+
+            @Override
+            public Set<String> findPackagesForUid(int uid) {
+                return Set.of(PACKAGE);
+            }
+        };
     }
 
     private static void assertFailOpen(ResidencyRuntimeController controller) {
