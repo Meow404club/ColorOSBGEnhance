@@ -14,6 +14,8 @@ import io.github.libxposed.api.XposedModuleInterface;
 
 /** Modern libxposed API 102 entry point. */
 public final class MainHook extends XposedModule {
+    private static final String ATHENA_PACKAGE = "com.oplus.athena";
+
     private volatile String processName = "";
     private volatile boolean systemServer;
 
@@ -21,10 +23,11 @@ public final class MainHook extends XposedModule {
     public void onModuleLoaded(@NonNull XposedModuleInterface.ModuleLoadedParam param) {
         processName = param.getProcessName();
         systemServer = param.isSystemServer();
+        if (!systemServer && !ATHENA_PACKAGE.equals(processName)) return;
+
         ModuleLog.initialize(this);
         HookUtils.initialize(this);
-        String packageName = systemServer ? "android"
-                : processName.startsWith("com.oplus.athena") ? "com.oplus.athena" : "";
+        String packageName = systemServer ? "android" : ATHENA_PACKAGE;
         HookConfig.initialize(this, packageName, processName);
         HookDiagnostics.reportProcess("ENTRY_LOADED", null);
         ModuleLog.i("modern module loaded process=" + processName
@@ -54,7 +57,9 @@ public final class MainHook extends XposedModule {
 
     @Override
     public void onPackageReady(@NonNull XposedModuleInterface.PackageReadyParam param) {
-        if (!"com.oplus.athena".equals(param.getPackageName())) return;
+        if (systemServer
+                || !ATHENA_PACKAGE.equals(processName)
+                || !ATHENA_PACKAGE.equals(param.getPackageName())) return;
         HookConfig.setProcess(param.getPackageName(), processName);
         try {
             ClassLoader loader = param.getClassLoader();
