@@ -20,6 +20,7 @@ import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.ModuleApplication;
 import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
+import com.frostwork.bgenhance.hooks.HansExemptionHook;
 import com.google.android.material.card.MaterialCardView;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.materialswitch.MaterialSwitch;
@@ -82,6 +83,10 @@ public final class DiagnosticsActivity extends AppCompatActivity {
                     HookTargetIds.HANS_R_TO_M_TIMING),
             new SupportItem(R.string.hans_m_to_f_timing_support_title,
                     HookTargetIds.HANS_M_TO_F_TIMING),
+            new SupportItem(R.string.hans_core_exemption_support_title,
+                    HookTargetIds.HANS_CORE_EXEMPTION),
+            new SupportItem(R.string.hans_lcd_on_exemption_support_title,
+                    HookTargetIds.HANS_LCD_ON_EXEMPTION),
             new SupportItem(R.string.freeze_nav_title, HookTargetIds.HANS_FREEZE_DISPATCH)
     );
 
@@ -366,22 +371,27 @@ public final class DiagnosticsActivity extends AppCompatActivity {
     }
 
     private String friendlySupportStatus(String status, long updatedAt) {
-        String value;
-        if (status == null || "UNKNOWN".equals(status)) {
-            value = getString(R.string.support_unknown);
-        } else if (status.startsWith("INSTALLED")) {
-            value = getString(R.string.support_available);
-        } else if (status.startsWith("UNSUPPORTED")) {
-            value = getString(R.string.support_unavailable);
-        } else if (status.startsWith("FAILED")) {
-            value = getString(R.string.support_failed);
-        } else {
-            value = getString(R.string.support_unknown);
-        }
+        String value = getString(supportStatusMessageRes(status));
         if (updatedAt > 0 && status != null && !"UNKNOWN".equals(status)) {
             value += "\n" + getString(R.string.support_last_updated, formatTime(updatedAt));
         }
         return value;
+    }
+
+    static int supportStatusMessageRes(String status) {
+        if (status == null || "UNKNOWN".equals(status)) {
+            return R.string.support_unknown;
+        } else if (status.startsWith("INSTALLED")) {
+            return R.string.support_available;
+        } else if (HansExemptionHook.FREEZE_GATE_INCOMPLETE.equals(status)) {
+            return R.string.support_freeze_gate_incomplete;
+        } else if (status.startsWith("UNSUPPORTED")) {
+            return R.string.support_unavailable;
+        } else if (status.startsWith("FAILED")) {
+            return R.string.support_failed;
+        } else {
+            return R.string.support_unknown;
+        }
     }
 
     private String friendlyResult(String result) {

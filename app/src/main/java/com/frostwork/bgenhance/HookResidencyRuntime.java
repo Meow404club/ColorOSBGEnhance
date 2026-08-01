@@ -9,6 +9,8 @@ import android.net.Uri;
 import android.os.Build;
 import com.frostwork.bgenhance.residency.decision.FreezeContext;
 import com.frostwork.bgenhance.residency.decision.FreezeDecision;
+import com.frostwork.bgenhance.residency.decision.FreezeExemptionContext;
+import com.frostwork.bgenhance.residency.decision.FreezeExemptionDecision;
 import com.frostwork.bgenhance.residency.decision.FreezeTimingContext;
 import com.frostwork.bgenhance.residency.decision.FreezeTimingDecision;
 import com.frostwork.bgenhance.residency.decision.KillContext;
@@ -109,6 +111,10 @@ public final class HookResidencyRuntime {
     }
     public static FreezeTimingDecision decideFreezeTiming(FreezeTimingContext context) {
         return decisionEngine().decideFreezeTiming(context);
+    }
+    public static FreezeExemptionDecision decideFreezeExemption(
+            FreezeExemptionContext context) {
+        return decisionEngine().decideFreezeExemption(context);
     }
     public static WakeDecision decideWake(WakeContext context) {
         return decisionEngine().decideWake(context);

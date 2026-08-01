@@ -391,8 +391,8 @@ public final class ResidencyIdentityIndex {
                 return sameFreezeTiming(
                         first.freezePolicy(), second.freezePolicy(), false);
             case CORE_EXEMPTION:
-                return isCoreExempt(first.freezePolicy())
-                        == isCoreExempt(second.freezePolicy());
+                return first.freezePolicy().fullExemption()
+                        == second.freezePolicy().fullExemption();
             case LCD_ON_EXEMPTION:
                 return isLcdOnExempt(first.freezePolicy())
                         == isLcdOnExempt(second.freezePolicy());
@@ -427,10 +427,6 @@ public final class ResidencyIdentityIndex {
         return rToM
                 ? first.rToMDelayMs() == second.rToMDelayMs()
                 : first.mToFDelayMs() == second.mToFDelayMs();
-    }
-
-    private static boolean isCoreExempt(FreezePolicy policy) {
-        return policy.fullExemption() || policy.coreExemption();
     }
 
     private static boolean isLcdOnExempt(FreezePolicy policy) {

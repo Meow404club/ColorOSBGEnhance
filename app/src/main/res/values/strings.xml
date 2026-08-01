@@ -91,6 +91,8 @@
     <string name="hans_detail">影响：后台应用可能更常保持运行</string>
     <string name="hans_r_to_m_timing_support_title">后台冻结准备时机</string>
     <string name="hans_m_to_f_timing_support_title">后台冻结执行时机</string>
+    <string name="hans_core_exemption_support_title">完整冻结豁免</string>
+    <string name="hans_lcd_on_exemption_support_title">亮屏状态冻结豁免</string>
     <string name="super_freeze_title">深度冻结保护</string>
     <string name="super_freeze_summary">减少系统对后台应用的深度冻结；可能明显增加耗电</string>
     <string name="super_freeze_detail">影响：后台应用保持运行的时间可能更长</string>
@@ -156,6 +158,7 @@
     <string name="stats_last_app">最近应用：%1$s</string>
     <string name="support_available">已加载</string>
     <string name="support_unavailable">当前系统不支持</string>
+    <string name="support_freeze_gate_incomplete">相关冻结路径尚未完整覆盖，当前保持系统行为</string>
     <string name="support_failed">加载失败，可先重启手机；若仍然失败，请复制诊断信息反馈</string>
     <string name="support_unknown">本次开机尚未收到加载结果；请检查 LSPosed 作用域并重启手机</string>
     <string name="support_last_updated">最近更新：%1$s</string>

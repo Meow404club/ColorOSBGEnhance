@@ -153,6 +153,36 @@ public final class ResidencyDecisionEngine {
                 DecisionReason.CUSTOM_FREEZE_TIMING);
     }
 
+    public FreezeExemptionDecision decideFreezeExemption(
+            FreezeExemptionContext context) {
+        Objects.requireNonNull(context, "context");
+        Evaluation evaluation = evaluate(
+                context, "", true, context.uidPolicyScope());
+        if (!evaluation.active()) {
+            return new FreezeExemptionDecision(
+                    FreezeExemptionDecision.Action.FOLLOW_SYSTEM,
+                    FreezeExemptionDecision.Action.FOLLOW_SYSTEM,
+                    evaluation.trace());
+        }
+
+        FreezePolicy freezePolicy = evaluation.policy().freezePolicy();
+        boolean fullExemption = freezePolicy.fullExemption();
+        boolean lcdOnExemption = context.kind() == FreezeExemptionContext.Kind.LCD_ON
+                && freezePolicy.lcdOnExemption();
+        FreezeExemptionDecision.Action action = fullExemption || lcdOnExemption
+                ? FreezeExemptionDecision.Action.GRANT_EXEMPTION
+                : FreezeExemptionDecision.Action.FOLLOW_SYSTEM;
+        return finishFreezeExemption(
+                context,
+                evaluation,
+                action,
+                fullExemption
+                        ? DecisionReason.FULL_EXEMPTION
+                        : lcdOnExemption
+                                ? DecisionReason.LCD_ON_EXEMPTION
+                                : DecisionReason.POLICY_FOLLOWS_EXEMPTION);
+    }
+
     public WakeDecision decideWake(WakeContext context) {
         Objects.requireNonNull(context, "context");
         Evaluation evaluation = evaluate(context);
@@ -457,6 +487,22 @@ public final class ResidencyDecisionEngine {
                 effective,
                 policyAction,
                 delayMs,
+                trace(context, evaluation.identity(), disposition, reason));
+    }
+
+    private FreezeExemptionDecision finishFreezeExemption(
+            FreezeExemptionContext context,
+            Evaluation evaluation,
+            FreezeExemptionDecision.Action policyAction,
+            DecisionReason reason) {
+        FreezeExemptionDecision.Action baseline =
+                FreezeExemptionDecision.Action.FOLLOW_SYSTEM;
+        DecisionDisposition disposition = disposition(policyAction != baseline);
+        FreezeExemptionDecision.Action effective =
+                effectiveAction(baseline, policyAction, disposition);
+        return new FreezeExemptionDecision(
+                effective,
+                policyAction,
                 trace(context, evaluation.identity(), disposition, reason));
     }
 

@@ -23,6 +23,28 @@ public final class DiagnosticsActivityMappingTest {
     }
 
     @Test
+    public void exemptionTargetsUseIndependentUserFacingSupportRows() throws Exception {
+        Map<String, Integer> supportTitles = supportTitles();
+
+        assertEquals(Integer.valueOf(R.string.hans_core_exemption_support_title),
+                supportTitles.get(HookTargetIds.HANS_CORE_EXEMPTION));
+        assertEquals(Integer.valueOf(R.string.hans_lcd_on_exemption_support_title),
+                supportTitles.get(HookTargetIds.HANS_LCD_ON_EXEMPTION));
+    }
+
+    @Test
+    public void incompleteCorePrerequisiteHasDedicatedUserFacingStatus() {
+        assertEquals(
+                R.string.support_freeze_gate_incomplete,
+                DiagnosticsActivity.supportStatusMessageRes(
+                        "UNSUPPORTED_FREEZE_GATE_INCOMPLETE"));
+        assertEquals(
+                R.string.support_unavailable,
+                DiagnosticsActivity.supportStatusMessageRes(
+                        "UNSUPPORTED_MISSING_METHOD"));
+    }
+
+    @Test
     public void timingSupportRowsAreNotIncludedInRuntimeStatistics() throws Exception {
         Field groupsField = DiagnosticsActivity.class.getDeclaredField("STAT_GROUPS");
         groupsField.setAccessible(true);
@@ -37,6 +59,8 @@ public final class DiagnosticsActivityMappingTest {
                 int titleRes = titleField.getInt(item);
                 assertFalse(titleRes == R.string.hans_r_to_m_timing_support_title);
                 assertFalse(titleRes == R.string.hans_m_to_f_timing_support_title);
+                assertFalse(titleRes == R.string.hans_core_exemption_support_title);
+                assertFalse(titleRes == R.string.hans_lcd_on_exemption_support_title);
             }
         }
     }

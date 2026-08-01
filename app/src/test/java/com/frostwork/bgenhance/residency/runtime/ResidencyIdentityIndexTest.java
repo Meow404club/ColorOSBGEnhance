@@ -252,13 +252,13 @@ public final class ResidencyIdentityIndexTest {
     }
 
     @Test
-    public void exemptionProjectionsCompareOnlyTheirEffectiveResult() {
+    public void exemptionProjectionsUseOnlyTheirVerifiedEffectiveResult() {
         FreezePolicy firstFreeze = new FreezePolicy(
                 true, true, true, true, false, 0L, 0L,
                 false, true, false);
         FreezePolicy secondFreeze = new FreezePolicy(
                 false, false, false, false, false, 0L, 0L,
-                true, false, false);
+                false, false, true);
         AppResidencyPolicy first = policyWithFreeze(FIRST, firstFreeze);
         AppResidencyPolicy second = policyWithFreeze(SECOND, secondFreeze);
         ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
@@ -277,6 +277,28 @@ public final class ResidencyIdentityIndexTest {
         assertEquals(
                 IdentityResolutionStatus.SHARED_UID_SAME_POLICY,
                 index.resolveUidScoped(target, UidPolicyScope.M_TO_F_TIMING).status());
+    }
+
+    @Test
+    public void fullExemptionConflictsForBothExemptionScopes() {
+        FreezePolicy firstFreeze = new FreezePolicy(
+                true, true, true, true, false, 0L, 0L,
+                false, true, false);
+        FreezePolicy secondFreeze = new FreezePolicy(
+                true, true, true, true, false, 0L, 0L,
+                true, false, false);
+        AppResidencyPolicy first = policyWithFreeze(FIRST, firstFreeze);
+        AppResidencyPolicy second = policyWithFreeze(SECOND, secondFreeze);
+        ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
+                snapshot(7L, first, second), packageUids(SHARED_UID, SHARED_UID));
+        ResidencyTarget target = new ResidencyTarget(FIRST, SHARED_UID, 20_201);
+
+        assertEquals(
+                IdentityResolutionStatus.SHARED_UID_CONFLICT,
+                index.resolveUidScoped(target, UidPolicyScope.CORE_EXEMPTION).status());
+        assertEquals(
+                IdentityResolutionStatus.SHARED_UID_CONFLICT,
+                index.resolveUidScoped(target, UidPolicyScope.LCD_ON_EXEMPTION).status());
     }
 
     @Test

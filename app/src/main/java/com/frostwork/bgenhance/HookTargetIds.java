@@ -19,6 +19,8 @@ public final class HookTargetIds {
     public static final String HANS_FREEZE_DISPATCH = "hans_freeze_dispatch";
     public static final String HANS_R_TO_M_TIMING = "hans_r_to_m_timing";
     public static final String HANS_M_TO_F_TIMING = "hans_m_to_f_timing";
+    public static final String HANS_CORE_EXEMPTION = "hans_core_exemption";
+    public static final String HANS_LCD_ON_EXEMPTION = "hans_lcd_on_exemption";
 
     private static final List<String> ALL = Collections.unmodifiableList(Arrays.asList(
             ATHENA_PERIODIC,
@@ -31,7 +33,9 @@ public final class HookTargetIds {
             OSENSE_PROCESS_KILL,
             HANS_FREEZE_DISPATCH,
             HANS_R_TO_M_TIMING,
-            HANS_M_TO_F_TIMING
+            HANS_M_TO_F_TIMING,
+            HANS_CORE_EXEMPTION,
+            HANS_LCD_ON_EXEMPTION
     ));
 
     public static List<String> all() {

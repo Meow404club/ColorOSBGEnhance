@@ -3,6 +3,7 @@ package com.frostwork.bgenhance;
 import androidx.annotation.NonNull;
 import com.frostwork.bgenhance.hooks.AthenaPeriodicHook;
 import com.frostwork.bgenhance.hooks.FastClearHook;
+import com.frostwork.bgenhance.hooks.HansExemptionHook;
 import com.frostwork.bgenhance.hooks.HansFreezeHook;
 import com.frostwork.bgenhance.hooks.HansTimingHook;
 import com.frostwork.bgenhance.hooks.MemoryGuardHook;
@@ -87,7 +88,9 @@ public final class MainHook extends XposedModule {
                 new OsenseProcessKillHook(),
                 new HansFreezeHook(),
                 HansTimingHook.rToM(),
-                HansTimingHook.mToF()));
+                HansTimingHook.mToF(),
+                HansExemptionHook.core(),
+                HansExemptionHook.lcdOn()));
     }
 
     static List<FeatureHook> athenaHooks() {
