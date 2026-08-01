@@ -6,11 +6,17 @@ import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.util.Log;
+import com.frostwork.bgenhance.residency.config.GlobalFeatureConfig;
+import com.frostwork.bgenhance.residency.config.RuntimeConfigCodec;
+import com.frostwork.bgenhance.residency.config.RuntimeConfigDocument;
+import com.frostwork.bgenhance.residency.model.ResidencyPolicyDocument;
+import com.frostwork.bgenhance.residency.runtime.HookRuntimeConfigState;
+import com.frostwork.bgenhance.residency.runtime.RuntimeConfigSnapshot;
 import io.github.libxposed.api.XposedModule;
 import java.lang.reflect.Method;
-import java.util.Collections;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Hook-side, read-only configuration snapshot backed by modern RemotePreferences.
@@ -19,20 +25,20 @@ import java.util.Map;
 public final class HookConfig {
     private HookConfig() {}
 
-    private static volatile Map<String, Boolean> sSnapshot = Collections.emptyMap();
+    private static final RuntimeConfigCodec RUNTIME_CONFIG_CODEC = new RuntimeConfigCodec();
+    private static final AtomicReference<HookRuntimeConfigState> STATE =
+            new AtomicReference<>(HookRuntimeConfigState.unavailable(
+                    "not_initialized", -1L, 0L));
     private static volatile SharedPreferences sRemotePreferences;
     private static volatile ContentResolver sResolver;
     private static volatile String sPackageName = "";
     private static volatile String sProcessName = "";
     private static volatile String sProcessId = "unknown";
-    private static volatile int sRevision = -1;
-    private static volatile boolean sConfigAvailable;
-    private static volatile String sLastError = "not_initialized";
     private static volatile long sLastReloadAt;
     private static final long RELOAD_INTERVAL_MS = 2_000L;
 
     private static final SharedPreferences.OnSharedPreferenceChangeListener REMOTE_LISTENER =
-            (sharedPreferences, key) -> reloadSnapshot(sharedPreferences);
+            HookConfig::onRemotePreferenceChanged;
 
     public static void initialize(XposedModule module, String packageName, String processName) {
         setProcess(packageName, processName);
@@ -80,26 +86,51 @@ public final class HookConfig {
     }
 
     public static boolean isReady() {
-        if (!sConfigAvailable && sRemotePreferences != null) {
+        if (!STATE.get().available() && sRemotePreferences != null) {
             long now = SystemClock.elapsedRealtime();
             if (now - sLastReloadAt >= RELOAD_INTERVAL_MS) {
                 reloadSnapshot(sRemotePreferences);
             }
         }
-        return sConfigAvailable;
+        return STATE.get().available();
     }
 
     public static int revision() {
-        return sRevision;
+        return diagnosticRevision(STATE.get().revision());
     }
 
     public static String error() {
-        return sLastError;
+        return STATE.get().error();
     }
 
     public static boolean getBoolean(String key) {
-        Boolean value = sSnapshot.get(key);
+        HookRuntimeConfigState state = STATE.get();
+        RuntimeConfigDocument document = state.document();
+        if (!state.available() || document == null) return ModuleSettings.defaultFor(key);
+        GlobalFeatureConfig global = document.global();
+        if (ModuleSettings.KEY_MASTER_ENABLE.equals(key)) return global.masterEnabled();
+        if (ModuleSettings.KEY_DRY_RUN.equals(key)) return global.dryRun();
+        if (ModuleSettings.KEY_VERBOSE_LOG.equals(key)) return global.verboseDiagnostics();
+        Boolean value = global.legacyFeatures().get(key);
         return value != null ? value : ModuleSettings.defaultFor(key);
+    }
+
+    public static RuntimeConfigSnapshot runtimeSnapshot() {
+        return STATE.get().snapshot();
+    }
+
+    public static HookRuntimeConfigState state() {
+        return STATE.get();
+    }
+
+    private static void onRemotePreferenceChanged(
+            SharedPreferences preferences, String key) {
+        if (preferences == null) return;
+        if (key == null
+                || ModuleSettings.KEY_RUNTIME_CONFIG_JSON.equals(key)
+                || !preferences.contains(ModuleSettings.KEY_RUNTIME_CONFIG_JSON)) {
+            reloadSnapshot(preferences);
+        }
     }
 
     private static void reloadSnapshot(SharedPreferences preferences) {
@@ -113,23 +144,21 @@ public final class HookConfig {
             return;
         }
         try {
-            if (!preferences.contains(ModuleSettings.KEY_CONFIG_REVISION)) {
-                markUnavailable("remote_preferences_not_initialized",
-                        SystemClock.elapsedRealtime() - started);
-                return;
+            RuntimeConfigDocument document;
+            String source;
+            if (preferences.contains(ModuleSettings.KEY_RUNTIME_CONFIG_JSON)) {
+                String encoded = preferences.getString(
+                        ModuleSettings.KEY_RUNTIME_CONFIG_JSON, null);
+                document = RUNTIME_CONFIG_CODEC.decode(encoded);
+                source = "runtime_envelope";
+            } else {
+                document = readLegacyDocument(preferences);
+                source = "legacy_preferences";
             }
-            int revision = preferences.getInt(ModuleSettings.KEY_CONFIG_REVISION, -1);
-            if (revision < 0) throw new IllegalStateException("invalid config revision");
-            Map<String, Boolean> next = new HashMap<>();
-            for (Map.Entry<String, Boolean> entry : ModuleSettings.defaults().entrySet()) {
-                next.put(entry.getKey(),
-                        preferences.getBoolean(entry.getKey(), entry.getValue()));
-            }
-            sSnapshot = Collections.unmodifiableMap(next);
-            sRevision = revision;
-            sConfigAvailable = true;
-            sLastError = "";
-            HookDiagnostics.reportConfig(revision, "remote_preferences",
+            HookRuntimeConfigState next = HookRuntimeConfigState.available(
+                    document, source, SystemClock.elapsedRealtime());
+            STATE.set(next);
+            HookDiagnostics.reportConfig(diagnosticRevision(document.revision()), source,
                     ModuleApplication.REMOTE_CONFIG_GROUP,
                     SystemClock.elapsedRealtime() - started, "");
         } catch (Throwable t) {
@@ -138,17 +167,67 @@ public final class HookConfig {
     }
 
     private static void markUnavailable(String error, long latencyMs) {
-        sConfigAvailable = false;
-        sLastError = error == null ? "unknown" : error;
-        HookDiagnostics.reportConfig(sRevision, "remote_preferences",
-                ModuleApplication.REMOTE_CONFIG_GROUP, latencyMs, sLastError);
-        Log.w(ModuleSettings.TAG, "remote config unavailable; fail-open: " + sLastError);
+        HookRuntimeConfigState previous = STATE.get();
+        String message = error == null ? "unknown" : error;
+        HookRuntimeConfigState unavailable = HookRuntimeConfigState.unavailable(
+                message, previous.lastGoodRevision(), SystemClock.elapsedRealtime());
+        STATE.set(unavailable);
+        HookDiagnostics.reportConfig(diagnosticRevision(unavailable.lastGoodRevision()),
+                "remote_preferences", ModuleApplication.REMOTE_CONFIG_GROUP,
+                latencyMs, message);
+        Log.w(ModuleSettings.TAG, "remote config unavailable; fail-open: " + message);
     }
 
     private static void reportCurrentConfig() {
-        HookDiagnostics.forceReportConfig(sRevision, "remote_preferences",
+        HookRuntimeConfigState state = STATE.get();
+        HookDiagnostics.forceReportConfig(diagnosticRevision(state.revision()), state.source(),
                 ModuleApplication.REMOTE_CONFIG_GROUP, 0L,
-                sConfigAvailable ? "" : sLastError);
+                state.available() ? "" : state.error());
+    }
+
+    private static RuntimeConfigDocument readLegacyDocument(SharedPreferences preferences) {
+        if (!preferences.contains(ModuleSettings.KEY_CONFIG_REVISION)) {
+            throw new IllegalStateException("remote_preferences_not_initialized");
+        }
+        int revision = preferences.getInt(ModuleSettings.KEY_CONFIG_REVISION, -1);
+        if (revision < 0) throw new IllegalStateException("invalid config revision");
+
+        Map<String, Boolean> featureFlags = new LinkedHashMap<>();
+        for (Map.Entry<String, Boolean> entry : ModuleSettings.defaults().entrySet()) {
+            String key = entry.getKey();
+            if (ModuleSettings.KEY_MASTER_ENABLE.equals(key)
+                    || ModuleSettings.KEY_DRY_RUN.equals(key)
+                    || ModuleSettings.KEY_VERBOSE_LOG.equals(key)) {
+                continue;
+            }
+            featureFlags.put(key, preferences.getBoolean(key, entry.getValue()));
+        }
+        GlobalFeatureConfig global = new GlobalFeatureConfig(
+                preferences.getBoolean(
+                        ModuleSettings.KEY_MASTER_ENABLE,
+                        ModuleSettings.defaultFor(ModuleSettings.KEY_MASTER_ENABLE)),
+                preferences.getBoolean(
+                        ModuleSettings.KEY_DRY_RUN,
+                        ModuleSettings.defaultFor(ModuleSettings.KEY_DRY_RUN)),
+                preferences.getBoolean(
+                        ModuleSettings.KEY_VERBOSE_LOG,
+                        ModuleSettings.defaultFor(ModuleSettings.KEY_VERBOSE_LOG)),
+                preferences.getString(
+                        ModuleSettings.KEY_ACTIVE_PRESET,
+                        ModuleSettings.PRESET_BALANCED),
+                featureFlags);
+        return new RuntimeConfigDocument(
+                RuntimeConfigDocument.DOCUMENT_TYPE,
+                RuntimeConfigDocument.CURRENT_SCHEMA_VERSION,
+                revision,
+                0L,
+                global,
+                ResidencyPolicyDocument.empty());
+    }
+
+    private static int diagnosticRevision(long revision) {
+        if (revision < 0L) return -1;
+        return revision > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) revision;
     }
 
     static Bundle processExtras() {
