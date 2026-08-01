@@ -7,7 +7,6 @@ import com.frostwork.bgenhance.FeatureIds;
 import com.frostwork.bgenhance.HookEvent;
 import com.frostwork.bgenhance.HookUtils;
 import com.frostwork.bgenhance.ModuleSettings;
-import de.robv.android.xposed.XC_MethodHook;
 import java.lang.reflect.Method;
 
 public final class NirvanaHook implements FeatureHook {
@@ -18,21 +17,20 @@ public final class NirvanaHook implements FeatureHook {
 
     @Override
     public String install(ClassLoader loader) {
-        int count = HookUtils.hookMatching(CLASS_NAME, loader,
-                this::isTarget, new XC_MethodHook() {
-                    @Override protected void beforeHookedMethod(MethodHookParam param) {
-                        if (param.args == null || param.args.length != 1 || !(param.args[0] instanceof Bundle)) return;
-                        Bundle bundle = (Bundle) param.args[0];
-                        String scene = bundle.getString("scene", "");
-                        Mapping mapping = map(scene);
-                        if (mapping == null) return;
-                        String pkg = bundle.getString("packageName", bundle.getString("pkg", ""));
-                        int uid = bundle.getInt("uid", -1);
-                        HookEvent event = new HookEvent(mapping.feature, mapping.code, uid, pkg, "", scene);
-                        if (Decision.shouldBlock(mapping.prefKey, event)) param.setResult(false);
-                    }
-                });
-        return count < 0 ? "UNSUPPORTED_CLASS" : count == 0 ? "UNSUPPORTED_SIGNATURE" : "INSTALLED:" + count;
+        int count = HookUtils.hookMatching(CLASS_NAME, loader, this::isTarget, chain -> {
+            Object value = HookUtils.objectArg(chain, 0);
+            if (!(value instanceof Bundle)) return chain.proceed();
+            Bundle bundle = (Bundle) value;
+            String scene = bundle.getString("scene", "");
+            Mapping mapping = map(scene);
+            if (mapping == null) return chain.proceed();
+            String pkg = bundle.getString("packageName", bundle.getString("pkg", ""));
+            int uid = bundle.getInt("uid", -1);
+            HookEvent event = new HookEvent(mapping.feature, mapping.code, uid, pkg, "", scene);
+            if (Decision.shouldBlock(mapping.prefKey, event)) return false;
+            return chain.proceed();
+        });
+        return status(count);
     }
 
     private boolean isTarget(Method method) {
@@ -49,6 +47,11 @@ public final class NirvanaHook implements FeatureHook {
         if ("GameLowFree".equals(scene))
             return new Mapping(FeatureIds.GAME_LOW_FREE, ModuleSettings.KEY_GAME_LOW_FREE, 1029);
         return null;
+    }
+
+    private static String status(int count) {
+        return count < 0 ? "UNSUPPORTED_CLASS"
+                : count == 0 ? "UNSUPPORTED_SIGNATURE" : "INSTALLED:" + count;
     }
 
     private static final class Mapping {

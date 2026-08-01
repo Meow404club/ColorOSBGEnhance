@@ -1,53 +1,56 @@
 package com.frostwork.bgenhance;
 
-import android.app.AndroidAppHelper;
 import android.content.ContentResolver;
 import android.content.Context;
-import android.database.ContentObserver;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.util.Log;
+import io.github.libxposed.api.XposedModule;
 import java.lang.reflect.Method;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Hook-side configuration cache backed by the module provider.
- * Provider IPC always runs on a dedicated configuration thread; Hook callbacks only read memory.
+ * Hook-side, read-only configuration snapshot backed by modern RemotePreferences.
+ * Hook callbacks only read the immutable in-memory snapshot and always fail open when unavailable.
  */
 public final class HookConfig {
     private HookConfig() {}
 
-    private static final long RELOAD_INTERVAL_MS = 2_000L;
-    private static final Map<String, Boolean> CACHE = new HashMap<>();
-    private static final AtomicBoolean RELOAD_QUEUED = new AtomicBoolean();
-    private static final ThreadPoolExecutor CONFIG_EXECUTOR = new ThreadPoolExecutor(
-            1, 1, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(1), runnable -> {
-        Thread thread = new Thread(runnable, "BgEnhanceConfig");
-        thread.setDaemon(true);
-        return thread;
-    }, new ThreadPoolExecutor.DiscardPolicy());
-
-    private static volatile Context sContext;
+    private static volatile Map<String, Boolean> sSnapshot = Collections.emptyMap();
+    private static volatile SharedPreferences sRemotePreferences;
     private static volatile ContentResolver sResolver;
     private static volatile String sPackageName = "";
     private static volatile String sProcessName = "";
     private static volatile String sProcessId = "unknown";
-    private static volatile long sLastRequestAt;
     private static volatile int sRevision = -1;
     private static volatile boolean sConfigAvailable;
-    private static volatile boolean sObserverRegistered;
+    private static volatile String sLastError = "not_initialized";
+    private static volatile long sLastReloadAt;
+    private static final long RELOAD_INTERVAL_MS = 2_000L;
 
-    private static final ContentObserver CONFIG_OBSERVER = new ContentObserver(null) {
-        @Override
-        public void onChange(boolean selfChange) {
-            requestReload(true);
+    private static final SharedPreferences.OnSharedPreferenceChangeListener REMOTE_LISTENER =
+            (sharedPreferences, key) -> reloadSnapshot(sharedPreferences);
+
+    public static void initialize(XposedModule module, String packageName, String processName) {
+        setProcess(packageName, processName);
+        if (module == null) {
+            markUnavailable("module_unavailable", 0L);
+            return;
         }
-    };
+        long started = SystemClock.elapsedRealtime();
+        try {
+            SharedPreferences remote = module.getRemotePreferences(
+                    ModuleApplication.REMOTE_CONFIG_GROUP);
+            sRemotePreferences = remote;
+            remote.registerOnSharedPreferenceChangeListener(REMOTE_LISTENER);
+            reloadSnapshot(remote, started);
+        } catch (Throwable t) {
+            markUnavailable(errorText(t), SystemClock.elapsedRealtime() - started);
+        }
+    }
 
     public static void setProcess(String packageName, String processName) {
         sPackageName = packageName == null ? "" : packageName;
@@ -58,19 +61,17 @@ public final class HookConfig {
     public static void attach(Context context) {
         if (context == null) return;
         Context app = context.getApplicationContext();
-        sContext = app != null ? app : context;
+        Context resolverContext = app != null ? app : context;
         try {
-            sResolver = sContext.getContentResolver();
-            registerObserver();
+            sResolver = resolverContext.getContentResolver();
         } catch (Throwable t) {
-            Log.w(ModuleSettings.TAG, "config context attach failed", t);
+            Log.w(ModuleSettings.TAG, "diagnostics context attach failed", t);
         }
-        requestReload(true);
+        reportCurrentConfig();
     }
 
-    public static Context context() {
+    public static void ensureDiagnosticsContext() {
         ensureContext();
-        return sContext;
     }
 
     public static ContentResolver resolver() {
@@ -79,7 +80,12 @@ public final class HookConfig {
     }
 
     public static boolean isReady() {
-        requestReload(false);
+        if (!sConfigAvailable && sRemotePreferences != null) {
+            long now = SystemClock.elapsedRealtime();
+            if (now - sLastReloadAt >= RELOAD_INTERVAL_MS) {
+                reloadSnapshot(sRemotePreferences);
+            }
+        }
         return sConfigAvailable;
     }
 
@@ -87,64 +93,62 @@ public final class HookConfig {
         return sRevision;
     }
 
+    public static String error() {
+        return sLastError;
+    }
+
     public static boolean getBoolean(String key) {
-        requestReload(false);
-        synchronized (CACHE) {
-            Boolean value = CACHE.get(key);
-            return value != null ? value : ModuleSettings.defaultFor(key);
-        }
+        Boolean value = sSnapshot.get(key);
+        return value != null ? value : ModuleSettings.defaultFor(key);
     }
 
-    private static void requestReload(boolean force) {
-        ensureContext();
-        if (sResolver == null) return;
-        long now = SystemClock.elapsedRealtime();
-        if (!force && now - sLastRequestAt < RELOAD_INTERVAL_MS) return;
-        if (!RELOAD_QUEUED.compareAndSet(false, true)) return;
-        sLastRequestAt = now;
-        CONFIG_EXECUTOR.execute(() -> {
-            try {
-                reloadNow();
-            } finally {
-                RELOAD_QUEUED.set(false);
-            }
-        });
+    private static void reloadSnapshot(SharedPreferences preferences) {
+        reloadSnapshot(preferences, SystemClock.elapsedRealtime());
     }
 
-    private static void reloadNow() {
-        long started = SystemClock.elapsedRealtime();
-        ContentResolver resolver = resolver();
-        if (resolver == null) {
-            sConfigAvailable = false;
-            HookDiagnostics.reportConfig(sRevision, "module_provider", BridgeContract.URI.toString(),
-                    0L, "content resolver unavailable");
+    private static synchronized void reloadSnapshot(SharedPreferences preferences, long started) {
+        sLastReloadAt = SystemClock.elapsedRealtime();
+        if (preferences == null) {
+            markUnavailable("remote_preferences_unavailable", 0L);
             return;
         }
         try {
-            Bundle out = resolver.call(
-                    BridgeContract.URI, BridgeContract.METHOD_GET_CONFIG, null, null);
-            if (out == null || !out.getBoolean(BridgeContract.EXTRA_OK, false)) {
-                throw new IllegalStateException(out == null ? "empty provider response"
-                        : out.getString(BridgeContract.EXTRA_ERROR, "provider rejected config"));
+            if (!preferences.contains(ModuleSettings.KEY_CONFIG_REVISION)) {
+                markUnavailable("remote_preferences_not_initialized",
+                        SystemClock.elapsedRealtime() - started);
+                return;
             }
-            int revision = out.getInt(BridgeContract.EXTRA_CONFIG_REVISION, -1);
+            int revision = preferences.getInt(ModuleSettings.KEY_CONFIG_REVISION, -1);
             if (revision < 0) throw new IllegalStateException("invalid config revision");
-            synchronized (CACHE) {
-                for (Map.Entry<String, Boolean> entry : ModuleSettings.defaults().entrySet()) {
-                    CACHE.put(entry.getKey(), out.getBoolean(entry.getKey(), entry.getValue()));
-                }
+            Map<String, Boolean> next = new HashMap<>();
+            for (Map.Entry<String, Boolean> entry : ModuleSettings.defaults().entrySet()) {
+                next.put(entry.getKey(),
+                        preferences.getBoolean(entry.getKey(), entry.getValue()));
             }
+            sSnapshot = Collections.unmodifiableMap(next);
             sRevision = revision;
             sConfigAvailable = true;
-            HookDiagnostics.reportConfig(revision, "module_provider", BridgeContract.URI.toString(),
+            sLastError = "";
+            HookDiagnostics.reportConfig(revision, "remote_preferences",
+                    ModuleApplication.REMOTE_CONFIG_GROUP,
                     SystemClock.elapsedRealtime() - started, "");
         } catch (Throwable t) {
-            sConfigAvailable = false;
-            HookDiagnostics.reportConfig(sRevision, "module_provider", BridgeContract.URI.toString(),
-                    SystemClock.elapsedRealtime() - started,
-                    t.getClass().getSimpleName() + ":" + safe(t.getMessage()));
-            Log.w(ModuleSettings.TAG, "provider config unavailable; fail-open", t);
+            markUnavailable(errorText(t), SystemClock.elapsedRealtime() - started);
         }
+    }
+
+    private static void markUnavailable(String error, long latencyMs) {
+        sConfigAvailable = false;
+        sLastError = error == null ? "unknown" : error;
+        HookDiagnostics.reportConfig(sRevision, "remote_preferences",
+                ModuleApplication.REMOTE_CONFIG_GROUP, latencyMs, sLastError);
+        Log.w(ModuleSettings.TAG, "remote config unavailable; fail-open: " + sLastError);
+    }
+
+    private static void reportCurrentConfig() {
+        HookDiagnostics.forceReportConfig(sRevision, "remote_preferences",
+                ModuleApplication.REMOTE_CONFIG_GROUP, 0L,
+                sConfigAvailable ? "" : sLastError);
     }
 
     static Bundle processExtras() {
@@ -155,26 +159,15 @@ public final class HookConfig {
         return extras;
     }
 
-    private static void registerObserver() {
-        if (sObserverRegistered || sResolver == null) return;
-        synchronized (HookConfig.class) {
-            if (sObserverRegistered || sResolver == null) return;
-            try {
-                sResolver.registerContentObserver(
-                        BridgeContract.CONFIG_URI, false, CONFIG_OBSERVER);
-                sObserverRegistered = true;
-            } catch (Throwable t) {
-                Log.w(ModuleSettings.TAG, "config change observer registration failed", t);
-            }
-        }
-    }
-
     private static void ensureContext() {
         if (sResolver != null) return;
         try {
-            Context app = AndroidAppHelper.currentApplication();
-            if (app != null) {
-                attach(app);
+            Class<?> activityThread = Class.forName("android.app.ActivityThread");
+            Method currentApplication = activityThread.getDeclaredMethod("currentApplication");
+            currentApplication.setAccessible(true);
+            Object application = currentApplication.invoke(null);
+            if (application instanceof Context) {
+                attach((Context) application);
                 return;
             }
         } catch (Throwable ignored) {}
@@ -192,7 +185,10 @@ public final class HookConfig {
         } catch (Throwable ignored) {}
     }
 
-    private static String safe(String value) {
-        return value == null ? "" : value;
+    private static String errorText(Throwable error) {
+        if (error == null) return "unknown";
+        String message = error.getMessage();
+        return error.getClass().getSimpleName()
+                + (message == null || message.isEmpty() ? "" : ":" + message);
     }
 }

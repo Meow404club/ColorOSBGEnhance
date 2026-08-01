@@ -1,7 +1,6 @@
 package com.frostwork.bgenhance;
 
-import android.app.AndroidAppHelper;
-import android.content.Context;
+import androidx.annotation.NonNull;
 import com.frostwork.bgenhance.hooks.AthenaPeriodicHook;
 import com.frostwork.bgenhance.hooks.FastClearHook;
 import com.frostwork.bgenhance.hooks.HansFreezeHook;
@@ -10,53 +9,65 @@ import com.frostwork.bgenhance.hooks.NirvanaHook;
 import com.frostwork.bgenhance.hooks.OguardForceStopHook;
 import com.frostwork.bgenhance.hooks.OguardKillHook;
 import com.frostwork.bgenhance.hooks.TournamentHook;
-import de.robv.android.xposed.IXposedHookLoadPackage;
-import de.robv.android.xposed.callbacks.XC_LoadPackage;
+import io.github.libxposed.api.XposedModule;
+import io.github.libxposed.api.XposedModuleInterface;
 
-public final class MainHook implements IXposedHookLoadPackage {
+/** Modern libxposed API 102 entry point. */
+public final class MainHook extends XposedModule {
+    private volatile String processName = "";
+    private volatile boolean systemServer;
+
     @Override
-    public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
-        if (lp == null || lp.packageName == null) return;
-        boolean systemServer = isSystemServer(lp);
-        boolean athena = "com.oplus.athena".equals(lp.packageName);
-        if (!systemServer && !athena) return;
+    public void onModuleLoaded(@NonNull XposedModuleInterface.ModuleLoadedParam param) {
+        processName = param.getProcessName();
+        systemServer = param.isSystemServer();
+        ModuleLog.initialize(this);
+        HookUtils.initialize(this);
+        String packageName = systemServer ? "android"
+                : processName.startsWith("com.oplus.athena") ? "com.oplus.athena" : "";
+        HookConfig.initialize(this, packageName, processName);
+        HookDiagnostics.reportProcess("ENTRY_LOADED", null);
+        ModuleLog.i("modern module loaded process=" + processName
+                + " systemServer=" + systemServer
+                + " api=" + getApiVersion());
+    }
 
-        HookConfig.setProcess(lp.packageName, lp.processName);
+    @Override
+    public void onSystemServerStarting(
+            @NonNull XposedModuleInterface.SystemServerStartingParam param) {
+        if (!systemServer) return;
+        HookConfig.setProcess("android", "system_server");
         try {
-            Context app = null;
-            try { app = AndroidAppHelper.currentApplication(); } catch (Throwable ignored) {}
-            if (app != null) HookConfig.attach(app);
-            else HookConfig.context();
-            HookDiagnostics.reportProcess("ENTRY_LOADED", null);
-
-            if (systemServer) {
-                ModuleLog.i("loaded system_server package=" + lp.packageName + " process=" + lp.processName);
-                FeatureRegistry.install(new OguardKillHook(), lp.classLoader);
-                FeatureRegistry.install(new OguardForceStopHook(), lp.classLoader);
-                FeatureRegistry.install(new NirvanaHook(), lp.classLoader);
-                FeatureRegistry.install(new HansFreezeHook(), lp.classLoader);
-            }
-
-            if (athena) {
-                ModuleLog.i("loaded Athena process=" + lp.processName);
-                FeatureRegistry.install(new AthenaPeriodicHook(), lp.classLoader);
-                FeatureRegistry.install(new FastClearHook(), lp.classLoader);
-                FeatureRegistry.install(new MemoryGuardHook(), lp.classLoader);
-                FeatureRegistry.install(new TournamentHook(), lp.classLoader);
-            }
+            ClassLoader loader = param.getClassLoader();
+            ModuleLog.i("installing system_server hooks");
+            FeatureRegistry.install(new OguardKillHook(), loader);
+            FeatureRegistry.install(new OguardForceStopHook(), loader);
+            FeatureRegistry.install(new NirvanaHook(), loader);
+            FeatureRegistry.install(new HansFreezeHook(), loader);
+            HookConfig.ensureDiagnosticsContext();
             HookDiagnostics.reportProcess("FEATURES_INSTALLED", null);
         } catch (Throwable t) {
             HookDiagnostics.reportProcess("BOOTSTRAP_FAILED", t);
-            ModuleLog.e("bootstrap failed package=" + lp.packageName, t);
+            ModuleLog.e("system_server bootstrap failed", t);
         }
     }
 
-    private boolean isSystemServer(XC_LoadPackage.LoadPackageParam lp) {
-        if (!"android".equals(lp.packageName)) return false;
-        String process = lp.processName;
-        return process == null
-                || "android".equals(process)
-                || "system_server".equals(process)
-                || process.contains("system_server");
+    @Override
+    public void onPackageReady(@NonNull XposedModuleInterface.PackageReadyParam param) {
+        if (!"com.oplus.athena".equals(param.getPackageName())) return;
+        HookConfig.setProcess(param.getPackageName(), processName);
+        try {
+            ClassLoader loader = param.getClassLoader();
+            ModuleLog.i("installing Athena hooks process=" + processName);
+            FeatureRegistry.install(new AthenaPeriodicHook(), loader);
+            FeatureRegistry.install(new FastClearHook(), loader);
+            FeatureRegistry.install(new MemoryGuardHook(), loader);
+            FeatureRegistry.install(new TournamentHook(), loader);
+            HookConfig.ensureDiagnosticsContext();
+            HookDiagnostics.reportProcess("FEATURES_INSTALLED", null);
+        } catch (Throwable t) {
+            HookDiagnostics.reportProcess("BOOTSTRAP_FAILED", t);
+            ModuleLog.e("Athena bootstrap failed", t);
+        }
     }
 }

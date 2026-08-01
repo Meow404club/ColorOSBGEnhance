@@ -8,6 +8,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.frostwork.bgenhance.BridgeContract;
 import com.frostwork.bgenhance.DiagnosticsStore;
 import com.frostwork.bgenhance.FeatureIds;
+import com.frostwork.bgenhance.ModuleApplication;
 import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
 import com.google.android.material.button.MaterialButtonToggleGroup;
@@ -32,6 +33,8 @@ public final class SettingsActivity extends AppCompatActivity {
     private View customAdvancedSection;
     private StatsOverviewView statsOverview;
     private boolean binding;
+    private final ModuleApplication.StateListener moduleStateListener =
+            () -> runOnUiThread(this::refreshAll);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -42,6 +45,18 @@ public final class SettingsActivity extends AppCompatActivity {
         bindViews();
         bindListeners();
         refreshAll();
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        ModuleApplication.addStateListener(moduleStateListener);
+    }
+
+    @Override
+    protected void onStop() {
+        ModuleApplication.removeStateListener(moduleStateListener);
+        super.onStop();
     }
 
     @Override
@@ -223,8 +238,10 @@ public final class SettingsActivity extends AppCompatActivity {
         boolean systemSynced = systemCurrent && system.configRevision >= revision;
         boolean athenaSynced = athenaCurrent && athena.configRevision >= revision;
 
-        if (!ModuleSettings.isDiagnosticsBridgeAvailable(this)) {
-            setEffectNotice(R.string.effect_bridge_error, false);
+        if (!ModuleApplication.isServiceConnected()) {
+            setEffectNotice(R.string.effect_config_service_waiting, false);
+        } else if (!ModuleApplication.isConfigSynced(this)) {
+            setEffectNotice(R.string.effect_config_pending, false);
         } else if (systemCurrent && athenaCurrent && systemSynced && athenaSynced
                 && installedHooks >= 3) {
             setEffectNotice(R.string.effect_no_restart_required, true);

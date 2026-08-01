@@ -16,6 +16,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.frostwork.bgenhance.BridgeContract;
 import com.frostwork.bgenhance.DiagnosticsStore;
 import com.frostwork.bgenhance.FeatureIds;
+import com.frostwork.bgenhance.ModuleApplication;
 import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
 import com.google.android.material.card.MaterialCardView;
@@ -28,6 +29,8 @@ import java.util.List;
 
 public final class DiagnosticsActivity extends AppCompatActivity {
     private LinearLayout container;
+    private final ModuleApplication.StateListener moduleStateListener =
+            () -> runOnUiThread(this::render);
 
     private static final class SupportItem {
         final int titleRes;
@@ -109,6 +112,18 @@ public final class DiagnosticsActivity extends AppCompatActivity {
         findViewById(R.id.button_copy_debug).setOnClickListener(v -> copyDebug());
         findViewById(R.id.button_reset_stats).setOnClickListener(v -> confirmReset());
         render();
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        ModuleApplication.addStateListener(moduleStateListener);
+    }
+
+    @Override
+    protected void onStop() {
+        ModuleApplication.removeStateListener(moduleStateListener);
+        super.onStop();
     }
 
     @Override
@@ -313,7 +328,18 @@ public final class DiagnosticsActivity extends AppCompatActivity {
     }
 
     private String localConfigStatus() {
-        return getString(R.string.local_config_ready, ModuleSettings.getConfigRevision(this));
+        int localRevision = ModuleSettings.getConfigRevision(this);
+        if (!ModuleApplication.isServiceConnected()) {
+            return getString(R.string.config_sync_waiting_service, localRevision);
+        }
+        int syncedRevision = ModuleApplication.syncedRevision();
+        if (ModuleApplication.isConfigSynced(this)) {
+            return getString(R.string.config_sync_ready, localRevision);
+        }
+        if (!TextUtils.isEmpty(ModuleApplication.syncError())) {
+            return getString(R.string.config_sync_failed, localRevision);
+        }
+        return getString(R.string.config_sync_pending, localRevision, syncedRevision);
     }
 
     private String diagnosticsBridgeStatus() {
@@ -342,9 +368,6 @@ public final class DiagnosticsActivity extends AppCompatActivity {
                     snapshot.configRevision, configRevision);
         } else {
             value = getString(R.string.diagnostics_process_ready, snapshot.configRevision);
-            if (!TextUtils.isEmpty(snapshot.configSource)) {
-                value += " · " + snapshot.configSource;
-            }
         }
         long time = snapshot.configLoadedAt > 0 ? snapshot.configLoadedAt : snapshot.loadedAt;
         if (time > 0) value += "\n" + getString(R.string.support_last_updated, formatTime(time));
@@ -387,9 +410,13 @@ public final class DiagnosticsActivity extends AppCompatActivity {
                 .append(" sdk=").append(Build.VERSION.SDK_INT).append('\n');
         out.append("device=").append(Build.MANUFACTURER).append(' ')
                 .append(Build.MODEL).append('\n');
-        out.append("hookApi=legacy-xposed-api-82 config=module_provider minXposed=93\n");
+        out.append("hookApi=modern-libxposed-api-102 config=remote_preferences minApi=101\n");
         out.append("bootCount=").append(DiagnosticsStore.currentBootCount(this)).append('\n');
-        out.append("bridgeAvailable=").append(ModuleSettings.isDiagnosticsBridgeAvailable(this)).append('\n');
+        out.append("xposedServiceConnected=").append(ModuleApplication.isServiceConnected()).append('\n');
+        out.append("xposedServiceApi=").append(ModuleApplication.serviceApiVersion()).append('\n');
+        out.append("remoteConfigRevision=").append(ModuleApplication.syncedRevision()).append('\n');
+        out.append("remoteConfigError=").append(ModuleApplication.syncError()).append('\n');
+        out.append("diagnosticsChannelAvailable=").append(ModuleSettings.isDiagnosticsBridgeAvailable(this)).append('\n');
         out.append("bridgeVersion=").append(BridgeContract.BRIDGE_VERSION).append('\n');
         out.append("configRevision=").append(ModuleSettings.getConfigRevision(this)).append('\n');
         out.append("activePreset=").append(ModuleSettings.getLocalString(

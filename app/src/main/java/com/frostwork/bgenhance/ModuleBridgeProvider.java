@@ -3,7 +3,6 @@ package com.frostwork.bgenhance;
 import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
@@ -13,7 +12,8 @@ import android.os.Process;
 import android.text.TextUtils;
 
 /**
- * Restricted IPC bridge. Configuration snapshots and diagnostics are both fail-open and run off Hook threads.
+ * Restricted, write-only diagnostics bridge used by hooked processes.
+ * Configuration is carried by modern RemotePreferences and is never exposed by this provider.
  * Only the module process, system UID and the scoped Athena package may call it.
  */
 public final class ModuleBridgeProvider extends ContentProvider {
@@ -40,21 +40,6 @@ public final class ModuleBridgeProvider extends ContentProvider {
                 out.putInt(BridgeContract.EXTRA_BRIDGE_VERSION, BridgeContract.BRIDGE_VERSION);
                 out.putInt(BridgeContract.EXTRA_CONFIG_REVISION,
                         ModuleSettings.getConfigRevision(context));
-                return out;
-            }
-            if (BridgeContract.METHOD_GET_CONFIG.equals(method)) {
-                SharedPreferences sp = ModuleSettings.prefs(context);
-                for (java.util.Map.Entry<String, Boolean> entry : ModuleSettings.defaults().entrySet()) {
-                    out.putBoolean(entry.getKey(),
-                            sp.getBoolean(entry.getKey(), entry.getValue()));
-                }
-                out.putString(BridgeContract.EXTRA_ACTIVE_PRESET,
-                        sp.getString(ModuleSettings.KEY_ACTIVE_PRESET,
-                                ModuleSettings.PRESET_BALANCED));
-                out.putInt(BridgeContract.EXTRA_CONFIG_REVISION,
-                        ModuleSettings.getConfigRevision(context));
-                out.putInt(BridgeContract.EXTRA_BRIDGE_VERSION, BridgeContract.BRIDGE_VERSION);
-                out.putBoolean(BridgeContract.EXTRA_OK, true);
                 return out;
             }
             if (BridgeContract.METHOD_REPORT_PROCESS.equals(method)) {

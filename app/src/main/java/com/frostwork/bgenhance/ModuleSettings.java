@@ -163,11 +163,7 @@ public final class ModuleSettings {
 
     public static void notifyConfigChanged(Context context) {
         if (context == null) return;
-        try {
-            context.getContentResolver().notifyChange(BridgeContract.CONFIG_URI, null);
-        } catch (Throwable t) {
-            android.util.Log.w(TAG, "notify config failed", t);
-        }
+        ModuleApplication.requestConfigSync(context);
     }
 
     public static boolean isDiagnosticsBridgeAvailable(Context context) {

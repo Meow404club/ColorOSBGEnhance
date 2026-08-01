@@ -8,12 +8,10 @@ public final class BridgeContract {
 
     public static final String AUTHORITY = "com.frostwork.bgenhance.bridge";
     public static final Uri URI = Uri.parse("content://" + AUTHORITY);
-    public static final Uri CONFIG_URI = Uri.withAppendedPath(URI, "config");
 
     public static final int BRIDGE_VERSION = 1;
 
     public static final String METHOD_PING = "ping";
-    public static final String METHOD_GET_CONFIG = "get_config";
     public static final String METHOD_REPORT_PROCESS = "report_process";
     public static final String METHOD_REPORT_CONFIG = "report_config";
     public static final String METHOD_REPORT_FEATURE = "report_feature";

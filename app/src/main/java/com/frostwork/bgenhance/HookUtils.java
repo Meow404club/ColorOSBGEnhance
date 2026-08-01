@@ -1,27 +1,49 @@
 package com.frostwork.bgenhance;
 
-import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XposedBridge;
-import de.robv.android.xposed.XposedHelpers;
+import io.github.libxposed.api.XposedInterface;
+import io.github.libxposed.api.XposedModule;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public final class HookUtils {
     private HookUtils() {}
 
     public interface MethodMatcher { boolean matches(Method method); }
 
+    private static final List<XposedInterface.HookHandle> HANDLES = new CopyOnWriteArrayList<>();
+    private static final ConcurrentHashMap<String, Field> FIELD_CACHE = new ConcurrentHashMap<>();
+    private static volatile XposedModule sModule;
+
+    public static void initialize(XposedModule module) {
+        sModule = module;
+    }
+
     public static int hookMatching(String className, ClassLoader loader,
-                                   MethodMatcher matcher, XC_MethodHook callback) {
-        Class<?> target = XposedHelpers.findClassIfExists(className, loader);
-        if (target == null) return -1;
+                                   MethodMatcher matcher, XposedInterface.Hooker hooker) {
+        XposedModule module = sModule;
+        if (module == null) throw new IllegalStateException("Xposed module not initialized");
+        Class<?> target;
+        try {
+            target = Class.forName(className, false, loader);
+        } catch (ClassNotFoundException e) {
+            return -1;
+        } catch (Throwable t) {
+            ModuleLog.w("target class lookup failed " + className + ": " + t);
+            return -1;
+        }
         int count = 0;
         for (Method method : target.getDeclaredMethods()) {
             try {
                 if (!matcher.matches(method)) continue;
-                method.setAccessible(true);
-                XposedBridge.hookMethod(method, callback);
+                XposedInterface.HookHandle handle = module.hook(method)
+                        .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                        .intercept(hooker);
+                HANDLES.add(handle);
                 count++;
                 ModuleLog.i("hooked " + className + "." + method.getName() + descriptor(method));
             } catch (Throwable t) {
@@ -29,6 +51,14 @@ public final class HookUtils {
             }
         }
         return count;
+    }
+
+    public static int installedHookCount() {
+        return HANDLES.size();
+    }
+
+    public static List<XposedInterface.HookHandle> hookHandles() {
+        return Collections.unmodifiableList(new ArrayList<>(HANDLES));
     }
 
     public static String descriptor(Method method) {
@@ -41,24 +71,60 @@ public final class HookUtils {
         return out.toString();
     }
 
-    public static int intArg(Object[] args, int index, int defValue) {
-        if (args == null || index < 0 || index >= args.length) return defValue;
-        Object value = args[index];
+    public static int intArg(XposedInterface.Chain chain, int index, int defValue) {
+        if (chain == null || index < 0 || index >= chain.getArgs().size()) return defValue;
+        Object value = chain.getArg(index);
         return value instanceof Number ? ((Number) value).intValue() : defValue;
     }
 
-    public static String stringArg(Object[] args, int index) {
-        if (args == null || index < 0 || index >= args.length) return "";
-        Object value = args[index];
+    public static String stringArg(XposedInterface.Chain chain, int index) {
+        if (chain == null || index < 0 || index >= chain.getArgs().size()) return "";
+        Object value = chain.getArg(index);
         return value == null ? "" : String.valueOf(value);
     }
 
-    public static List<Method> methodsNamed(Class<?> target, String name) {
-        ArrayList<Method> methods = new ArrayList<>();
-        if (target == null) return methods;
-        for (Method method : target.getDeclaredMethods()) {
-            if (name.equals(method.getName())) methods.add(method);
+    public static Object objectArg(XposedInterface.Chain chain, int index) {
+        if (chain == null || index < 0 || index >= chain.getArgs().size()) return null;
+        return chain.getArg(index);
+    }
+
+    public static String fieldString(Object object, String fieldName) {
+        Object value = fieldValue(object, fieldName);
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    public static int fieldInt(Object object, String fieldName, int defValue) {
+        Object value = fieldValue(object, fieldName);
+        return value instanceof Number ? ((Number) value).intValue() : defValue;
+    }
+
+    private static Object fieldValue(Object object, String fieldName) {
+        if (object == null || fieldName == null || fieldName.isEmpty()) return null;
+        Class<?> type = object.getClass();
+        String key = type.getName() + '#' + fieldName;
+        try {
+            Field field = FIELD_CACHE.get(key);
+            if (field == null) {
+                field = findField(type, fieldName);
+                if (field == null) return null;
+                field.setAccessible(true);
+                FIELD_CACHE.putIfAbsent(key, field);
+            }
+            return field.get(object);
+        } catch (Throwable ignored) {
+            return null;
         }
-        return methods;
+    }
+
+    private static Field findField(Class<?> type, String name) {
+        Class<?> current = type;
+        while (current != null) {
+            try {
+                return current.getDeclaredField(name);
+            } catch (NoSuchFieldException ignored) {
+                current = current.getSuperclass();
+            }
+        }
+        return null;
     }
 }

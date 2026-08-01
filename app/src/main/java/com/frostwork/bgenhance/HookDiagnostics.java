@@ -30,6 +30,7 @@ public final class HookDiagnostics {
     private static final Map<String, String> PROCESS_ERRORS = new ConcurrentHashMap<>();
     private static final AtomicInteger PENDING_EVENTS = new AtomicInteger();
     private static final AtomicBoolean FLUSH_SCHEDULED = new AtomicBoolean();
+    private static final AtomicBoolean STICKY_RETRY_SCHEDULED = new AtomicBoolean();
     private static final ScheduledThreadPoolExecutor EXECUTOR = new ScheduledThreadPoolExecutor(
             1, runnable -> {
         Thread thread = new Thread(runnable, "BgEnhanceDiagnostics");
@@ -38,6 +39,10 @@ public final class HookDiagnostics {
     });
     private static volatile int sLastReportedRevision = Integer.MIN_VALUE;
     private static volatile long sLastConfigReportAt;
+    private static volatile String sLastConfigSource = "";
+    private static volatile String sLastConfigPath = "";
+    private static volatile long sLastConfigLatencyMs;
+    private static volatile String sLastConfigError = "";
 
     static {
         EXECUTOR.setRemoveOnCancelPolicy(true);
@@ -59,9 +64,28 @@ public final class HookDiagnostics {
 
     public static void reportConfig(int revision, String source, String path,
                                     long reloadLatencyMs, String error) {
+        reportConfigInternal(revision, source, path, reloadLatencyMs, error, false);
+    }
+
+    public static void forceReportConfig(int revision, String source, String path,
+                                         long reloadLatencyMs, String error) {
+        reportConfigInternal(revision, source, path, reloadLatencyMs, error, true);
+    }
+
+    private static void reportConfigInternal(int revision, String source, String path,
+                                             long reloadLatencyMs, String error,
+                                             boolean force) {
+        String sourceValue = source == null ? "" : source;
+        String pathValue = path == null ? "" : path;
+        String errorValue = error == null ? "" : error;
+        sLastConfigSource = sourceValue;
+        sLastConfigPath = pathValue;
+        sLastConfigLatencyMs = reloadLatencyMs;
+        sLastConfigError = errorValue;
+
         long now = SystemClock.elapsedRealtime();
-        boolean failed = error != null && !error.isEmpty();
-        if (!failed && revision == sLastReportedRevision
+        boolean failed = !errorValue.isEmpty();
+        if (!force && !failed && revision == sLastReportedRevision
                 && now - sLastConfigReportAt < 30_000L) return;
         sLastReportedRevision = revision;
         sLastConfigReportAt = now;
@@ -76,10 +100,10 @@ public final class HookDiagnostics {
         for (String processId : processIds) {
             Bundle extras = processExtrasFor(processId);
             extras.putInt(BridgeContract.EXTRA_CONFIG_REVISION, revision);
-            extras.putString(BridgeContract.EXTRA_CONFIG_SOURCE, source == null ? "" : source);
-            extras.putString(BridgeContract.EXTRA_CONFIG_PATH, path == null ? "" : path);
+            extras.putString(BridgeContract.EXTRA_CONFIG_SOURCE, sourceValue);
+            extras.putString(BridgeContract.EXTRA_CONFIG_PATH, pathValue);
             extras.putLong(BridgeContract.EXTRA_RELOAD_LATENCY, reloadLatencyMs);
-            extras.putString(BridgeContract.EXTRA_ERROR, error == null ? "" : error);
+            extras.putString(BridgeContract.EXTRA_ERROR, errorValue);
             submitCall(BridgeContract.METHOD_REPORT_CONFIG, extras);
         }
         resendStickyStates();
@@ -201,7 +225,19 @@ public final class HookDiagnostics {
     }
 
     private static void submitCall(String method, Bundle extras) {
-        EXECUTOR.execute(() -> callProvider(method, extras));
+        EXECUTOR.execute(() -> {
+            if (!callProvider(method, extras)) scheduleStickyRetry();
+        });
+    }
+
+    private static void scheduleStickyRetry() {
+        if (!STICKY_RETRY_SCHEDULED.compareAndSet(false, true)) return;
+        EXECUTOR.schedule(() -> {
+            STICKY_RETRY_SCHEDULED.set(false);
+            reportConfigInternal(sLastReportedRevision, sLastConfigSource,
+                    sLastConfigPath, sLastConfigLatencyMs, sLastConfigError, true);
+            if (PENDING_EVENTS.get() > 0) scheduleFlush(0L);
+        }, FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 
     private static boolean callProvider(String method, Bundle extras) {

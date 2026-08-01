@@ -164,7 +164,7 @@
     <string name="back">返回</string>
 
     <string name="settings_save_failed">设置保存失败，请复制诊断信息后反馈</string>
-    <string name="effect_bridge_error">模块配置桥暂不可用，Hook 会安全放行；请进入诊断页复制信息反馈</string>
+    <string name="effect_config_service_waiting">暂未连接模块服务；新设置会先保存在本机，连接后自动同步</string>
     <string name="diagnostics_chain_title">运行链路</string>
     <string name="diagnostics_system_process">系统框架 Hook</string>
     <string name="diagnostics_athena_process">Athena Hook</string>
@@ -177,15 +177,18 @@
 请先重启手机；若仍失败，请复制诊断信息反馈</string>
     <string name="diagnostics_process_config_error">读取设置失败：%1$s
 当前会安全放行，请复制诊断信息反馈</string>
-    <string name="config_bridge_ready">配置服务可用 · 当前配置 %1$d · 桥接协议 %2$d</string>
-    <string name="config_bridge_unavailable">配置服务不可用；Hook 会安全放行，请复制诊断信息反馈</string>
+    <string name="config_bridge_ready">设置同步服务可用 · 当前配置 %1$d</string>
+    <string name="config_bridge_unavailable">设置同步服务暂不可用；新设置将在连接后自动同步</string>
     <string name="refresh_diagnostics">重新检测 Hook 状态</string>
-    <string name="diagnostics_refresh_sent">已请求系统进程重新读取设置</string>
+    <string name="diagnostics_refresh_sent">正在重新同步设置并检查运行状态</string>
     <string name="result_config_unavailable">配置不可用，已安全放行</string>
     <string name="result_unknown_short">未知错误</string>
 
-    <string name="diagnostics_bridge_title">模块桥接</string>
-    <string name="diagnostics_bridge_ready">配置与诊断桥可用，可向系统进程同步设置并接收 Hook 状态</string>
-    <string name="diagnostics_bridge_unavailable">模块桥不可用；Hook 会安全放行，设置和运行状态暂时无法同步</string>
-    <string name="local_config_ready">设置已保存在模块内 · 当前配置 %1$d · Hook 通过受限模块桥读取</string>
+    <string name="diagnostics_bridge_title">运行状态回传</string>
+    <string name="diagnostics_bridge_ready">可以接收系统进程的保护状态和运行记录</string>
+    <string name="diagnostics_bridge_unavailable">暂时无法接收新的运行状态；设置同步不受此项影响</string>
+    <string name="config_sync_ready">设置已同步 · 当前配置 %1$d</string>
+    <string name="config_sync_pending">设置已保存，正在同步（本地 %1$d / 已同步 %2$d）</string>
+    <string name="config_sync_waiting_service">设置已保存（配置 %1$d），连接模块服务后会自动同步</string>
+    <string name="config_sync_failed">设置已保存（配置 %1$d），但同步未完成；请稍后重新检测</string>
 </resources>
