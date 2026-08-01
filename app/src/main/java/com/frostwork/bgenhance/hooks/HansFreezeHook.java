@@ -4,6 +4,7 @@ import com.frostwork.bgenhance.Decision;
 import com.frostwork.bgenhance.FeatureHook;
 import com.frostwork.bgenhance.FeatureIds;
 import com.frostwork.bgenhance.HookEvent;
+import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.HookUtils;
 import com.frostwork.bgenhance.ModuleSettings;
 import java.lang.reflect.Method;
@@ -11,7 +12,7 @@ import java.lang.reflect.Method;
 public final class HansFreezeHook implements FeatureHook {
     private static final String CLASS_NAME = "com.android.server.am.OplusHansManager";
 
-    @Override public String id() { return "hans_freeze_dispatch"; }
+    @Override public String hookTargetId() { return HookTargetIds.HANS_FREEZE_DISPATCH; }
     @Override public String prefKey() { return ""; }
 
     @Override

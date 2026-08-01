@@ -8,6 +8,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.frostwork.bgenhance.BridgeContract;
 import com.frostwork.bgenhance.DiagnosticsStore;
 import com.frostwork.bgenhance.FeatureIds;
+import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.ModuleApplication;
 import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
@@ -203,10 +204,13 @@ public final class SettingsActivity extends AppCompatActivity {
     }
 
     private void refreshHookStatus() {
-        String ogKill = DiagnosticsStore.getSupportStatus(this, FeatureIds.OGUARD_KILL);
-        String ogStop = DiagnosticsStore.getSupportStatus(this, FeatureIds.OGUARD_FORCE_STOP);
-        String periodic = DiagnosticsStore.getSupportStatus(this, FeatureIds.ATHENA_PERIODIC);
-        String fast = DiagnosticsStore.getSupportStatus(this, "fast_clear_dispatch");
+        String ogKill = DiagnosticsStore.getSupportStatus(this, HookTargetIds.OGUARD_KILL);
+        String ogStop = DiagnosticsStore.getSupportStatus(
+                this, HookTargetIds.OGUARD_FORCE_STOP);
+        String periodic = DiagnosticsStore.getSupportStatus(
+                this, HookTargetIds.ATHENA_PERIODIC);
+        String fast = DiagnosticsStore.getSupportStatus(
+                this, HookTargetIds.FAST_CLEAR_DISPATCH);
         int installed = 0;
         int known = 0;
         for (String value : Arrays.asList(ogKill, ogStop, periodic, fast)) {

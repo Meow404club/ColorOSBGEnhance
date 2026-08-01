@@ -4,12 +4,13 @@ import com.frostwork.bgenhance.Decision;
 import com.frostwork.bgenhance.FeatureHook;
 import com.frostwork.bgenhance.FeatureIds;
 import com.frostwork.bgenhance.HookEvent;
+import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.HookUtils;
 import com.frostwork.bgenhance.ModuleSettings;
 import java.lang.reflect.Method;
 
 public final class TournamentHook implements FeatureHook {
-    @Override public String id() { return FeatureIds.TOURNAMENT; }
+    @Override public String hookTargetId() { return HookTargetIds.TOURNAMENT; }
     @Override public String prefKey() { return ModuleSettings.KEY_TOURNAMENT; }
 
     @Override
@@ -21,7 +22,8 @@ public final class TournamentHook implements FeatureHook {
             String pkg = HookUtils.fieldString(proc, "pkgName");
             String process = HookUtils.fieldString(proc, "procName");
             int uid = HookUtils.fieldInt(proc, "uid", -1);
-            HookEvent event = new HookEvent(id(), code, uid, pkg, process, "tournamentmode");
+            HookEvent event = new HookEvent(
+                    FeatureIds.TOURNAMENT, code, uid, pkg, process, "tournamentmode");
             if (Decision.shouldBlock(prefKey(), event)) return null;
             return chain.proceed();
         });

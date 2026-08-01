@@ -4,6 +4,7 @@ import com.frostwork.bgenhance.Decision;
 import com.frostwork.bgenhance.FeatureHook;
 import com.frostwork.bgenhance.FeatureIds;
 import com.frostwork.bgenhance.HookEvent;
+import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.HookUtils;
 import com.frostwork.bgenhance.ModuleSettings;
 import java.lang.reflect.Method;
@@ -11,7 +12,7 @@ import java.lang.reflect.Method;
 public final class OguardForceStopHook implements FeatureHook {
     private static final String CLASS_NAME = "com.android.server.hans.oguard.policy.AppPowerPolicy";
 
-    @Override public String id() { return FeatureIds.OGUARD_FORCE_STOP; }
+    @Override public String hookTargetId() { return HookTargetIds.OGUARD_FORCE_STOP; }
     @Override public String prefKey() { return ModuleSettings.KEY_OGUARD_FORCE_STOP; }
 
     @Override
@@ -20,7 +21,8 @@ public final class OguardForceStopHook implements FeatureHook {
             int uid = HookUtils.intArg(chain, 0, -1);
             String pkg = HookUtils.stringArg(chain, 1);
             String reason = HookUtils.stringArg(chain, 2);
-            HookEvent event = new HookEvent(id(), 502, uid, pkg, pkg, reason);
+            HookEvent event = new HookEvent(
+                    FeatureIds.OGUARD_FORCE_STOP, 502, uid, pkg, pkg, reason);
             if (Decision.shouldBlock(prefKey(), event)) return true;
             return chain.proceed();
         });

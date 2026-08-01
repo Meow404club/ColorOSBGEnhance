@@ -16,6 +16,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.frostwork.bgenhance.BridgeContract;
 import com.frostwork.bgenhance.DiagnosticsStore;
 import com.frostwork.bgenhance.FeatureIds;
+import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.ModuleApplication;
 import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
@@ -34,22 +35,25 @@ public final class DiagnosticsActivity extends AppCompatActivity {
 
     private static final class SupportItem {
         final int titleRes;
-        final String id;
-        SupportItem(int titleRes, String id) { this.titleRes = titleRes; this.id = id; }
+        final String hookTargetId;
+        SupportItem(int titleRes, String hookTargetId) {
+            this.titleRes = titleRes;
+            this.hookTargetId = hookTargetId;
+        }
     }
 
     private static final class StatItem {
         final int titleRes;
-        final String feature;
+        final String featureId;
         final boolean diagnosticOnly;
 
-        StatItem(int titleRes, String feature) {
-            this(titleRes, feature, false);
+        StatItem(int titleRes, String featureId) {
+            this(titleRes, featureId, false);
         }
 
-        StatItem(int titleRes, String feature, boolean diagnosticOnly) {
+        StatItem(int titleRes, String featureId, boolean diagnosticOnly) {
             this.titleRes = titleRes;
-            this.feature = feature;
+            this.featureId = featureId;
             this.diagnosticOnly = diagnosticOnly;
         }
     }
@@ -65,14 +69,14 @@ public final class DiagnosticsActivity extends AppCompatActivity {
     }
 
     private static final List<SupportItem> SUPPORTS = Arrays.asList(
-            new SupportItem(R.string.periodic_title, FeatureIds.ATHENA_PERIODIC),
-            new SupportItem(R.string.oguard_kill_title, FeatureIds.OGUARD_KILL),
-            new SupportItem(R.string.oguard_stop_title, FeatureIds.OGUARD_FORCE_STOP),
-            new SupportItem(R.string.fast_clear_nav_title, "fast_clear_dispatch"),
-            new SupportItem(R.string.tournament_title, FeatureIds.TOURNAMENT),
-            new SupportItem(R.string.memory_nav_title, "memory_guard_dispatch"),
-            new SupportItem(R.string.nirvana_nav_title, "osense_group_clean"),
-            new SupportItem(R.string.freeze_nav_title, "hans_freeze_dispatch")
+            new SupportItem(R.string.periodic_title, HookTargetIds.ATHENA_PERIODIC),
+            new SupportItem(R.string.oguard_kill_title, HookTargetIds.OGUARD_KILL),
+            new SupportItem(R.string.oguard_stop_title, HookTargetIds.OGUARD_FORCE_STOP),
+            new SupportItem(R.string.fast_clear_nav_title, HookTargetIds.FAST_CLEAR_DISPATCH),
+            new SupportItem(R.string.tournament_title, HookTargetIds.TOURNAMENT),
+            new SupportItem(R.string.memory_nav_title, HookTargetIds.MEMORY_GUARD_DISPATCH),
+            new SupportItem(R.string.nirvana_nav_title, HookTargetIds.OSENSE_GROUP_CLEAN),
+            new SupportItem(R.string.freeze_nav_title, HookTargetIds.HANS_FREEZE_DISPATCH)
     );
 
 
@@ -168,8 +172,8 @@ public final class DiagnosticsActivity extends AppCompatActivity {
         supportCard.addView(supportRows);
         for (int i = 0; i < SUPPORTS.size(); i++) {
             SupportItem item = SUPPORTS.get(i);
-            String status = DiagnosticsStore.getSupportStatus(this, item.id);
-            long updatedAt = DiagnosticsStore.getSupportUpdatedAt(this, item.id);
+            String status = DiagnosticsStore.getSupportStatus(this, item.hookTargetId);
+            long updatedAt = DiagnosticsStore.getSupportUpdatedAt(this, item.hookTargetId);
             addStatusRow(supportRows, getString(item.titleRes),
                     friendlySupportStatus(status, updatedAt));
             if (i < SUPPORTS.size() - 1) addDivider(supportRows);
@@ -216,9 +220,9 @@ public final class DiagnosticsActivity extends AppCompatActivity {
         int groupBlocked = 0;
         int groupFailOpen = 0;
         for (StatItem item : group.items) {
-            groupObserved += DiagnosticsStore.getStatInt(this, item.feature, "observed");
-            groupBlocked += DiagnosticsStore.getStatInt(this, item.feature, "blocked");
-            groupFailOpen += DiagnosticsStore.getStatInt(this, item.feature, "fail_open");
+            groupObserved += DiagnosticsStore.getStatInt(this, item.featureId, "observed");
+            groupBlocked += DiagnosticsStore.getStatInt(this, item.featureId, "blocked");
+            groupFailOpen += DiagnosticsStore.getStatInt(this, item.featureId, "fail_open");
         }
 
         MaterialCardView card = newCard();
@@ -274,9 +278,9 @@ public final class DiagnosticsActivity extends AppCompatActivity {
         title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
         row.addView(title);
 
-        int observed = DiagnosticsStore.getStatInt(this, item.feature, "observed");
-        int blocked = DiagnosticsStore.getStatInt(this, item.feature, "blocked");
-        int failOpen = DiagnosticsStore.getStatInt(this, item.feature, "fail_open");
+        int observed = DiagnosticsStore.getStatInt(this, item.featureId, "observed");
+        int blocked = DiagnosticsStore.getStatInt(this, item.featureId, "blocked");
+        int failOpen = DiagnosticsStore.getStatInt(this, item.featureId, "fail_open");
         StringBuilder details = new StringBuilder(
                 getString(R.string.stats_count_summary, observed, blocked));
         if (failOpen > 0) {
@@ -285,9 +289,11 @@ public final class DiagnosticsActivity extends AppCompatActivity {
         if (item.diagnosticOnly) {
             details.append('\n').append(getString(R.string.stats_diagnostic_only));
         } else {
-            long lastAt = DiagnosticsStore.getStatLong(this, item.feature, "last_at");
-            String lastResult = DiagnosticsStore.getStatString(this, item.feature, "last_result");
-            String lastPkg = DiagnosticsStore.getStatString(this, item.feature, "last_pkg");
+            long lastAt = DiagnosticsStore.getStatLong(this, item.featureId, "last_at");
+            String lastResult = DiagnosticsStore.getStatString(
+                    this, item.featureId, "last_result");
+            String lastPkg = DiagnosticsStore.getStatString(
+                    this, item.featureId, "last_pkg");
             if (lastAt > 0) {
                 details.append('\n').append(getString(R.string.stats_recent,
                         formatTime(lastAt), friendlyResult(lastResult)));
@@ -410,10 +416,11 @@ public final class DiagnosticsActivity extends AppCompatActivity {
 
         out.append("\n[support]\n");
         for (SupportItem item : SUPPORTS) {
-            out.append(item.id).append('=').append(
-                    DiagnosticsStore.getSupportStatus(this, item.id))
+            out.append(item.hookTargetId).append('=').append(
+                    DiagnosticsStore.getSupportStatus(this, item.hookTargetId))
                     .append(" updatedAt=")
-                    .append(DiagnosticsStore.getSupportUpdatedAt(this, item.id)).append('\n');
+                    .append(DiagnosticsStore.getSupportUpdatedAt(
+                            this, item.hookTargetId)).append('\n');
         }
 
         out.append("\n[stats]\n");

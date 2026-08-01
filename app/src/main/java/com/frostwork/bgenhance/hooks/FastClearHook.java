@@ -4,12 +4,13 @@ import com.frostwork.bgenhance.Decision;
 import com.frostwork.bgenhance.FeatureHook;
 import com.frostwork.bgenhance.FeatureIds;
 import com.frostwork.bgenhance.HookEvent;
+import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.HookUtils;
 import com.frostwork.bgenhance.ModuleSettings;
 import java.lang.reflect.Method;
 
 public final class FastClearHook implements FeatureHook {
-    @Override public String id() { return "fast_clear_dispatch"; }
+    @Override public String hookTargetId() { return HookTargetIds.FAST_CLEAR_DISPATCH; }
     @Override public String prefKey() { return ""; }
 
     @Override
@@ -19,7 +20,7 @@ public final class FastClearHook implements FeatureHook {
             Mapping mapping = map(code);
             if (mapping == null) return chain.proceed();
             String caller = HookUtils.stringArg(chain, 6);
-            HookEvent event = new HookEvent(mapping.feature, code, -1, caller, "", caller);
+            HookEvent event = new HookEvent(mapping.featureId, code, -1, caller, "", caller);
             if (Decision.shouldBlock(mapping.prefKey, event)) return null;
             return chain.proceed();
         });
@@ -56,8 +57,11 @@ public final class FastClearHook implements FeatureHook {
     }
 
     private static final class Mapping {
-        final String feature;
+        final String featureId;
         final String prefKey;
-        Mapping(String feature, String prefKey) { this.feature = feature; this.prefKey = prefKey; }
+        Mapping(String featureId, String prefKey) {
+            this.featureId = featureId;
+            this.prefKey = prefKey;
+        }
     }
 }

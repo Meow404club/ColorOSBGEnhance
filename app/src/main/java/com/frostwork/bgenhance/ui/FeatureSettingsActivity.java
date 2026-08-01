@@ -103,7 +103,7 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
             FeatureCatalog.FeatureSpec spec = specs.get(i);
             SettingSwitchRow row = new SettingSwitchRow(this);
             row.bind(spec, ModuleSettings.getLocalBoolean(this, spec.prefKey));
-            String status = DiagnosticsStore.getSupportStatus(this, spec.supportId);
+            String status = DiagnosticsStore.getSupportStatus(this, spec.hookTargetId);
             boolean unsupported = status.startsWith("UNSUPPORTED") || status.startsWith("FAILED");
             if (spec.diagnosticOnly) row.showDiagnosticOnly();
             else if (unsupported) row.showUnsupported();
