@@ -206,32 +206,9 @@ public final class DiagnosticsActivity extends AppCompatActivity {
     }
 
     private void renderStats() {
-        addSectionTitle(R.string.stats_title);
-
-        int totalObserved = 0;
-        int totalBlocked = 0;
-        int totalFailOpen = 0;
-        for (String feature : FeatureIds.all()) {
-            totalObserved += DiagnosticsStore.getStatInt(this, feature, "observed");
-            totalBlocked += DiagnosticsStore.getStatInt(this, feature, "blocked");
-            totalFailOpen += DiagnosticsStore.getStatInt(this, feature, "fail_open");
-        }
-        addStatsOverview(totalObserved, totalBlocked, totalFailOpen);
-
         for (StatGroup group : STAT_GROUPS) {
             addStatsGroup(group);
         }
-    }
-
-    private void addStatsOverview(int observed, int blocked, int failOpen) {
-        MaterialCardView card = newCard();
-        StatsOverviewView overview = new StatsOverviewView(this);
-        overview.bind(observed, blocked, failOpen,
-                getString(R.string.stats_overview_hint), false);
-        card.addView(overview, new MaterialCardView.LayoutParams(
-                MaterialCardView.LayoutParams.MATCH_PARENT,
-                MaterialCardView.LayoutParams.WRAP_CONTENT));
-        container.addView(card, cardParams());
     }
 
     private void addStatsGroup(StatGroup group) {

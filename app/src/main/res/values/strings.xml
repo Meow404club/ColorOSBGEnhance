@@ -128,7 +128,6 @@
     <string name="support_status_title">功能加载状态</string>
     <string name="config_sync_title">设置同步</string>
     <string name="stats_title">运行记录</string>
-    <string name="stats_overview_hint">所有保护项目都会显示，尚未触发时统计为 0 次</string>
     <string name="home_stats_action">查看全部保护项目的运行记录和 Hook 状态</string>
     <string name="stats_metric_observed">已检测</string>
     <string name="stats_metric_blocked">已阻止</string>
