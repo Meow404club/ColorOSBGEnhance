@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="page_bg">#FFF7F6FA</color>
+    <color name="card_bg">#FFFFFFFF</color>
+    <color name="title_text">#FF1C1B20</color>
+    <color name="item_title">#FF222126</color>
+    <color name="item_summary">#FF777780</color>
+    <color name="divider">#FFE8E7EC</color>
+    <color name="brand">#FF4F8EF7</color>
+    <color name="brand_soft">#FFE7F0FF</color>
+    <color name="success">#FF2E9B62</color>
+    <color name="warning">#FFD98600</color>
+    <color name="error">#FFD74646</color>
+    <color name="risk_badge_high">#FFE5484D</color>
+    <color name="risk_badge_very_high">#FFC9343A</color>
+    <color name="risk_badge_experimental">#FF3478F6</color>
+    <color name="experimental">#FF7B61D1</color>
+    <color name="chip_neutral">#FFEDEDF2</color>
+    <color name="chip_text">#FF5F6068</color>
+    <color name="banner_warning">#FFFFF1D6</color>
+    <color name="banner_warning_text">#FF7A4D00</color>
+</resources>
