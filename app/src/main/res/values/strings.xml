@@ -89,6 +89,8 @@
     <string name="hans_title">后台冻结保护</string>
     <string name="hans_summary">减少系统冻结后台应用；可能会增加待机耗电</string>
     <string name="hans_detail">影响：后台应用可能更常保持运行</string>
+    <string name="hans_r_to_m_timing_support_title">后台冻结准备时机</string>
+    <string name="hans_m_to_f_timing_support_title">后台冻结执行时机</string>
     <string name="super_freeze_title">深度冻结保护</string>
     <string name="super_freeze_summary">减少系统对后台应用的深度冻结；可能明显增加耗电</string>
     <string name="super_freeze_detail">影响：后台应用保持运行的时间可能更长</string>

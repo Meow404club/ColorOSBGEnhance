@@ -4,6 +4,7 @@ import androidx.annotation.NonNull;
 import com.frostwork.bgenhance.hooks.AthenaPeriodicHook;
 import com.frostwork.bgenhance.hooks.FastClearHook;
 import com.frostwork.bgenhance.hooks.HansFreezeHook;
+import com.frostwork.bgenhance.hooks.HansTimingHook;
 import com.frostwork.bgenhance.hooks.MemoryGuardHook;
 import com.frostwork.bgenhance.hooks.NirvanaHook;
 import com.frostwork.bgenhance.hooks.OguardForceStopHook;
@@ -12,6 +13,9 @@ import com.frostwork.bgenhance.hooks.OsenseProcessKillHook;
 import com.frostwork.bgenhance.hooks.TournamentHook;
 import io.github.libxposed.api.XposedModule;
 import io.github.libxposed.api.XposedModuleInterface;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 /** Modern libxposed API 102 entry point. */
 public final class MainHook extends XposedModule {
@@ -44,11 +48,9 @@ public final class MainHook extends XposedModule {
         try {
             ClassLoader loader = param.getClassLoader();
             ModuleLog.i("installing system_server hooks");
-            FeatureRegistry.install(new OguardKillHook(), loader);
-            FeatureRegistry.install(new OguardForceStopHook(), loader);
-            FeatureRegistry.install(new NirvanaHook(), loader);
-            FeatureRegistry.install(new OsenseProcessKillHook(), loader);
-            FeatureRegistry.install(new HansFreezeHook(), loader);
+            for (FeatureHook hook : systemServerHooks()) {
+                FeatureRegistry.install(hook, loader);
+            }
             HookConfig.ensureDiagnosticsContext();
             HookDiagnostics.reportProcess("FEATURES_INSTALLED", null);
         } catch (Throwable t) {
@@ -66,15 +68,33 @@ public final class MainHook extends XposedModule {
         try {
             ClassLoader loader = param.getClassLoader();
             ModuleLog.i("installing Athena hooks process=" + processName);
-            FeatureRegistry.install(new AthenaPeriodicHook(), loader);
-            FeatureRegistry.install(new FastClearHook(), loader);
-            FeatureRegistry.install(new MemoryGuardHook(), loader);
-            FeatureRegistry.install(new TournamentHook(), loader);
+            for (FeatureHook hook : athenaHooks()) {
+                FeatureRegistry.install(hook, loader);
+            }
             HookConfig.ensureDiagnosticsContext();
             HookDiagnostics.reportProcess("FEATURES_INSTALLED", null);
         } catch (Throwable t) {
             HookDiagnostics.reportProcess("BOOTSTRAP_FAILED", t);
             ModuleLog.e("Athena bootstrap failed", t);
         }
+    }
+
+    static List<FeatureHook> systemServerHooks() {
+        return Collections.unmodifiableList(Arrays.asList(
+                new OguardKillHook(),
+                new OguardForceStopHook(),
+                new NirvanaHook(),
+                new OsenseProcessKillHook(),
+                new HansFreezeHook(),
+                HansTimingHook.rToM(),
+                HansTimingHook.mToF()));
+    }
+
+    static List<FeatureHook> athenaHooks() {
+        return Collections.unmodifiableList(Arrays.asList(
+                new AthenaPeriodicHook(),
+                new FastClearHook(),
+                new MemoryGuardHook(),
+                new TournamentHook()));
     }
 }

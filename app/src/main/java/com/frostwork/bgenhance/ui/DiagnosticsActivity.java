@@ -78,6 +78,10 @@ public final class DiagnosticsActivity extends AppCompatActivity {
             new SupportItem(R.string.nirvana_nav_title, HookTargetIds.OSENSE_GROUP_CLEAN),
             new SupportItem(R.string.osense_per_process_title,
                     HookTargetIds.OSENSE_PROCESS_KILL),
+            new SupportItem(R.string.hans_r_to_m_timing_support_title,
+                    HookTargetIds.HANS_R_TO_M_TIMING),
+            new SupportItem(R.string.hans_m_to_f_timing_support_title,
+                    HookTargetIds.HANS_M_TO_F_TIMING),
             new SupportItem(R.string.freeze_nav_title, HookTargetIds.HANS_FREEZE_DISPATCH)
     );
 

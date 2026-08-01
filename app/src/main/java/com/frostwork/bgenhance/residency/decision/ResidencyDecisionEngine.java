@@ -104,6 +104,55 @@ public final class ResidencyDecisionEngine {
                 reason);
     }
 
+    public FreezeTimingDecision decideFreezeTiming(FreezeTimingContext context) {
+        Objects.requireNonNull(context, "context");
+        Evaluation evaluation = evaluate(
+                context, "", true, context.uidPolicyScope());
+        if (!evaluation.active()) {
+            return new FreezeTimingDecision(
+                    FreezeTimingDecision.Action.FOLLOW_SYSTEM,
+                    FreezeTimingDecision.Action.FOLLOW_SYSTEM,
+                    0L,
+                    evaluation.trace());
+        }
+
+        FreezePolicy policy = evaluation.policy().freezePolicy();
+        if (policy.fullExemption()) {
+            return finishFreezeTiming(
+                    context,
+                    evaluation,
+                    FreezeTimingDecision.Action.FOLLOW_SYSTEM,
+                    0L,
+                    DecisionReason.FULL_EXEMPTION);
+        }
+        if (!policy.customTiming()) {
+            return finishFreezeTiming(
+                    context,
+                    evaluation,
+                    FreezeTimingDecision.Action.FOLLOW_SYSTEM,
+                    0L,
+                    DecisionReason.POLICY_FOLLOWS_FREEZE_TIMING);
+        }
+
+        long delayMs;
+        switch (context.transition()) {
+            case R_TO_M:
+                delayMs = policy.rToMDelayMs();
+                break;
+            case M_TO_F:
+                delayMs = policy.mToFDelayMs();
+                break;
+            default:
+                throw new AssertionError(context.transition());
+        }
+        return finishFreezeTiming(
+                context,
+                evaluation,
+                FreezeTimingDecision.Action.APPLY_CUSTOM_TIMING,
+                delayMs,
+                DecisionReason.CUSTOM_FREEZE_TIMING);
+    }
+
     public WakeDecision decideWake(WakeContext context) {
         Objects.requireNonNull(context, "context");
         Evaluation evaluation = evaluate(context);
@@ -391,6 +440,23 @@ public final class ResidencyDecisionEngine {
                 policyAction,
                 rToMDelayMs,
                 mToFDelayMs,
+                trace(context, evaluation.identity(), disposition, reason));
+    }
+
+    private FreezeTimingDecision finishFreezeTiming(
+            FreezeTimingContext context,
+            Evaluation evaluation,
+            FreezeTimingDecision.Action policyAction,
+            long delayMs,
+            DecisionReason reason) {
+        FreezeTimingDecision.Action baseline = FreezeTimingDecision.Action.FOLLOW_SYSTEM;
+        DecisionDisposition disposition = disposition(policyAction != baseline);
+        FreezeTimingDecision.Action effective =
+                effectiveAction(baseline, policyAction, disposition);
+        return new FreezeTimingDecision(
+                effective,
+                policyAction,
+                delayMs,
                 trace(context, evaluation.identity(), disposition, reason));
     }
 

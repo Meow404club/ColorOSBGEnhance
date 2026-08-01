@@ -20,7 +20,9 @@ public final class HookTargetIdsTest {
                 "memory_guard_dispatch",
                 "osense_group_clean",
                 "osense_process_kill",
-                "hans_freeze_dispatch"
+                "hans_freeze_dispatch",
+                "hans_r_to_m_timing",
+                "hans_m_to_f_timing"
         ), HookTargetIds.all());
     }
 
