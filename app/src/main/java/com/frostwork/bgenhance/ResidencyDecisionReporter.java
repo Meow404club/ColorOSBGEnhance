@@ -2,6 +2,7 @@ package com.frostwork.bgenhance;
 
 import com.frostwork.bgenhance.residency.decision.DecisionDisposition;
 import com.frostwork.bgenhance.residency.decision.DecisionTrace;
+import com.frostwork.bgenhance.residency.decision.FreezeDecision;
 import com.frostwork.bgenhance.residency.decision.KillDecision;
 
 /** Converts typed residency decisions into the existing bounded diagnostics stream. */
@@ -15,6 +16,17 @@ public final class ResidencyDecisionReporter {
     /** Records only in-memory diagnostics for callbacks that already hold system locks. */
     public static void recordKillFromLockedPath(HookEvent event, KillDecision decision) {
         recordKill(event, decision, false);
+    }
+
+    /** Records a freeze decision without scheduling work while a HANS lock is held. */
+    public static void recordFreezeFromLockedPath(
+            HookEvent event, FreezeDecision decision) {
+        if (event == null || decision == null) return;
+        try {
+            HookDiagnostics.recordEventFromLockedPath(event, resultFor(decision));
+        } catch (Throwable ignored) {
+            // Diagnostics must never delay or change a HANS-locked callback.
+        }
     }
 
     private static void recordKill(
@@ -49,5 +61,12 @@ public final class ResidencyDecisionReporter {
         if (disposition == DecisionDisposition.FAIL_OPEN) return "fail_open";
         if (disposition == DecisionDisposition.DRY_RUN) return "observed";
         return decision.blocksAction() ? "blocked" : "passed";
+    }
+
+    static String resultFor(FreezeDecision decision) {
+        DecisionDisposition disposition = decision.trace().disposition();
+        if (disposition == DecisionDisposition.FAIL_OPEN) return "fail_open";
+        if (disposition == DecisionDisposition.DRY_RUN) return "observed";
+        return decision.blocksFreeze() ? "blocked" : "passed";
     }
 }

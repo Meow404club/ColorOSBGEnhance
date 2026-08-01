@@ -23,6 +23,12 @@ public final class Decision {
         return block;
     }
 
+    /** Evaluates a legacy global gate without logging or scheduling diagnostics work. */
+    public static LockedResult evaluateFromLockedPath(String prefKey) {
+        Outcome outcome = evaluate(HookConfig.state(), prefKey);
+        return new LockedResult(outcome == Outcome.BLOCKED, outcome.wireValue);
+    }
+
     static Outcome evaluate(HookRuntimeConfigState state, String prefKey) {
         if (state == null || !state.available()) return Outcome.CONFIG_UNAVAILABLE;
         RuntimeConfigDocument document = state.document();
@@ -47,5 +53,18 @@ public final class Decision {
         Outcome(String wireValue) {
             this.wireValue = wireValue;
         }
+    }
+
+    public static final class LockedResult {
+        private final boolean blocked;
+        private final String wireValue;
+
+        private LockedResult(boolean blocked, String wireValue) {
+            this.blocked = blocked;
+            this.wireValue = wireValue;
+        }
+
+        public boolean blocked() { return blocked; }
+        public String wireValue() { return wireValue; }
     }
 }
