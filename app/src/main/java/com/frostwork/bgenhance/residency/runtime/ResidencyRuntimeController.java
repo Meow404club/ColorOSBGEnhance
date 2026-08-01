@@ -18,6 +18,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /** Coordinates config and package identity snapshots without doing platform work on hook threads. */
 public final class ResidencyRuntimeController {
+    private static final StaleIdentityBuildException STALE_IDENTITY_BUILD =
+            new StaleIdentityBuildException();
     private final Executor identityExecutor;
     private final AtomicLong generation = new AtomicLong();
     private final AtomicReference<ResidencyRuntimeState> state =
@@ -107,11 +109,18 @@ public final class ResidencyRuntimeController {
 
     private void buildIdentities(
             RuntimeConfigSnapshot snapshot, PackageUidSource source, long token) {
+        if (generation.get() != token) return;
         try {
-            ResidencyIdentityIndex index =
-                    new ResidencyIdentityIndexBuilder(source).build(snapshot);
+            PackageUidSource guardedSource = packageName -> {
+                if (generation.get() != token) throw STALE_IDENTITY_BUILD;
+                return source.findUid(packageName);
+            };
+            ResidencyIdentityIndex index = new ResidencyIdentityIndexBuilder(
+                    guardedSource).build(snapshot);
             publishIfCurrent(snapshot, index,
                     ResidencyRuntimeState.Status.READY, token, "");
+        } catch (StaleIdentityBuildException ignored) {
+            // A newer generation already published fail-open state and owns the next rebuild.
         } catch (Throwable error) {
             publishIfCurrent(snapshot, ResidencyIdentityIndex.invalidated(),
                     ResidencyRuntimeState.Status.IDENTITY_REBUILD_FAILED,
@@ -165,5 +174,10 @@ public final class ResidencyRuntimeController {
         String message = error.getMessage();
         return error.getClass().getSimpleName()
                 + (message == null || message.isEmpty() ? "" : ":" + message);
+    }
+
+    private static final class StaleIdentityBuildException extends RuntimeException {
+        @Override
+        public synchronized Throwable fillInStackTrace() { return this; }
     }
 }

@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.OptionalInt;
 import java.util.Queue;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.Test;
 
 public final class ResidencyRuntimeControllerTest {
@@ -67,17 +68,23 @@ public final class ResidencyRuntimeControllerTest {
     public void staleBuildCannotReplaceANewerPolicyGeneration() {
         QueuedExecutor executor = new QueuedExecutor();
         ResidencyRuntimeController controller = new ResidencyRuntimeController(executor);
-        controller.setPackageUidSource(packageName -> OptionalInt.of(UID));
+        AtomicInteger queries = new AtomicInteger();
+        controller.setPackageUidSource(packageName -> {
+            queries.incrementAndGet();
+            return OptionalInt.of(UID);
+        });
         controller.updateConfig(snapshot(1L, 3L, true));
         controller.updateConfig(snapshot(2L, 4L, true));
 
         executor.runNext();
+        assertEquals(0, queries.get());
         assertEquals(
                 ResidencyRuntimeState.Status.IDENTITY_REBUILD_PENDING,
                 controller.state().status());
         assertEquals(4L, controller.state().snapshot().policyRevision());
 
         executor.runNext();
+        assertEquals(1, queries.get());
         assertTrue(controller.state().ready());
         assertEquals(4L, controller.state().identityIndex().policyRevision());
     }
