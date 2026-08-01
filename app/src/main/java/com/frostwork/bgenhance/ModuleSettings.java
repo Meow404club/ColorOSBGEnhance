@@ -4,6 +4,9 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.text.TextUtils;
+import com.frostwork.bgenhance.residency.config.ModuleConfigRepository;
+import com.frostwork.bgenhance.residency.config.RuntimeConfigDocument;
+import com.frostwork.bgenhance.residency.model.ResidencyPolicyDocument;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -15,6 +18,9 @@ public final class ModuleSettings {
     public static final String TAG = "ColorOSBgEnhance";
     public static final String PREFS_NAME = "settings";
     public static final String KEY_CONFIG_REVISION = "internal.config_revision";
+    public static final String KEY_CONFIG_UPDATED_AT = "internal.config_updated_at";
+    public static final String KEY_RESIDENCY_POLICY_JSON = "residency.policy_json";
+    public static final String KEY_RUNTIME_CONFIG_JSON = "runtime.config_json";
 
     public static final String KEY_MASTER_ENABLE = "master_enable";
     public static final String KEY_DRY_RUN = "dry_run";
@@ -82,24 +88,7 @@ public final class ModuleSettings {
 
     public static synchronized void ensureDefaults(Context context) {
         if (context == null) return;
-        SharedPreferences sp = prefs(context);
-        SharedPreferences.Editor editor = sp.edit();
-        boolean changed = false;
-        for (Map.Entry<String, Boolean> entry : DEFAULTS.entrySet()) {
-            if (!sp.contains(entry.getKey())) {
-                editor.putBoolean(entry.getKey(), entry.getValue());
-                changed = true;
-            }
-        }
-        if (!sp.contains(KEY_ACTIVE_PRESET)) {
-            editor.putString(KEY_ACTIVE_PRESET, PRESET_BALANCED);
-            changed = true;
-        }
-        if (!sp.contains(KEY_CONFIG_REVISION)) {
-            editor.putInt(KEY_CONFIG_REVISION, 1);
-            changed = true;
-        }
-        if (changed) editor.commit();
+        ModuleConfigRepository.ensureInitialized(context);
     }
 
     public static boolean getLocalBoolean(Context context, String key) {
@@ -118,13 +107,36 @@ public final class ModuleSettings {
         return prefs(context).getInt(KEY_CONFIG_REVISION, 1);
     }
 
+    public static synchronized ResidencyPolicyDocument getResidencyPolicy(Context context) {
+        if (context == null) return ResidencyPolicyDocument.empty();
+        return ModuleConfigRepository.readResidencyPolicy(context);
+    }
+
+    public static synchronized RuntimeConfigDocument getRuntimeConfig(Context context) {
+        if (context == null) return RuntimeConfigDocument.empty();
+        return ModuleConfigRepository.readRuntimeConfig(context);
+    }
+
+    public static synchronized String getRuntimeConfigJson(Context context) {
+        if (context == null) return "";
+        return ModuleConfigRepository.readRuntimeConfigJson(context);
+    }
+
+    public static synchronized boolean setResidencyPolicy(
+            Context context, ResidencyPolicyDocument policy) {
+        if (context == null || policy == null) return false;
+        return ModuleConfigRepository.writeResidencyPolicy(context, policy);
+    }
+
     public static synchronized boolean setBoolean(Context context, String key, boolean value) {
         if (context == null || !DEFAULTS.containsKey(key)) return false;
         SharedPreferences sp = prefs(context);
         if (sp.contains(key) && sp.getBoolean(key, defaultFor(key)) == value) return true;
-        int nextRevision = Math.max(1, sp.getInt(KEY_CONFIG_REVISION, 1) + 1);
+        int nextRevision = ModuleConfigRepository.nextConfigRevision(
+                sp.getInt(KEY_CONFIG_REVISION, 1));
         boolean saved = sp.edit().putBoolean(key, value)
-                .putInt(KEY_CONFIG_REVISION, nextRevision).commit();
+                .putInt(KEY_CONFIG_REVISION, nextRevision)
+                .putLong(KEY_CONFIG_UPDATED_AT, System.currentTimeMillis()).commit();
         if (saved) notifyConfigChanged(context);
         return saved;
     }
@@ -134,9 +146,11 @@ public final class ModuleSettings {
         SharedPreferences sp = prefs(context);
         String current = sp.getString(key, PRESET_BALANCED);
         if (String.valueOf(value).equals(current)) return true;
-        int nextRevision = Math.max(1, sp.getInt(KEY_CONFIG_REVISION, 1) + 1);
+        int nextRevision = ModuleConfigRepository.nextConfigRevision(
+                sp.getInt(KEY_CONFIG_REVISION, 1));
         boolean saved = sp.edit().putString(key, value)
-                .putInt(KEY_CONFIG_REVISION, nextRevision).commit();
+                .putInt(KEY_CONFIG_REVISION, nextRevision)
+                .putLong(KEY_CONFIG_UPDATED_AT, System.currentTimeMillis()).commit();
         if (saved) notifyConfigChanged(context);
         return saved;
     }
@@ -154,8 +168,9 @@ public final class ModuleSettings {
             }
         }
         if (!TextUtils.isEmpty(activePreset)) editor.putString(KEY_ACTIVE_PRESET, activePreset);
-        editor.putInt(KEY_CONFIG_REVISION,
-                Math.max(1, sp.getInt(KEY_CONFIG_REVISION, 1) + 1));
+        editor.putInt(KEY_CONFIG_REVISION, ModuleConfigRepository.nextConfigRevision(
+                sp.getInt(KEY_CONFIG_REVISION, 1)));
+        editor.putLong(KEY_CONFIG_UPDATED_AT, System.currentTimeMillis());
         boolean saved = editor.commit();
         if (saved) notifyConfigChanged(context);
         return saved;
