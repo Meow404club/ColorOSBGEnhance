@@ -5,6 +5,9 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
 import androidx.annotation.NonNull;
+import com.frostwork.bgenhance.residency.config.GlobalFeatureConfig;
+import com.frostwork.bgenhance.residency.config.RuntimeConfigCodec;
+import com.frostwork.bgenhance.residency.config.RuntimeConfigDocument;
 import io.github.libxposed.service.XposedService;
 import io.github.libxposed.service.XposedServiceHelper;
 import java.util.Map;
@@ -28,6 +31,7 @@ public final class ModuleApplication extends Application
         return thread;
     });
     private static final AtomicBoolean SYNC_QUEUED = new AtomicBoolean();
+    private static final RuntimeConfigCodec RUNTIME_CONFIG_CODEC = new RuntimeConfigCodec();
     private static final CopyOnWriteArraySet<StateListener> STATE_LISTENERS =
             new CopyOnWriteArraySet<>();
 
@@ -91,6 +95,8 @@ public final class ModuleApplication extends Application
     @Override
     public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
         if (key == null || ModuleSettings.KEY_CONFIG_REVISION.equals(key)
+                || ModuleSettings.KEY_CONFIG_UPDATED_AT.equals(key)
+                || ModuleSettings.KEY_RESIDENCY_POLICY_JSON.equals(key)
                 || ModuleSettings.KEY_ACTIVE_PRESET.equals(key)
                 || ModuleSettings.defaults().containsKey(key)) {
             requestConfigSync();
@@ -152,20 +158,40 @@ public final class ModuleApplication extends Application
             return;
         }
         ModuleSettings.ensureDefaults(this);
-        SharedPreferences local = ModuleSettings.prefs(this);
-        int revision = ModuleSettings.getConfigRevision(this);
+        RuntimeConfigDocument document;
+        String encoded;
         try {
-            SharedPreferences.Editor editor = service
-                    .getRemotePreferences(REMOTE_CONFIG_GROUP).edit();
+            document = ModuleSettings.getRuntimeConfig(this);
+            encoded = RUNTIME_CONFIG_CODEC.encode(document);
+            int revision = Math.toIntExact(document.revision());
+            GlobalFeatureConfig global = document.global();
+            SharedPreferences remote = service.getRemotePreferences(REMOTE_CONFIG_GROUP);
+            SharedPreferences.Editor editor = remote.edit();
             for (Map.Entry<String, Boolean> entry : ModuleSettings.defaults().entrySet()) {
-                editor.putBoolean(entry.getKey(),
-                        local.getBoolean(entry.getKey(), entry.getValue()));
+                String key = entry.getKey();
+                boolean value;
+                if (ModuleSettings.KEY_MASTER_ENABLE.equals(key)) {
+                    value = global.masterEnabled();
+                } else if (ModuleSettings.KEY_DRY_RUN.equals(key)) {
+                    value = global.dryRun();
+                } else if (ModuleSettings.KEY_VERBOSE_LOG.equals(key)) {
+                    value = global.verboseDiagnostics();
+                } else {
+                    value = global.legacyFeatures().getOrDefault(key, entry.getValue());
+                }
+                editor.putBoolean(key, value);
             }
-            editor.putString(ModuleSettings.KEY_ACTIVE_PRESET,
-                    local.getString(ModuleSettings.KEY_ACTIVE_PRESET,
-                            ModuleSettings.PRESET_BALANCED));
+            editor.putString(ModuleSettings.KEY_ACTIVE_PRESET, global.activePreset());
             editor.putInt(ModuleSettings.KEY_CONFIG_REVISION, revision);
+            editor.putString(ModuleSettings.KEY_RUNTIME_CONFIG_JSON, encoded);
             if (!editor.commit()) throw new IllegalStateException("remote preferences commit failed");
+
+            String published = remote.getString(ModuleSettings.KEY_RUNTIME_CONFIG_JSON, null);
+            RuntimeConfigDocument verified = RUNTIME_CONFIG_CODEC.decode(published);
+            if (verified.revision() != document.revision()
+                    || !encoded.equals(RUNTIME_CONFIG_CODEC.encode(verified))) {
+                throw new IllegalStateException("remote runtime configuration verification failed");
+            }
             sSyncedRevision = revision;
             sSyncError = "";
             notifyStateChanged();
