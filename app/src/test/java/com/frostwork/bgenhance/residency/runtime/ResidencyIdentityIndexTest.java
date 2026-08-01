@@ -6,6 +6,11 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import com.frostwork.bgenhance.residency.decision.DecisionDisposition;
+import com.frostwork.bgenhance.residency.decision.DecisionReason;
+import com.frostwork.bgenhance.residency.decision.KillContext;
+import com.frostwork.bgenhance.residency.decision.KillDecision;
+import com.frostwork.bgenhance.residency.decision.ResidencyDecisionEngine;
 import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
 import com.frostwork.bgenhance.residency.model.ResidencyMode;
 import com.frostwork.bgenhance.residency.model.ResidencyPresets;
@@ -19,6 +24,8 @@ public final class ResidencyIdentityIndexTest {
     private static final String UNMANAGED = "com.example.identity.unmanaged";
     private static final int FIRST_UID = 10_201;
     private static final int SHARED_UID = 10_202;
+    private static final int USER_TEN_FIRST_UID = 1_010_201;
+    private static final int USER_TEN_SHARED_UID = 1_010_202;
 
     @Test
     public void resolvesExactPackageBeforeSharedUidPolicyComparison() {
@@ -49,6 +56,24 @@ public final class ResidencyIdentityIndexTest {
         assertEquals(IdentityResolutionStatus.UID_SINGLE_RULE, result.status());
         assertSame(first, result.policy().orElse(null));
         assertTrue(result.candidatePackages().contains(UNMANAGED));
+    }
+
+    @Test
+    public void normalizesFullUidsToAppIdsAcrossUsers() {
+        AppResidencyPolicy first = ResidencyPresets.create(FIRST, ResidencyMode.BALANCED);
+        RuntimeConfigSnapshot snapshot = snapshot(8L, first);
+        ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
+                snapshot, Map.of(FIRST, FIRST_UID));
+
+        ResidencyTarget target = new ResidencyTarget(FIRST, USER_TEN_FIRST_UID, 20_201);
+        ResidencyIdentityResolution packageResult = index.resolve(target);
+        ResidencyIdentityResolution uidResult = index.resolve(
+                ResidencyTarget.forUid(USER_TEN_FIRST_UID));
+
+        assertEquals(IdentityResolutionStatus.EXACT_PACKAGE, packageResult.status());
+        assertEquals(USER_TEN_FIRST_UID, packageResult.target().uid());
+        assertEquals(IdentityResolutionStatus.UID_SINGLE_RULE, uidResult.status());
+        assertEquals(Integer.valueOf(FIRST_UID), index.packageAppIds().get(FIRST));
     }
 
     @Test
@@ -93,7 +118,7 @@ public final class ResidencyIdentityIndexTest {
         AppResidencyPolicy second = ResidencyPresets.create(SECOND, ResidencyMode.LOW_POWER);
         RuntimeConfigSnapshot snapshot = snapshot(10L, first, second);
         ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
-                snapshot, packageUids(SHARED_UID, SHARED_UID));
+                snapshot, packageUids(SHARED_UID, USER_TEN_SHARED_UID));
 
         ResidencyIdentityResolution result = index.resolve(ResidencyTarget.forUid(SHARED_UID));
 
@@ -132,16 +157,37 @@ public final class ResidencyIdentityIndexTest {
     public void indexIsRevisionAwareAndItsMapsAreImmutable() {
         AppResidencyPolicy first = ResidencyPresets.create(FIRST, ResidencyMode.BALANCED);
         RuntimeConfigSnapshot snapshot = snapshot(42L, first);
-        Map<String, Integer> source = packageUids(FIRST_UID, SHARED_UID);
+        Map<String, Integer> source = packageUids(USER_TEN_FIRST_UID, SHARED_UID);
         ResidencyIdentityIndex index = ResidencyIdentityIndex.build(snapshot, source);
         source.clear();
 
         assertEquals(42L, index.policyRevision());
-        assertEquals(Integer.valueOf(FIRST_UID), index.packageUids().get(FIRST));
-        assertThrows(UnsupportedOperationException.class, () -> index.packageUids().clear());
+        assertEquals(Integer.valueOf(FIRST_UID), index.packageAppIds().get(FIRST));
+        assertThrows(UnsupportedOperationException.class, () -> index.packageAppIds().clear());
         assertThrows(
                 UnsupportedOperationException.class,
-                () -> index.uidPackages().get(FIRST_UID).add(UNMANAGED));
+                () -> index.appIdPackages().get(FIRST_UID).add(UNMANAGED));
+    }
+
+    @Test
+    public void invalidatedIndexForcesDecisionLayerToFailOpen() {
+        AppResidencyPolicy first = ResidencyPresets.create(FIRST, ResidencyMode.BALANCED);
+        RuntimeConfigSnapshot snapshot = snapshot(43L, first);
+        ResidencyIdentityIndex invalidated = ResidencyIdentityIndex.invalidated();
+        ResidencyDecisionEngine engine = new ResidencyDecisionEngine(snapshot, invalidated);
+
+        KillDecision decision = engine.decideKill(new KillContext(
+                new ResidencyTarget(FIRST, FIRST_UID, -1),
+                KillContext.Path.OGUARD_KILL));
+
+        assertTrue(invalidated.isInvalidated());
+        assertEquals(-1L, invalidated.policyRevision());
+        assertEquals(KillDecision.Action.ALLOW_SYSTEM, decision.effectiveAction());
+        assertEquals(DecisionDisposition.FAIL_OPEN, decision.trace().disposition());
+        assertEquals(DecisionReason.STALE_IDENTITY_INDEX, decision.trace().reason());
+        assertEquals(
+                IdentityResolutionStatus.NOT_EVALUATED,
+                decision.trace().identity().status());
     }
 
     private static RuntimeConfigSnapshot snapshot(
