@@ -2,43 +2,22 @@ package com.frostwork.bgenhance.hooks.osense;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * Extracts an OSense process identity using only fields already present in the kill callback.
  * Reflection metadata is cached per runtime class; resolution performs no external lookup or I/O.
  */
 public final class OsenseProcessIdentityAdapter {
-    private static final ClassValue<AccessorSet<ProcessInfoAccessors>> PROCESS_INFO_ACCESSORS =
-            new ClassValue<>() {
-                @Override
-                protected AccessorSet<ProcessInfoAccessors> computeValue(Class<?> type) {
-                    return load(type, ProcessInfoAccessors::create);
-                }
-            };
-
-    private static final ClassValue<AccessorSet<GroupAccessors>> GROUP_ACCESSORS =
-            new ClassValue<>() {
-                @Override
-                protected AccessorSet<GroupAccessors> computeValue(Class<?> type) {
-                    return load(type, GroupAccessors::create);
-                }
-            };
-
-    private static final ClassValue<AccessorSet<ProcessRecordAccessors>> PROCESS_RECORD_ACCESSORS =
-            new ClassValue<>() {
-                @Override
-                protected AccessorSet<ProcessRecordAccessors> computeValue(Class<?> type) {
-                    return load(type, ProcessRecordAccessors::create);
-                }
-            };
-
-    private static final ClassValue<AccessorSet<ApplicationInfoAccessors>> APPLICATION_INFO_ACCESSORS =
-            new ClassValue<>() {
-                @Override
-                protected AccessorSet<ApplicationInfoAccessors> computeValue(Class<?> type) {
-                    return load(type, ApplicationInfoAccessors::create);
-                }
-            };
+    private static final AccessorCache<ProcessInfoAccessors> PROCESS_INFO_ACCESSORS =
+            new AccessorCache<>(ProcessInfoAccessors::create);
+    private static final AccessorCache<GroupAccessors> GROUP_ACCESSORS =
+            new AccessorCache<>(GroupAccessors::create);
+    private static final AccessorCache<ProcessRecordAccessors> PROCESS_RECORD_ACCESSORS =
+            new AccessorCache<>(ProcessRecordAccessors::create);
+    private static final AccessorCache<ApplicationInfoAccessors> APPLICATION_INFO_ACCESSORS =
+            new AccessorCache<>(ApplicationInfoAccessors::create);
 
     private OsenseProcessIdentityAdapter() {}
 
@@ -159,6 +138,24 @@ public final class OsenseProcessIdentityAdapter {
 
     private interface AccessorFactory<T> {
         T create(Class<?> type) throws NoSuchFieldException, NoSuchMethodException;
+    }
+
+    private static final class AccessorCache<T> {
+        private final ConcurrentMap<Class<?>, AccessorSet<T>> values =
+                new ConcurrentHashMap<>();
+        private final AccessorFactory<T> factory;
+
+        private AccessorCache(AccessorFactory<T> factory) {
+            this.factory = factory;
+        }
+
+        AccessorSet<T> get(Class<?> type) {
+            AccessorSet<T> cached = values.get(type);
+            if (cached != null) return cached;
+            AccessorSet<T> loaded = load(type, factory);
+            AccessorSet<T> raced = values.putIfAbsent(type, loaded);
+            return raced != null ? raced : loaded;
+        }
     }
 
     private static final class AccessorSet<T> {
