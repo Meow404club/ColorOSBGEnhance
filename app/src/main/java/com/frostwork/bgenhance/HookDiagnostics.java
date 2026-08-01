@@ -38,13 +38,11 @@ public final class HookDiagnostics {
         thread.setDaemon(true);
         return thread;
     });
-    private static volatile int sLastReportedRevision = Integer.MIN_VALUE;
-    private static volatile ConfigReportKey sLastReportedConfig;
+    private static final AtomicReference<ConfigReportState> CURRENT_CONFIG_REPORT =
+            new AtomicReference<>(new ConfigReportState(
+                    Integer.MIN_VALUE, "", "", 0L, ""));
+    private static volatile ConfigReportState sLastReportedConfig;
     private static volatile long sLastConfigReportAt;
-    private static volatile String sLastConfigSource = "";
-    private static volatile String sLastConfigPath = "";
-    private static volatile long sLastConfigLatencyMs;
-    private static volatile String sLastConfigError = "";
 
     static {
         EXECUTOR.setRemoveOnCancelPolicy(true);
@@ -74,25 +72,24 @@ public final class HookDiagnostics {
         reportConfigInternal(revision, source, path, reloadLatencyMs, error, true);
     }
 
-    private static synchronized void reportConfigInternal(
+    private static void reportConfigInternal(
             int revision, String source, String path,
             long reloadLatencyMs, String error, boolean force) {
-        String sourceValue = source == null ? "" : source;
-        String pathValue = path == null ? "" : path;
-        String errorValue = error == null ? "" : error;
-        ConfigReportKey reportKey = new ConfigReportKey(
-                revision, sourceValue, pathValue, errorValue);
-        sLastConfigSource = sourceValue;
-        sLastConfigPath = pathValue;
-        sLastConfigLatencyMs = reloadLatencyMs;
-        sLastConfigError = errorValue;
+        reportConfigInternal(new ConfigReportState(
+                revision,
+                source == null ? "" : source,
+                path == null ? "" : path,
+                reloadLatencyMs,
+                error == null ? "" : error), force);
+    }
 
+    private static synchronized void reportConfigInternal(
+            ConfigReportState report, boolean force) {
+        CURRENT_CONFIG_REPORT.set(report);
         long now = SystemClock.elapsedRealtime();
-        boolean failed = !errorValue.isEmpty();
-        if (!force && !failed && reportKey.equals(sLastReportedConfig)
+        if (!force && report.sameConfigurationAs(sLastReportedConfig)
                 && now - sLastConfigReportAt < 30_000L) return;
-        sLastReportedRevision = revision;
-        sLastReportedConfig = reportKey;
+        sLastReportedConfig = report;
         sLastConfigReportAt = now;
 
         Set<String> processIds = new HashSet<>();
@@ -104,11 +101,11 @@ public final class HookDiagnostics {
         }
         for (String processId : processIds) {
             Bundle extras = processExtrasFor(processId);
-            extras.putInt(BridgeContract.EXTRA_CONFIG_REVISION, revision);
-            extras.putString(BridgeContract.EXTRA_CONFIG_SOURCE, sourceValue);
-            extras.putString(BridgeContract.EXTRA_CONFIG_PATH, pathValue);
-            extras.putLong(BridgeContract.EXTRA_RELOAD_LATENCY, reloadLatencyMs);
-            extras.putString(BridgeContract.EXTRA_ERROR, errorValue);
+            extras.putInt(BridgeContract.EXTRA_CONFIG_REVISION, report.revision);
+            extras.putString(BridgeContract.EXTRA_CONFIG_SOURCE, report.source);
+            extras.putString(BridgeContract.EXTRA_CONFIG_PATH, report.path);
+            extras.putLong(BridgeContract.EXTRA_RELOAD_LATENCY, report.reloadLatencyMs);
+            extras.putString(BridgeContract.EXTRA_ERROR, report.error);
             submitCall(BridgeContract.METHOD_REPORT_CONFIG, extras);
         }
         resendStickyStates();
@@ -239,8 +236,7 @@ public final class HookDiagnostics {
         if (!STICKY_RETRY_SCHEDULED.compareAndSet(false, true)) return;
         EXECUTOR.schedule(() -> {
             STICKY_RETRY_SCHEDULED.set(false);
-            reportConfigInternal(sLastReportedRevision, sLastConfigSource,
-                    sLastConfigPath, sLastConfigLatencyMs, sLastConfigError, true);
+            reportConfigInternal(CURRENT_CONFIG_REPORT.get(), true);
             if (PENDING_EVENTS.get() > 0) scheduleFlush(0L);
         }, FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
@@ -299,33 +295,32 @@ public final class HookDiagnostics {
         }
     }
 
-    static final class ConfigReportKey {
+    static final class ConfigReportState {
         final int revision;
         final String source;
         final String path;
+        final long reloadLatencyMs;
         final String error;
 
-        ConfigReportKey(int revision, String source, String path, String error) {
+        ConfigReportState(
+                int revision,
+                String source,
+                String path,
+                long reloadLatencyMs,
+                String error) {
             this.revision = revision;
             this.source = Objects.requireNonNull(source, "source");
             this.path = Objects.requireNonNull(path, "path");
+            this.reloadLatencyMs = reloadLatencyMs;
             this.error = Objects.requireNonNull(error, "error");
         }
 
-        @Override
-        public boolean equals(Object other) {
-            if (this == other) return true;
-            if (!(other instanceof ConfigReportKey)) return false;
-            ConfigReportKey that = (ConfigReportKey) other;
+        boolean sameConfigurationAs(ConfigReportState that) {
+            if (that == null) return false;
             return revision == that.revision
                     && source.equals(that.source)
                     && path.equals(that.path)
                     && error.equals(that.error);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(revision, source, path, error);
         }
     }
 }
