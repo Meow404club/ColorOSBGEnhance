@@ -16,6 +16,10 @@ import io.github.libxposed.api.XposedModule;
 import java.lang.reflect.Method;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -26,16 +30,24 @@ public final class HookConfig {
     private HookConfig() {}
 
     private static final RuntimeConfigCodec RUNTIME_CONFIG_CODEC = new RuntimeConfigCodec();
+    private static final ScheduledExecutorService CONFIG_EXECUTOR =
+            Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "BgEnhanceHookConfig");
+        thread.setDaemon(true);
+        return thread;
+    });
     private static final AtomicReference<HookRuntimeConfigState> STATE =
             new AtomicReference<>(HookRuntimeConfigState.unavailable(
                     "not_initialized", -1L, 0L));
+    private static final AtomicBoolean RELOAD_ENQUEUED = new AtomicBoolean();
+    private static final AtomicBoolean RELOAD_AGAIN = new AtomicBoolean();
+    private static final AtomicBoolean RETRY_SCHEDULED = new AtomicBoolean();
     private static volatile SharedPreferences sRemotePreferences;
     private static volatile ContentResolver sResolver;
     private static volatile String sPackageName = "";
     private static volatile String sProcessName = "";
     private static volatile String sProcessId = "unknown";
-    private static volatile long sLastReloadAt;
-    private static final long RELOAD_INTERVAL_MS = 2_000L;
+    private static final long RELOAD_RETRY_DELAY_MS = 2_000L;
 
     private static final SharedPreferences.OnSharedPreferenceChangeListener REMOTE_LISTENER =
             HookConfig::onRemotePreferenceChanged;
@@ -52,9 +64,10 @@ public final class HookConfig {
                     ModuleApplication.REMOTE_CONFIG_GROUP);
             sRemotePreferences = remote;
             remote.registerOnSharedPreferenceChangeListener(REMOTE_LISTENER);
-            reloadSnapshot(remote, started);
+            requestReload();
         } catch (Throwable t) {
             markUnavailable(errorText(t), SystemClock.elapsedRealtime() - started);
+            scheduleRetry();
         }
     }
 
@@ -86,12 +99,6 @@ public final class HookConfig {
     }
 
     public static boolean isReady() {
-        if (!STATE.get().available() && sRemotePreferences != null) {
-            long now = SystemClock.elapsedRealtime();
-            if (now - sLastReloadAt >= RELOAD_INTERVAL_MS) {
-                reloadSnapshot(sRemotePreferences);
-            }
-        }
         return STATE.get().available();
     }
 
@@ -126,19 +133,47 @@ public final class HookConfig {
     private static void onRemotePreferenceChanged(
             SharedPreferences preferences, String key) {
         if (preferences == null) return;
+        HookRuntimeConfigState state = STATE.get();
         if (key == null
                 || ModuleSettings.KEY_RUNTIME_CONFIG_JSON.equals(key)
-                || !preferences.contains(ModuleSettings.KEY_RUNTIME_CONFIG_JSON)) {
-            reloadSnapshot(preferences);
+                || !state.available()
+                || "legacy_preferences".equals(state.source())) {
+            requestReload();
         }
     }
 
-    private static void reloadSnapshot(SharedPreferences preferences) {
-        reloadSnapshot(preferences, SystemClock.elapsedRealtime());
+    private static void requestReload() {
+        if (sRemotePreferences == null) return;
+        RELOAD_AGAIN.set(true);
+        if (RELOAD_ENQUEUED.compareAndSet(false, true)) {
+            CONFIG_EXECUTOR.execute(HookConfig::drainReloadRequests);
+        }
     }
 
-    private static synchronized void reloadSnapshot(SharedPreferences preferences, long started) {
-        sLastReloadAt = SystemClock.elapsedRealtime();
+    private static void drainReloadRequests() {
+        try {
+            while (RELOAD_AGAIN.getAndSet(false)) {
+                reloadSnapshot(sRemotePreferences, SystemClock.elapsedRealtime());
+            }
+        } finally {
+            RELOAD_ENQUEUED.set(false);
+            if (RELOAD_AGAIN.get()) requestReload();
+            if (!STATE.get().available()) scheduleRetry();
+        }
+    }
+
+    private static void scheduleRetry() {
+        if (sRemotePreferences == null
+                || !RETRY_SCHEDULED.compareAndSet(false, true)) {
+            return;
+        }
+        CONFIG_EXECUTOR.schedule(() -> {
+            RETRY_SCHEDULED.set(false);
+            if (!STATE.get().available()) requestReload();
+        }, RELOAD_RETRY_DELAY_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private static void reloadSnapshot(SharedPreferences preferences, long started) {
         if (preferences == null) {
             markUnavailable("remote_preferences_unavailable", 0L);
             return;
