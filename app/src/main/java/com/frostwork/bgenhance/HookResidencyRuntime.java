@@ -1,7 +1,12 @@
 package com.frostwork.bgenhance;
 
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.os.Build;
 import com.frostwork.bgenhance.residency.decision.FreezeContext;
 import com.frostwork.bgenhance.residency.decision.FreezeDecision;
 import com.frostwork.bgenhance.residency.decision.KillContext;
@@ -16,6 +21,7 @@ import com.frostwork.bgenhance.residency.decision.WakeDecision;
 import com.frostwork.bgenhance.residency.runtime.AndroidPackageUidSource;
 import com.frostwork.bgenhance.residency.runtime.HookRuntimeConfigState;
 import com.frostwork.bgenhance.residency.runtime.ResidencyIdentityIndex;
+import com.frostwork.bgenhance.residency.runtime.ResidencyPackageChangeFilter;
 import com.frostwork.bgenhance.residency.runtime.ResidencyRuntimeController;
 import com.frostwork.bgenhance.residency.runtime.ResidencyRuntimeState;
 import com.frostwork.bgenhance.residency.runtime.RuntimeConfigSnapshot;
@@ -35,13 +41,26 @@ public final class HookResidencyRuntime {
             new ResidencyDecisionEngine(
                     RuntimeConfigSnapshot.unavailable(0L),
                     ResidencyIdentityIndex.invalidated());
+    private static final BroadcastReceiver PACKAGE_CHANGE_RECEIVER = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            Uri data = intent == null ? null : intent.getData();
+            String packageName = data == null ? null : data.getSchemeSpecificPart();
+            RuntimeConfigSnapshot snapshot = CONTROLLER.state().snapshot();
+            if (ResidencyPackageChangeFilter.shouldInvalidate(packageName, snapshot)) {
+                CONTROLLER.invalidateIdentities();
+            }
+        }
+    };
     private static PackageManager sPackageManager;
+    private static boolean sPackageReceiverRegistered;
 
     public static synchronized void attach(Context context) {
         if (context == null) return;
         Context application = context.getApplicationContext();
         Context host = application != null ? application : context;
         try {
+            ensurePackageReceiver(host);
             PackageManager packageManager = host.getPackageManager();
             if (packageManager == sPackageManager) return;
             CONTROLLER.setPackageUidSource(
@@ -50,6 +69,24 @@ public final class HookResidencyRuntime {
         } catch (Throwable error) {
             ModuleLog.w("residency identity source attach failed: " + error);
         }
+    }
+
+    private static void ensurePackageReceiver(Context context) {
+        if (sPackageReceiverRegistered) return;
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_PACKAGE_ADDED);
+        filter.addAction(Intent.ACTION_PACKAGE_REMOVED);
+        filter.addAction(Intent.ACTION_PACKAGE_REPLACED);
+        filter.addAction(Intent.ACTION_PACKAGE_FULLY_REMOVED);
+        filter.addAction(Intent.ACTION_PACKAGE_CHANGED);
+        filter.addDataScheme("package");
+        if (Build.VERSION.SDK_INT >= 33) {
+            context.registerReceiver(
+                    PACKAGE_CHANGE_RECEIVER, filter, Context.RECEIVER_EXPORTED);
+        } else {
+            context.registerReceiver(PACKAGE_CHANGE_RECEIVER, filter);
+        }
+        sPackageReceiverRegistered = true;
     }
 
     public static void updateConfig(HookRuntimeConfigState state) {

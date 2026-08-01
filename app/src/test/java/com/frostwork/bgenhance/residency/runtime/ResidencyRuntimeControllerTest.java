@@ -128,6 +128,31 @@ public final class ResidencyRuntimeControllerTest {
         assertFailOpen(controller);
     }
 
+    @Test
+    public void packageInvalidationFailsOpenBeforeRebuildingNewAppId() {
+        QueuedExecutor executor = new QueuedExecutor();
+        ResidencyRuntimeController controller = new ResidencyRuntimeController(executor);
+        AtomicInteger uid = new AtomicInteger(UID);
+        controller.setPackageUidSource(
+                packageName -> OptionalInt.of(uid.get()));
+        controller.updateConfig(snapshot(1L, 6L, true));
+        executor.runNext();
+        assertTrue(controller.state().ready());
+
+        uid.set(UID + 1);
+        controller.invalidateIdentities();
+
+        assertEquals(
+                ResidencyRuntimeState.Status.IDENTITY_REBUILD_PENDING,
+                controller.state().status());
+        assertFailOpen(controller);
+        executor.runNext();
+        assertTrue(controller.state().ready());
+        assertEquals(
+                Integer.valueOf(UID + 1),
+                controller.state().identityIndex().packageAppIds().get(PACKAGE));
+    }
+
     private static void assertFailOpen(ResidencyRuntimeController controller) {
         KillDecision decision = controller.decideKill(killContext());
         assertEquals(KillDecision.Action.ALLOW_SYSTEM, decision.effectiveAction());
