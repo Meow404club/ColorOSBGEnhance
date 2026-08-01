@@ -239,24 +239,24 @@ public final class SettingsActivity extends AppCompatActivity {
         boolean athenaSynced = athenaCurrent && athena.configRevision >= revision;
 
         if (!ModuleApplication.isServiceConnected()) {
-            setEffectNotice(R.string.effect_config_service_waiting, false);
+            showEffectWarning(R.string.effect_config_service_waiting);
         } else if (!ModuleApplication.isConfigSynced(this)) {
-            setEffectNotice(R.string.effect_config_pending, false);
+            showEffectWarning(R.string.effect_config_pending);
         } else if (systemCurrent && athenaCurrent && systemSynced && athenaSynced
                 && installedHooks >= 3) {
-            setEffectNotice(R.string.effect_no_restart_required, true);
+            effectNotice.setVisibility(View.GONE);
         } else if ((systemCurrent && !systemSynced) || (athenaCurrent && !athenaSynced)) {
-            setEffectNotice(R.string.effect_config_pending, false);
+            showEffectWarning(R.string.effect_config_pending);
         } else {
-            setEffectNotice(R.string.effect_restart_required, false);
+            showEffectWarning(R.string.effect_restart_required);
         }
     }
 
-    private void setEffectNotice(int textRes, boolean info) {
+    private void showEffectWarning(int textRes) {
+        effectNotice.setVisibility(View.VISIBLE);
         effectNotice.setText(textRes);
-        effectNotice.setTextColor(getColor(info ? R.color.brand : R.color.banner_warning_text));
-        effectNotice.setBackgroundResource(info
-                ? R.drawable.bg_notice_info : R.drawable.bg_notice_warning);
+        effectNotice.setTextColor(getColor(R.color.banner_warning_text));
+        effectNotice.setBackgroundResource(R.drawable.bg_notice_warning);
     }
 
     private void refreshNavigationCounts() {
