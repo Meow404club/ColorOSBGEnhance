@@ -21,6 +21,23 @@ public final class OsenseProcessIdentityAdapter {
 
     private OsenseProcessIdentityAdapter() {}
 
+    /** Resolves and caches every declared accessor before a system lock callback can run. */
+    public static boolean prepare(Class<?> processInfoType) {
+        if (processInfoType == null) return false;
+        AccessorSet<ProcessInfoAccessors> processInfoSet =
+                PROCESS_INFO_ACCESSORS.get(processInfoType);
+        if (!processInfoSet.isReady()) return false;
+
+        ProcessInfoAccessors processInfo = processInfoSet.accessors;
+        AccessorSet<GroupAccessors> groupSet =
+                GROUP_ACCESSORS.get(processInfo.group.getType());
+        AccessorSet<ProcessRecordAccessors> processRecordSet =
+                PROCESS_RECORD_ACCESSORS.get(processInfo.processRecord.getType());
+        if (!groupSet.isReady() || !processRecordSet.isReady()) return false;
+        return APPLICATION_INFO_ACCESSORS.get(
+                processRecordSet.accessors.applicationInfo.getType()).isReady();
+    }
+
     public static OsenseProcessIdentityResolution resolve(Object processInfo) {
         if (processInfo == null) {
             return unresolved(OsenseProcessIdentityFailure.NULL_PROCESS_INFO);
@@ -152,6 +169,15 @@ public final class OsenseProcessIdentityAdapter {
         AccessorSet<T> get(Class<?> type) {
             AccessorSet<T> cached = values.get(type);
             if (cached != null) return cached;
+            for (Class<?> current = type.getSuperclass();
+                    current != null;
+                    current = current.getSuperclass()) {
+                AccessorSet<T> inherited = values.get(current);
+                if (inherited != null && inherited.isReady()) {
+                    AccessorSet<T> raced = values.putIfAbsent(type, inherited);
+                    return raced != null ? raced : inherited;
+                }
+            }
             AccessorSet<T> loaded = load(type, factory);
             AccessorSet<T> raced = values.putIfAbsent(type, loaded);
             return raced != null ? raced : loaded;

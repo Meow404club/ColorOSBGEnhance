@@ -10,6 +10,7 @@ import com.frostwork.bgenhance.hooks.MemoryGuardHook;
 import com.frostwork.bgenhance.hooks.NirvanaHook;
 import com.frostwork.bgenhance.hooks.OguardForceStopHook;
 import com.frostwork.bgenhance.hooks.OguardKillHook;
+import com.frostwork.bgenhance.hooks.OsenseProcessKillHook;
 import com.frostwork.bgenhance.hooks.TournamentHook;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -28,6 +29,7 @@ public final class FeatureHookTargetIdsTest {
                 new TournamentHook(),
                 new MemoryGuardHook(),
                 new NirvanaHook(),
+                new OsenseProcessKillHook(),
                 new HansFreezeHook()
         );
         List<String> actual = new ArrayList<>();

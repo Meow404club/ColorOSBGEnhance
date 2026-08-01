@@ -15,6 +15,7 @@ public final class HookTargetIds {
     public static final String TOURNAMENT = "tournament";
     public static final String MEMORY_GUARD_DISPATCH = "memory_guard_dispatch";
     public static final String OSENSE_GROUP_CLEAN = "osense_group_clean";
+    public static final String OSENSE_PROCESS_KILL = "osense_process_kill";
     public static final String HANS_FREEZE_DISPATCH = "hans_freeze_dispatch";
 
     private static final List<String> ALL = Collections.unmodifiableList(Arrays.asList(
@@ -25,6 +26,7 @@ public final class HookTargetIds {
             TOURNAMENT,
             MEMORY_GUARD_DISPATCH,
             OSENSE_GROUP_CLEAN,
+            OSENSE_PROCESS_KILL,
             HANS_FREEZE_DISPATCH
     ));
 

@@ -8,6 +8,7 @@ import com.frostwork.bgenhance.hooks.MemoryGuardHook;
 import com.frostwork.bgenhance.hooks.NirvanaHook;
 import com.frostwork.bgenhance.hooks.OguardForceStopHook;
 import com.frostwork.bgenhance.hooks.OguardKillHook;
+import com.frostwork.bgenhance.hooks.OsenseProcessKillHook;
 import com.frostwork.bgenhance.hooks.TournamentHook;
 import io.github.libxposed.api.XposedModule;
 import io.github.libxposed.api.XposedModuleInterface;
@@ -46,6 +47,7 @@ public final class MainHook extends XposedModule {
             FeatureRegistry.install(new OguardKillHook(), loader);
             FeatureRegistry.install(new OguardForceStopHook(), loader);
             FeatureRegistry.install(new NirvanaHook(), loader);
+            FeatureRegistry.install(new OsenseProcessKillHook(), loader);
             FeatureRegistry.install(new HansFreezeHook(), loader);
             HookConfig.ensureDiagnosticsContext();
             HookDiagnostics.reportProcess("FEATURES_INSTALLED", null);

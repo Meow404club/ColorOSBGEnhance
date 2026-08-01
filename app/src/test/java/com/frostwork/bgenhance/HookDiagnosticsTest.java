@@ -4,6 +4,9 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
+import java.lang.reflect.Field;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.Test;
 
 public final class HookDiagnosticsTest {
@@ -41,6 +44,23 @@ public final class HookDiagnosticsTest {
 
         assertTrue(first.sameConfigurationAs(retry));
         assertNotEquals(first.reloadLatencyMs, retry.reloadLatencyMs);
+    }
+
+    @Test
+    public void lockedPathEventDoesNotScheduleExecutorWork() throws Exception {
+        Field field = HookDiagnostics.class.getDeclaredField("FLUSH_SCHEDULED");
+        field.setAccessible(true);
+        AtomicBoolean scheduled = (AtomicBoolean) field.get(null);
+        scheduled.set(false);
+
+        HookDiagnostics.recordEventFromLockedPath(
+                new HookEvent("osense_per_process", 1024, -1, "", "", ""),
+                "fail_open");
+
+        assertFalse(scheduled.get());
+        Field pendingField = HookDiagnostics.class.getDeclaredField("PENDING_EVENTS");
+        pendingField.setAccessible(true);
+        ((AtomicInteger) pendingField.get(null)).set(0);
     }
 
     private static HookDiagnostics.ConfigReportState state(

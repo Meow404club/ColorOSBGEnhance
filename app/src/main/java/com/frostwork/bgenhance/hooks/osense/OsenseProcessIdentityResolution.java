@@ -36,7 +36,15 @@ public final class OsenseProcessIdentityResolution {
         return Optional.ofNullable(identity);
     }
 
+    public OsenseProcessIdentity identityOrNull() {
+        return identity;
+    }
+
     public Optional<OsenseProcessIdentityFailure> failure() {
         return Optional.ofNullable(failure);
+    }
+
+    public OsenseProcessIdentityFailure failureOrNull() {
+        return failure;
     }
 }

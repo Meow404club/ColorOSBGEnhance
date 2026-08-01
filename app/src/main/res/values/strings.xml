@@ -82,6 +82,7 @@
     <string name="game_low_free_title">游戏低内存保护</string>
     <string name="game_low_free_summary">游戏需要更多内存时，尽量保留其他后台应用</string>
     <string name="game_low_free_detail">适用场景：游戏需要更多可用内存</string>
+    <string name="osense_per_process_title">其他系统内存清理</string>
 
     <string name="freeze_page_title">后台冻结</string>
     <string name="freeze_page_subtitle">冻结可能导致消息延迟或应用暂时无响应</string>

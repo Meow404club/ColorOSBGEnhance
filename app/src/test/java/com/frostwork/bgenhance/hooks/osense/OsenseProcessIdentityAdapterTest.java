@@ -29,6 +29,14 @@ public final class OsenseProcessIdentityAdapterTest {
     }
 
     @Test
+    public void prewarmsAllIdentityAccessors() {
+        assertTrue(OsenseProcessIdentityAdapter.prepare(BaseProcessInfoFixture.class));
+        assertTrue(OsenseProcessIdentityAdapter.resolve(new InheritedProcessInfoFixture(
+                UID, PID, PROCESS_NAME, PACKAGE_NAME, PACKAGE_NAME)).isResolved());
+        assertFalse(OsenseProcessIdentityAdapter.prepare(MissingFieldProcessInfoFixture.class));
+    }
+
+    @Test
     public void resolvesFieldsAndGetterDeclaredBySuperclass() {
         InheritedProcessInfoFixture fixture = new InheritedProcessInfoFixture(
                 UID, PID, PROCESS_NAME, PACKAGE_NAME, PACKAGE_NAME);

@@ -73,13 +73,13 @@ public final class FeatureCatalog {
     );
 
     private static final List<FeatureSpec> NIRVANA = Arrays.asList(
-            new FeatureSpec(FeatureIds.NIRVANA, HookTargetIds.OSENSE_GROUP_CLEAN,
+            new FeatureSpec(FeatureIds.NIRVANA, HookTargetIds.OSENSE_PROCESS_KILL,
                     ModuleSettings.KEY_NIRVANA, R.string.nirvana_title,
                     R.string.nirvana_summary, R.string.nirvana_detail, Risk.VERY_HIGH, false, false),
-            new FeatureSpec(FeatureIds.CAMERA_LOW_FREE, HookTargetIds.OSENSE_GROUP_CLEAN,
+            new FeatureSpec(FeatureIds.CAMERA_LOW_FREE, HookTargetIds.OSENSE_PROCESS_KILL,
                     ModuleSettings.KEY_CAMERA_LOW_FREE, R.string.camera_low_free_title,
                     R.string.camera_low_free_summary, R.string.camera_low_free_detail, Risk.VERY_HIGH, false, false),
-            new FeatureSpec(FeatureIds.GAME_LOW_FREE, HookTargetIds.OSENSE_GROUP_CLEAN,
+            new FeatureSpec(FeatureIds.GAME_LOW_FREE, HookTargetIds.OSENSE_PROCESS_KILL,
                     ModuleSettings.KEY_GAME_LOW_FREE, R.string.game_low_free_title,
                     R.string.game_low_free_summary, R.string.game_low_free_detail, Risk.VERY_HIGH, true, false)
     );

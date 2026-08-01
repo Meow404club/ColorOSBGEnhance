@@ -45,8 +45,16 @@ public final class HookDiagnostics {
     private static volatile long sLastConfigReportAt;
 
     static {
+        for (String featureId : FeatureIds.all()) {
+            COUNTERS.put(featureId, new Counter());
+        }
         EXECUTOR.setRemoveOnCancelPolicy(true);
         EXECUTOR.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+        EXECUTOR.scheduleWithFixedDelay(
+                HookDiagnostics::flushPendingFromPeriodicTask,
+                FLUSH_INTERVAL_MS,
+                FLUSH_INTERVAL_MS,
+                TimeUnit.MILLISECONDS);
     }
 
     public static void reportProcess(String stage, Throwable error) {
@@ -120,8 +128,21 @@ public final class HookDiagnostics {
     }
 
     public static void recordEvent(HookEvent event, String result) {
+        recordEvent(event, result, true);
+    }
+
+    /** Updates prebuilt counters without scheduling work while a system lock is held. */
+    public static void recordEventFromLockedPath(HookEvent event, String result) {
+        recordEvent(event, result, false);
+    }
+
+    private static void recordEvent(
+            HookEvent event, String result, boolean scheduleImmediately) {
         if (event == null || event.feature == null || event.feature.isEmpty()) return;
-        Counter counter = COUNTERS.computeIfAbsent(event.feature, key -> new Counter());
+        Counter counter = COUNTERS.get(event.feature);
+        if (counter == null) {
+            counter = COUNTERS.computeIfAbsent(event.feature, key -> new Counter());
+        }
         counter.observed.incrementAndGet();
         if ("blocked".equals(result)) counter.blocked.incrementAndGet();
         if ("config_unavailable".equals(result) || "fail_open".equals(result)) {
@@ -129,7 +150,17 @@ public final class HookDiagnostics {
         }
         counter.last.set(new LastEvent(event, result, System.currentTimeMillis()));
         int pending = PENDING_EVENTS.incrementAndGet();
-        scheduleFlush(pending >= FLUSH_EVENT_THRESHOLD ? 0L : FLUSH_INTERVAL_MS);
+        if (scheduleImmediately) {
+            scheduleFlush(pending >= FLUSH_EVENT_THRESHOLD ? 0L : FLUSH_INTERVAL_MS);
+        }
+    }
+
+    private static void flushPendingFromPeriodicTask() {
+        try {
+            if (PENDING_EVENTS.get() > 0) flushSnapshot();
+        } catch (Throwable error) {
+            Log.w(ModuleSettings.TAG, "periodic diagnostics flush failed: " + error);
+        }
     }
 
     private static void resendStickyStates() {

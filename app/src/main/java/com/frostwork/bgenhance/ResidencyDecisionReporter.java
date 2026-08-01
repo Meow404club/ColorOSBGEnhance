@@ -9,10 +9,25 @@ public final class ResidencyDecisionReporter {
     private ResidencyDecisionReporter() {}
 
     public static void recordKill(HookEvent event, KillDecision decision) {
+        recordKill(event, decision, true);
+    }
+
+    /** Records only in-memory diagnostics for callbacks that already hold system locks. */
+    public static void recordKillFromLockedPath(HookEvent event, KillDecision decision) {
+        recordKill(event, decision, false);
+    }
+
+    private static void recordKill(
+            HookEvent event, KillDecision decision, boolean writeLog) {
         if (event == null || decision == null) return;
         String result = resultFor(decision);
         try {
-            HookDiagnostics.recordEvent(event, result);
+            if (writeLog) {
+                HookDiagnostics.recordEvent(event, result);
+            } else {
+                HookDiagnostics.recordEventFromLockedPath(event, result);
+            }
+            if (!writeLog) return;
             DecisionTrace trace = decision.trace();
             ModuleLog.d(event
                     + " result=" + result
@@ -23,7 +38,9 @@ public final class ResidencyDecisionReporter {
                     + " policyRevision=" + trace.policyRevision()
                     + " identityRevision=" + trace.identityIndexRevision());
         } catch (Throwable error) {
-            ModuleLog.w("residency decision diagnostics failed: " + error);
+            if (writeLog) {
+                ModuleLog.w("residency decision diagnostics failed: " + error);
+            }
         }
     }
 

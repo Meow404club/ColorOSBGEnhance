@@ -1,13 +1,11 @@
 package com.frostwork.bgenhance.hooks;
 
 import android.os.Bundle;
-import com.frostwork.bgenhance.Decision;
 import com.frostwork.bgenhance.FeatureHook;
 import com.frostwork.bgenhance.FeatureIds;
-import com.frostwork.bgenhance.HookEvent;
 import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.HookUtils;
-import com.frostwork.bgenhance.ModuleSettings;
+import com.frostwork.bgenhance.ModuleLog;
 import java.lang.reflect.Method;
 
 public final class NirvanaHook implements FeatureHook {
@@ -25,11 +23,8 @@ public final class NirvanaHook implements FeatureHook {
             String scene = bundle.getString("scene", "");
             Mapping mapping = map(scene);
             if (mapping == null) return chain.proceed();
-            String pkg = bundle.getString("packageName", bundle.getString("pkg", ""));
-            int uid = bundle.getInt("uid", -1);
-            HookEvent event = new HookEvent(
-                    mapping.featureId, mapping.code, uid, pkg, "", scene);
-            if (Decision.shouldBlock(mapping.prefKey, event)) return false;
+            ModuleLog.d("osense scene request feature=" + mapping.featureId
+                    + " code=" + mapping.code + " scene=" + scene);
             return chain.proceed();
         });
         return status(count);
@@ -43,11 +38,11 @@ public final class NirvanaHook implements FeatureHook {
 
     private Mapping map(String scene) {
         if ("NirvanaLowFree".equals(scene))
-            return new Mapping(FeatureIds.NIRVANA, ModuleSettings.KEY_NIRVANA, 1026);
+            return new Mapping(FeatureIds.NIRVANA, 1026);
         if ("CamLowFree".equals(scene))
-            return new Mapping(FeatureIds.CAMERA_LOW_FREE, ModuleSettings.KEY_CAMERA_LOW_FREE, 1028);
+            return new Mapping(FeatureIds.CAMERA_LOW_FREE, 1028);
         if ("GameLowFree".equals(scene))
-            return new Mapping(FeatureIds.GAME_LOW_FREE, ModuleSettings.KEY_GAME_LOW_FREE, 1029);
+            return new Mapping(FeatureIds.GAME_LOW_FREE, 1029);
         return null;
     }
 
@@ -57,9 +52,9 @@ public final class NirvanaHook implements FeatureHook {
     }
 
     private static final class Mapping {
-        final String featureId; final String prefKey; final int code;
-        Mapping(String featureId, String prefKey, int code) {
-            this.featureId = featureId; this.prefKey = prefKey; this.code = code;
+        final String featureId; final int code;
+        Mapping(String featureId, int code) {
+            this.featureId = featureId; this.code = code;
         }
     }
 }

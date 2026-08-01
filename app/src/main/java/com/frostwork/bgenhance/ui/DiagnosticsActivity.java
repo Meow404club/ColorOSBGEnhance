@@ -76,6 +76,8 @@ public final class DiagnosticsActivity extends AppCompatActivity {
             new SupportItem(R.string.tournament_title, HookTargetIds.TOURNAMENT),
             new SupportItem(R.string.memory_nav_title, HookTargetIds.MEMORY_GUARD_DISPATCH),
             new SupportItem(R.string.nirvana_nav_title, HookTargetIds.OSENSE_GROUP_CLEAN),
+            new SupportItem(R.string.osense_per_process_title,
+                    HookTargetIds.OSENSE_PROCESS_KILL),
             new SupportItem(R.string.freeze_nav_title, HookTargetIds.HANS_FREEZE_DISPATCH)
     );
 
@@ -97,7 +99,9 @@ public final class DiagnosticsActivity extends AppCompatActivity {
             new StatGroup(R.string.stats_group_nirvana,
                     new StatItem(R.string.nirvana_title, FeatureIds.NIRVANA),
                     new StatItem(R.string.camera_low_free_title, FeatureIds.CAMERA_LOW_FREE),
-                    new StatItem(R.string.game_low_free_title, FeatureIds.GAME_LOW_FREE)),
+                    new StatItem(R.string.game_low_free_title, FeatureIds.GAME_LOW_FREE),
+                    new StatItem(R.string.osense_per_process_title,
+                            FeatureIds.OSENSE_PER_PROCESS)),
             new StatGroup(R.string.stats_group_freeze,
                     new StatItem(R.string.hans_title, FeatureIds.HANS),
                     new StatItem(R.string.super_freeze_title, FeatureIds.SUPER_FREEZE),
