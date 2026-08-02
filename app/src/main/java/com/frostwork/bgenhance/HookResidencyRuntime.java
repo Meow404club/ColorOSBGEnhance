@@ -24,11 +24,15 @@ import com.frostwork.bgenhance.residency.decision.WakeContext;
 import com.frostwork.bgenhance.residency.decision.WakeDecision;
 import com.frostwork.bgenhance.residency.runtime.AndroidPackageUidSource;
 import com.frostwork.bgenhance.residency.runtime.HookRuntimeConfigState;
+import com.frostwork.bgenhance.residency.runtime.PackageUidSource;
 import com.frostwork.bgenhance.residency.runtime.ResidencyIdentityIndex;
 import com.frostwork.bgenhance.residency.runtime.ResidencyPackageChangeFilter;
 import com.frostwork.bgenhance.residency.runtime.ResidencyRuntimeController;
 import com.frostwork.bgenhance.residency.runtime.ResidencyRuntimeState;
 import com.frostwork.bgenhance.residency.runtime.RuntimeConfigSnapshot;
+import java.util.Collections;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.Executors;
 
 /** Process-local facade used by hooks; all platform identity work stays on a background thread. */
@@ -57,6 +61,7 @@ public final class HookResidencyRuntime {
         }
     };
     private static PackageManager sPackageManager;
+    private static volatile PackageUidSource sPackageUidSource;
     private static boolean sPackageReceiverRegistered;
 
     public static synchronized void attach(Context context) {
@@ -67,8 +72,9 @@ public final class HookResidencyRuntime {
             ensurePackageReceiver(host);
             PackageManager packageManager = host.getPackageManager();
             if (packageManager == sPackageManager) return;
-            CONTROLLER.setPackageUidSource(
-                    new AndroidPackageUidSource(packageManager));
+            PackageUidSource source = new AndroidPackageUidSource(packageManager);
+            sPackageUidSource = source;
+            CONTROLLER.setPackageUidSource(source);
             sPackageManager = packageManager;
         } catch (Throwable error) {
             ModuleLog.w("residency identity source attach failed: " + error);
@@ -107,6 +113,26 @@ public final class HookResidencyRuntime {
     }
 
     public static ResidencyRuntimeState state() { return CONTROLLER.state(); }
+
+    /** Performs a fresh full-UID ownership check from a dedicated background worker. */
+    public static Set<String> findPackagesForUidForRecovery(int uid) {
+        if (uid < 0) throw new IllegalArgumentException("uid < 0");
+        PackageUidSource source = sPackageUidSource;
+        if (source == null || !source.hasCompleteUidEnumeration()) {
+            throw new IllegalStateException("complete UID package source unavailable");
+        }
+        Set<String> resolved = source.findPackagesForUid(uid);
+        if (resolved == null || resolved.isEmpty()) return Collections.emptySet();
+        TreeSet<String> packages = new TreeSet<>();
+        for (String packageName : resolved) {
+            if (packageName == null || packageName.isEmpty()) {
+                throw new IllegalStateException("invalid package name for UID");
+            }
+            packages.add(packageName);
+        }
+        return Collections.unmodifiableSet(packages);
+    }
+
     public static KillDecision decideKill(KillContext context) {
         return decisionEngine().decideKill(context);
     }

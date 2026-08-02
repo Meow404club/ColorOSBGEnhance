@@ -12,6 +12,7 @@ public final class DiagnosticsResultTest {
         assertTrue(DiagnosticsResult.countsAsBlocked(DiagnosticsResult.THROTTLE_BLOCKED));
         assertFalse(DiagnosticsResult.countsAsBlocked(DiagnosticsResult.PASSED));
         assertFalse(DiagnosticsResult.countsAsBlocked(DiagnosticsResult.THROTTLE_ALLOWED));
+        assertFalse(DiagnosticsResult.countsAsBlocked(DiagnosticsResult.RECOVERED));
     }
 
     @Test
@@ -21,5 +22,7 @@ public final class DiagnosticsResultTest {
         assertTrue(DiagnosticsResult.countsAsFailOpen(DiagnosticsResult.RUNTIME_FAIL_OPEN));
         assertFalse(DiagnosticsResult.countsAsFailOpen(DiagnosticsResult.PASSED));
         assertFalse(DiagnosticsResult.countsAsFailOpen(DiagnosticsResult.THROTTLE_BLOCKED));
+        assertFalse(DiagnosticsResult.countsAsFailOpen(DiagnosticsResult.NO_ACTION_NEEDED));
+        assertFalse(DiagnosticsResult.countsAsFailOpen(DiagnosticsResult.SAFETY_ABORTED));
     }
 }

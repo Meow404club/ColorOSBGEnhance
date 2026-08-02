@@ -34,7 +34,8 @@ public final class FeatureIdsTest {
                 "super_freeze",
                 "android_freeze",
                 "hans_resource",
-                "hans_refreeze"
+                "hans_refreeze",
+                "hans_recovery"
         ), FeatureIds.all());
     }
 

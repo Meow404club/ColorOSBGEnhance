@@ -94,7 +94,9 @@ public final class DiagnosticsActivity extends AppCompatActivity {
             new SupportItem(R.string.alarm_wake_delivery_support_title,
                     HookTargetIds.ALARM_WAKE_DELIVERY),
             new SupportItem(R.string.hans_resource_support_title,
-                    HookTargetIds.HANS_RESOURCE_DISPATCH)
+                    HookTargetIds.HANS_RESOURCE_DISPATCH),
+            new SupportItem(R.string.hans_recovery_support_title,
+                    HookTargetIds.HANS_ACTIVE_RECOVERY)
     );
 
 
@@ -125,6 +127,8 @@ public final class DiagnosticsActivity extends AppCompatActivity {
                             FeatureIds.HANS_RESOURCE),
                     new StatItem(R.string.hans_refreeze_stats_title,
                             FeatureIds.HANS_REFREEZE),
+                    new StatItem(R.string.hans_recovery_stats_title,
+                            FeatureIds.HANS_RECOVERY),
                     new StatItem(R.string.super_freeze_title, FeatureIds.SUPER_FREEZE),
                     new StatItem(R.string.android_freeze_title, FeatureIds.ANDROID_FREEZE, true))
     );
@@ -422,6 +426,15 @@ public final class DiagnosticsActivity extends AppCompatActivity {
         }
         if (DiagnosticsResult.RUNTIME_FAIL_OPEN.equals(result)) {
             return getString(R.string.result_runtime_fail_open);
+        }
+        if (DiagnosticsResult.RECOVERED.equals(result)) {
+            return getString(R.string.result_recovered);
+        }
+        if (DiagnosticsResult.NO_ACTION_NEEDED.equals(result)) {
+            return getString(R.string.result_no_action_needed);
+        }
+        if (DiagnosticsResult.SAFETY_ABORTED.equals(result)) {
+            return getString(R.string.result_safety_aborted);
         }
         return getString(R.string.result_unknown, result);
     }

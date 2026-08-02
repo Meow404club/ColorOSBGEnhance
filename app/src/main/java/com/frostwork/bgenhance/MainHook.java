@@ -5,6 +5,7 @@ import com.frostwork.bgenhance.hooks.AlarmWakeHook;
 import com.frostwork.bgenhance.hooks.AthenaPeriodicHook;
 import com.frostwork.bgenhance.hooks.FastClearHook;
 import com.frostwork.bgenhance.hooks.HansExemptionHook;
+import com.frostwork.bgenhance.hooks.HansActiveRecoveryHook;
 import com.frostwork.bgenhance.hooks.HansFreezeHook;
 import com.frostwork.bgenhance.hooks.HansResourceHook;
 import com.frostwork.bgenhance.hooks.HansRefreezeHook;
@@ -97,7 +98,8 @@ public final class MainHook extends XposedModule {
                 HansTimingHook.rToM(),
                 new HansRefreezeHook(),
                 HansExemptionHook.core(),
-                HansExemptionHook.lcdOn()));
+                HansExemptionHook.lcdOn(),
+                new HansActiveRecoveryHook()));
     }
 
     static List<FeatureHook> athenaHooks() {

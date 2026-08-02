@@ -3,6 +3,8 @@ package com.frostwork.bgenhance;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import com.frostwork.bgenhance.hooks.HansActiveRecoveryHook;
+
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -24,5 +26,11 @@ public final class FeatureHookTargetIdsTest {
         assertEquals(new HashSet<>(HookTargetIds.all()), new HashSet<>(actual));
         assertEquals(HookTargetIds.all().size(), actual.size());
         assertEquals(actual.size(), new HashSet<>(actual).size());
+    }
+
+    @Test
+    public void activeRecoveryInstallsAfterEveryHansBehaviorGate() {
+        List<FeatureHook> hooks = MainHook.systemServerHooks();
+        assertTrue(hooks.get(hooks.size() - 1) instanceof HansActiveRecoveryHook);
     }
 }

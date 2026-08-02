@@ -47,7 +47,7 @@ public final class HansRefreezeHook implements FeatureHook {
     private static final long RECOVERY_CONFIRMATION_TIMEOUT_MS = 2_000L;
     private static final ScheduledExecutorService RECOVERY_SERVICE =
             Executors.newSingleThreadScheduledExecutor(runnable -> {
-        Thread thread = new Thread(runnable, "BgEnhanceHansRecovery");
+        Thread thread = new Thread(runnable, "BgEnhanceHansRefreeze");
         thread.setDaemon(true);
         return thread;
     });

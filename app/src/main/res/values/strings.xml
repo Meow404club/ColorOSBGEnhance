@@ -99,6 +99,8 @@
     <string name="hans_resource_support_title">后台资源保留控制</string>
     <string name="hans_resource_stats_title">后台资源保留</string>
     <string name="hans_refreeze_stats_title">再次冻结控制</string>
+    <string name="hans_recovery_support_title">后台状态恢复</string>
+    <string name="hans_recovery_stats_title">后台状态恢复</string>
     <string name="super_freeze_title">深度冻结保护</string>
     <string name="super_freeze_summary">减少系统对后台应用的深度冻结；可能明显增加耗电</string>
     <string name="super_freeze_detail">影响：后台应用保持运行的时间可能更长</string>
@@ -195,6 +197,9 @@
     <string name="result_fail_open">条件无法确认，已安全放行</string>
     <string name="result_throttle_allowed">已按间隔放行</string>
     <string name="result_throttle_blocked">间隔内重复唤醒，已阻止</string>
+    <string name="result_recovered">已恢复后台状态</string>
+    <string name="result_no_action_needed">无需恢复</string>
+    <string name="result_safety_aborted">目标身份无法安全确认，已停止恢复</string>
     <string name="result_runtime_fail_open">运行状态无法确认，已安全放行</string>
     <string name="result_unknown_short">未知错误</string>
 
