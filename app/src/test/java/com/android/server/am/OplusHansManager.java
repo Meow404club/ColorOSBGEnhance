@@ -61,6 +61,21 @@ public class OplusHansManager {
             String rpcName,
             int code) {}
 
+    public boolean checkAlarmIfRestricted(
+            int uid, String packageName, String action) {
+        return false;
+    }
+
+    public static boolean checkAlarmIfRestricted(
+            Integer uid, String packageName, String action) {
+        return true;
+    }
+
+    public int checkAlarmIfRestricted(
+            int uid, CharSequence packageName, String action) {
+        return -1;
+    }
+
     public static boolean isHansCoreApp(Integer uid, String packageName) {
         return true;
     }
