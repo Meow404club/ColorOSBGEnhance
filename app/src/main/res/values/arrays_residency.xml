@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="residency_mode_filters">
+        <item>全部模式</item>
+        <item>系统管理</item>
+        <item>均衡</item>
+        <item>低功耗</item>
+        <item>活跃</item>
+        <item>自定义</item>
+    </string-array>
+    <string-array name="residency_status_filters">
+        <item>全部状态</item>
+        <item>已启用</item>
+        <item>已停用</item>
+    </string-array>
+    <string-array name="residency_availability_filters">
+        <item>全部应用</item>
+        <item>可配置</item>
+        <item>不可配置</item>
+    </string-array>
+</resources>

@@ -12,6 +12,8 @@ import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.ModuleApplication;
 import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
+import com.frostwork.bgenhance.ui.residency.ResidencyAppsActivity;
+import com.frostwork.bgenhance.ui.residency.ResidencyRuleStore;
 import com.google.android.material.button.MaterialButtonToggleGroup;
 import com.google.android.material.materialswitch.MaterialSwitch;
 import com.google.android.material.snackbar.Snackbar;
@@ -117,6 +119,8 @@ public final class SettingsActivity extends AppCompatActivity {
         bindNavigation(R.id.row_freeze, FeatureCatalog.GROUP_FREEZE);
         findViewById(R.id.card_home_stats).setOnClickListener(v ->
                 startActivity(new Intent(this, DiagnosticsActivity.class)));
+        findViewById(R.id.row_residency).setOnClickListener(v ->
+                startActivity(new Intent(this, ResidencyAppsActivity.class)));
     }
 
     private void bindNavigation(int viewId, String group) {
@@ -201,6 +205,7 @@ public final class SettingsActivity extends AppCompatActivity {
 
         refreshHookStatus();
         refreshNavigationCounts();
+        refreshResidencySummary();
     }
 
     private void refreshHookStatus() {
@@ -293,5 +298,17 @@ public final class SettingsActivity extends AppCompatActivity {
         for (String key : keys) if (ModuleSettings.getLocalBoolean(this, key)) count++;
         ((TextView) findViewById(textId)).setText(count == 0
                 ? getString(R.string.none_enabled) : getString(R.string.enabled_count, count));
+    }
+
+    private void refreshResidencySummary() {
+        TextView status = findViewById(R.id.status_residency);
+        try {
+            int count = ResidencyRuleStore.read(this).rules().size();
+            status.setText(count == 0
+                    ? getString(R.string.residency_home_empty)
+                    : getString(R.string.residency_home_count, count));
+        } catch (RuntimeException exception) {
+            status.setText(R.string.residency_home_unavailable);
+        }
     }
 }

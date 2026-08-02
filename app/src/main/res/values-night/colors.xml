@@ -11,9 +11,9 @@
     <color name="success">#FF72D69C</color>
     <color name="warning">#FFFFC267</color>
     <color name="error">#FFFF8A8A</color>
-    <color name="risk_badge_high">#FFE85D62</color>
+    <color name="risk_badge_high">#FFB3261E</color>
     <color name="risk_badge_very_high">#FFD84349</color>
-    <color name="risk_badge_experimental">#FF4E8BFF</color>
+    <color name="risk_badge_experimental">#FF1557B0</color>
     <color name="experimental">#FFBDA8FF</color>
     <color name="chip_neutral">#FF303139</color>
     <color name="chip_text">#FFD3D2DA</color>

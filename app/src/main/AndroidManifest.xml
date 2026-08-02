@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
 
     <queries>
         <package android:name="com.oplus.athena" />
@@ -27,6 +32,22 @@
 
         <activity
             android:name=".ui.FeatureSettingsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.residency.ResidencyPolicyActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.residency.ResidencyImportActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.residency.ResidencyAppPickerActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.residency.ResidencyAppsActivity"
             android:exported="false" />
 
         <activity
