@@ -459,6 +459,12 @@ public final class ResidencyIdentityIndex {
             AppResidencyPolicy first,
             AppResidencyPolicy second,
             WakeSource source) {
+        if (first.freezePolicy().fullExemption()
+                != second.freezePolicy().fullExemption()) {
+            return false;
+        }
+        if (first.freezePolicy().fullExemption()) return true;
+        if (source.isAlwaysAllowed()) return true;
         WakeMode firstMode = effectiveWakeMode(first, source);
         WakeMode secondMode = effectiveWakeMode(second, source);
         if (firstMode != secondMode) return false;
@@ -470,9 +476,6 @@ public final class ResidencyIdentityIndex {
 
     private static WakeMode effectiveWakeMode(
             AppResidencyPolicy policy, WakeSource source) {
-        if (policy.freezePolicy().fullExemption() || source.isAlwaysAllowed()) {
-            return WakeMode.ALLOW;
-        }
         return policy.wakePolicy().modeFor(source);
     }
 

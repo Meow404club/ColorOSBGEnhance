@@ -48,7 +48,8 @@ public final class ResidencyDecisionReporter {
                     + " identity=" + trace.identity().status()
                     + " configRevision=" + trace.configRevision()
                     + " policyRevision=" + trace.policyRevision()
-                    + " identityRevision=" + trace.identityIndexRevision());
+                    + " identityRevision=" + trace.identityIndexRevision()
+                    + " identityGeneration=" + trace.identityGeneration());
         } catch (Throwable error) {
             if (writeLog) {
                 ModuleLog.w("residency decision diagnostics failed: " + error);

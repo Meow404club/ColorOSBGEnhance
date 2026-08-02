@@ -10,6 +10,7 @@ public final class DecisionTrace {
     private final long configRevision;
     private final long policyRevision;
     private final long identityIndexRevision;
+    private final long identityGeneration;
     private final ResidencyIdentityResolution identity;
     private final DecisionDisposition disposition;
     private final DecisionReason reason;
@@ -19,6 +20,7 @@ public final class DecisionTrace {
             long configRevision,
             long policyRevision,
             long identityIndexRevision,
+            long identityGeneration,
             ResidencyIdentityResolution identity,
             DecisionDisposition disposition,
             DecisionReason reason) {
@@ -27,6 +29,7 @@ public final class DecisionTrace {
         this.configRevision = configRevision;
         this.policyRevision = policyRevision;
         this.identityIndexRevision = identityIndexRevision;
+        this.identityGeneration = identityGeneration;
         this.identity = Objects.requireNonNull(identity, "identity");
         this.disposition = Objects.requireNonNull(disposition, "disposition");
         this.reason = Objects.requireNonNull(reason, "reason");
@@ -37,6 +40,7 @@ public final class DecisionTrace {
     public long configRevision() { return configRevision; }
     public long policyRevision() { return policyRevision; }
     public long identityIndexRevision() { return identityIndexRevision; }
+    public long identityGeneration() { return identityGeneration; }
     public ResidencyIdentityResolution identity() { return identity; }
     public DecisionDisposition disposition() { return disposition; }
     public DecisionReason reason() { return reason; }

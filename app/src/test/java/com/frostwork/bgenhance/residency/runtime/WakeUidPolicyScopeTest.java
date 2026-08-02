@@ -94,7 +94,7 @@ public final class WakeUidPolicyScopeTest {
     }
 
     @Test
-    public void fullExemptionAndExplicitAllowHaveTheSameWakeBehavior() {
+    public void fullExemptionAndSystemAllowRemainDistinctActions() {
         FreezePolicy fullExemption = new FreezePolicy(
                 true, true, true, true, false, 0L, 0L,
                 true, false, false);
@@ -102,7 +102,7 @@ public final class WakeUidPolicyScopeTest {
                 policy(FIRST, WakePolicy.allowAll(), fullExemption),
                 policy(SECOND, WakePolicy.allowAll(), FreezePolicy.followSystem()));
 
-        assertEquals(IdentityResolutionStatus.SHARED_UID_SAME_POLICY,
+        assertEquals(IdentityResolutionStatus.SHARED_UID_CONFLICT,
                 index.resolveUidScoped(
                         ResidencyTarget.forUid(SHARED_UID),
                         UidPolicyScope.forWakeSource(WakeSource.PACKET)).status());

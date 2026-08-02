@@ -21,12 +21,24 @@ import java.util.Objects;
 public final class ResidencyDecisionEngine {
     private final RuntimeConfigSnapshot snapshot;
     private final ResidencyIdentityIndex identityIndex;
+    private final long identityGeneration;
 
     public ResidencyDecisionEngine(
             RuntimeConfigSnapshot snapshot,
             ResidencyIdentityIndex identityIndex) {
+        this(snapshot, identityIndex, 0L);
+    }
+
+    public ResidencyDecisionEngine(
+            RuntimeConfigSnapshot snapshot,
+            ResidencyIdentityIndex identityIndex,
+            long identityGeneration) {
         this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
         this.identityIndex = Objects.requireNonNull(identityIndex, "identityIndex");
+        if (identityGeneration < 0L) {
+            throw new IllegalArgumentException("identityGeneration < 0");
+        }
+        this.identityGeneration = identityGeneration;
     }
 
     public KillDecision decideKill(KillContext context) {
@@ -563,6 +575,7 @@ public final class ResidencyDecisionEngine {
                 snapshot.configRevision(),
                 snapshot.policyRevision(),
                 identityIndex.policyRevision(),
+                identityGeneration,
                 identity,
                 disposition,
                 reason);

@@ -47,7 +47,10 @@ public final class ResidencyRuntimeControllerTest {
 
         executor.runNext();
         assertTrue(controller.state().ready());
-        assertTrue(controller.decideKill(killContext()).blocksAction());
+        KillDecision decision = controller.decideKill(killContext());
+        assertTrue(decision.blocksAction());
+        assertEquals(controller.state().generation(),
+                decision.trace().identityGeneration());
     }
 
     @Test

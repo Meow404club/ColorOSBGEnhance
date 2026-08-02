@@ -28,7 +28,8 @@ public final class ResidencyRuntimeState {
             String error) {
         this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
         this.identityIndex = Objects.requireNonNull(identityIndex, "identityIndex");
-        this.decisionEngine = new ResidencyDecisionEngine(snapshot, identityIndex);
+        this.decisionEngine = new ResidencyDecisionEngine(
+                snapshot, identityIndex, generation);
         this.status = Objects.requireNonNull(status, "status");
         this.generation = generation;
         this.error = error == null ? "" : error;
