@@ -61,6 +61,30 @@ public final class ResidencyDiagnosticsBackendTest {
     }
 
     @Test
+    public void legacyPreferencesAreReadAndMigratedOnBackendWorker() throws Exception {
+        FakeStorage storage = new FakeStorage();
+        ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(1);
+        String callerThread = Thread.currentThread().getName();
+        ResidencyDiagnosticsBackend backend = new ResidencyDiagnosticsBackend(
+                policy(8, 4, 60_000L), storage, executor, "boot", () -> {
+            storage.migrationReadThread = Thread.currentThread().getName();
+            return DiagnosticsWriteBatch.builder()
+                    .addLegacyFeatureDelta(new DiagnosticsWriteBatch.LegacyFeatureDelta(
+                            "legacy", 1L, 0L, 0L, 1L,
+                            "", "", "", "", "passed"))
+                    .build();
+        });
+        backends.add(backend);
+
+        backend.currentEpochAsync().get(5, TimeUnit.SECONDS);
+
+        assertNotEquals(callerThread, storage.migrationReadThread);
+        assertEquals(storage.migrationReadThread, storage.migrationWriteThread);
+        assertEquals(1, storage.migrationCalls);
+        assertEquals(1, storage.migratedBatch.size());
+    }
+
+    @Test
     public void periodicMaintenanceRunsWithoutWritesOrQueries() throws Exception {
         FakeStorage storage = new FakeStorage();
         storage.maintenanceLatch = new CountDownLatch(2);
@@ -459,11 +483,14 @@ public final class ResidencyDiagnosticsBackendTest {
         volatile int written;
         volatile int writeAttempts;
         volatile int clearCalls;
+        volatile int migrationCalls;
         volatile int regularMaintenanceCalls;
         volatile int pressureMaintenanceCalls;
         volatile int queryCalls;
         volatile String writeThread = "";
         volatile String maintenanceThread = "";
+        volatile String migrationReadThread = "";
+        volatile String migrationWriteThread = "";
         volatile boolean failWrites;
         volatile boolean failQueries;
         volatile boolean alwaysFull;
@@ -473,6 +500,7 @@ public final class ResidencyDiagnosticsBackendTest {
         volatile CountDownLatch queryStarted;
         volatile CountDownLatch releaseQueries;
         volatile DiagnosticsWriteBatch.BatchIdentity lastBatchIdentity;
+        volatile DiagnosticsWriteBatch migratedBatch;
         final List<String> operations = new ArrayList<>();
         volatile DiagnosticsQuery.HomeStatsSnapshot homeStats =
                 DiagnosticsQuery.HomeStatsSnapshot.empty("");
@@ -491,6 +519,14 @@ public final class ResidencyDiagnosticsBackendTest {
             written += batch.size();
             events.addAll(batch.events);
             operations.add("write");
+        }
+
+        @Override
+        public synchronized boolean migrateLegacyOnce(DiagnosticsWriteBatch batch) {
+            migrationCalls++;
+            migrationWriteThread = Thread.currentThread().getName();
+            migratedBatch = batch;
+            return migrationCalls == 1;
         }
 
         @Override

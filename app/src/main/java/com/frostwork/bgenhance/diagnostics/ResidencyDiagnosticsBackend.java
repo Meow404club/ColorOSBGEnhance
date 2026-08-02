@@ -39,6 +39,7 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
     private final StorageFactory storageFactory;
     private final ScheduledExecutorService executor;
     private final String currentBootId;
+    private final LegacyMigrationSource legacyMigrationSource;
     private final ArrayDeque<PendingBatch> queue = new ArrayDeque<>();
     private final Object stateLock = new Object();
     private final int commandCapacity;
@@ -85,7 +86,9 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 throw new IllegalStateException("diagnostics context unavailable");
             }
             return new ResidencyDiagnosticsDb(applicationContext, policy);
-        }, worker, currentBootId);
+        }, worker, currentBootId,
+                applicationContext == null
+                        ? null : () -> LegacyDiagnosticsMigration.read(applicationContext));
     }
 
     ResidencyDiagnosticsBackend(
@@ -96,16 +99,35 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
         this(policy, () -> storage, executor, currentBootId);
     }
 
+    ResidencyDiagnosticsBackend(
+            DiagnosticsRetentionPolicy policy,
+            ResidencyDiagnosticsStorage storage,
+            ScheduledExecutorService executor,
+            String currentBootId,
+            LegacyMigrationSource legacyMigrationSource) {
+        this(policy, () -> storage, executor, currentBootId, legacyMigrationSource);
+    }
+
     private ResidencyDiagnosticsBackend(
             DiagnosticsRetentionPolicy policy,
             StorageFactory storageFactory,
             ScheduledExecutorService executor,
             String currentBootId) {
+        this(policy, storageFactory, executor, currentBootId, null);
+    }
+
+    private ResidencyDiagnosticsBackend(
+            DiagnosticsRetentionPolicy policy,
+            StorageFactory storageFactory,
+            ScheduledExecutorService executor,
+            String currentBootId,
+            LegacyMigrationSource legacyMigrationSource) {
         this.policy = policy == null ? DiagnosticsRetentionPolicy.defaults() : policy;
         this.storageFactory = storageFactory;
         this.executor = executor;
         this.currentBootId = DiagnosticsValues.isStrictId(currentBootId, false)
                 ? currentBootId : "";
+        this.legacyMigrationSource = legacyMigrationSource;
         commandCapacity = Math.max(1, Math.min(MAX_PENDING_COMMANDS, this.policy.queueCapacity));
         startMaintenance();
     }
@@ -305,12 +327,46 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
 
     private void startMaintenance() {
         try {
+            if (legacyMigrationSource != null) {
+                executor.execute(this::performLegacyMigrationSafely);
+            }
             executor.execute(this::performRegularMaintenanceSafely);
             maintenanceFuture = executor.scheduleWithFixedDelay(
                     this::performRegularMaintenanceSafely,
                     policy.maintenanceIntervalMillis,
                     policy.maintenanceIntervalMillis,
                     TimeUnit.MILLISECONDS);
+        } catch (Throwable error) {
+            failedBatches.incrementAndGet();
+        }
+    }
+
+    private void performLegacyMigrationSafely() {
+        if (closed.get()) return;
+        ResidencyDiagnosticsStorage current = storageOrNull();
+        if (current == null) {
+            failedBatches.incrementAndGet();
+            return;
+        }
+        try {
+            DiagnosticsWriteBatch batch = legacyMigrationSource.read();
+            current.migrateLegacyOnce(batch == null
+                    ? DiagnosticsWriteBatch.builder()
+                            .countingMode(DiagnosticsWriteBatch.CountingMode.LEGACY)
+                            .build()
+                    : batch);
+        } catch (SQLiteFullException full) {
+            try {
+                current.performMaintenance(System.currentTimeMillis(), true);
+                DiagnosticsWriteBatch batch = legacyMigrationSource.read();
+                current.migrateLegacyOnce(batch == null
+                        ? DiagnosticsWriteBatch.builder()
+                                .countingMode(DiagnosticsWriteBatch.CountingMode.LEGACY)
+                                .build()
+                        : batch);
+            } catch (Throwable recoveryFailure) {
+                failedBatches.incrementAndGet();
+            }
         } catch (Throwable error) {
             failedBatches.incrementAndGet();
         }
@@ -778,6 +834,10 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
 
     interface StorageFactory {
         ResidencyDiagnosticsStorage open();
+    }
+
+    interface LegacyMigrationSource {
+        DiagnosticsWriteBatch read();
     }
 
     public static final class EnqueueResult {

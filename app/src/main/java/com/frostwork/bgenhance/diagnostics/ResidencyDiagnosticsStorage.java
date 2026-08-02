@@ -5,6 +5,9 @@ import java.util.List;
 interface ResidencyDiagnosticsStorage extends AutoCloseable {
     void writeBatch(DiagnosticsWriteBatch batch);
 
+    /** Imports legacy feature totals and records its marker in one transaction. */
+    boolean migrateLegacyOnce(DiagnosticsWriteBatch batch);
+
     /** Runs retention, or a row-limited pressure cleanup when {@code storagePressure} is true. */
     void performMaintenance(long nowMillis, boolean storagePressure);
 

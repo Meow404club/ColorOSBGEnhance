@@ -28,6 +28,7 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
     static final String TABLE_METADATA = "diagnostics_metadata";
 
     private static final String METADATA_EPOCH = "epoch";
+    private static final String METADATA_LEGACY_MIGRATION = "legacy_hook_diagnostics_v1";
 
     private final DiagnosticsRetentionPolicy policy;
 
@@ -129,6 +130,39 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                 if (state != null && state.isStorable()) upsertHookState(db, state, true);
             }
             db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    @Override
+    public boolean migrateLegacyOnce(DiagnosticsWriteBatch batch) {
+        if (batch == null
+                || batch.batchIdentity != null
+                || batch.countingMode != DiagnosticsWriteBatch.CountingMode.LEGACY
+                || !batch.rawHits.isEmpty()
+                || !batch.events.isEmpty()
+                || !batch.hookStates.isEmpty()
+                || batch.size() > DiagnosticsRetentionPolicy.MAX_ACCEPTED_BATCH_ITEMS) {
+            throw new IllegalArgumentException("invalid legacy diagnostics migration");
+        }
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransactionNonExclusive();
+        try {
+            if (hasMetadata(db, METADATA_LEGACY_MIGRATION)) {
+                db.setTransactionSuccessful();
+                return false;
+            }
+            for (DiagnosticsWriteBatch.LegacyFeatureDelta delta
+                    : batch.legacyFeatureDeltas) {
+                if (delta == null || !delta.isStorable()) {
+                    throw new IllegalArgumentException("invalid legacy diagnostics delta");
+                }
+                writeLegacyFeatureDelta(db, delta);
+            }
+            putMetadataString(db, METADATA_LEGACY_MIGRATION, "1");
+            db.setTransactionSuccessful();
+            return true;
         } finally {
             db.endTransaction();
         }
@@ -1116,12 +1150,21 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         }
     }
 
-    private static void putMetadataLong(SQLiteDatabase db, String name, long value) {
+    private static boolean hasMetadata(SQLiteDatabase db, String name) {
+        return DatabaseUtils.queryNumEntries(
+                db, TABLE_METADATA, "name=?", new String[] { name }) > 0L;
+    }
+
+    private static void putMetadataString(SQLiteDatabase db, String name, String value) {
         ContentValues values = new ContentValues();
         values.put("name", name);
-        values.put("value", String.valueOf(Math.max(0L, value)));
+        values.put("value", value == null ? "" : value);
         db.insertWithOnConflict(
                 TABLE_METADATA, null, values, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    private static void putMetadataLong(SQLiteDatabase db, String name, long value) {
+        putMetadataString(db, name, String.valueOf(Math.max(0L, value)));
     }
 
     private static void createIndexes(SQLiteDatabase db) {

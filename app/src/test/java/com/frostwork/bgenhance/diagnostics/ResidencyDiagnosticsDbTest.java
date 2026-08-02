@@ -71,6 +71,38 @@ public final class ResidencyDiagnosticsDbTest {
     }
 
     @Test
+    public void legacyMigrationDataAndMarkerCommitExactlyOnce() {
+        database = open(policy(20, 20, 20, 60_000L));
+        DiagnosticsWriteBatch first = DiagnosticsWriteBatch.builder()
+                .addLegacyFeatureDelta(new DiagnosticsWriteBatch.LegacyFeatureDelta(
+                        "legacy_feature", 7L, 3L, 1L, 100L,
+                        "com.example.target", "system_server", "scene", "9", "blocked"))
+                .build();
+        DiagnosticsWriteBatch second = DiagnosticsWriteBatch.builder()
+                .addLegacyFeatureDelta(new DiagnosticsWriteBatch.LegacyFeatureDelta(
+                        "legacy_feature", 100L, 50L, 10L, 200L,
+                        "other", "system_server", "other", "10", "blocked"))
+                .build();
+
+        assertTrue(database.migrateLegacyOnce(first));
+        assertFalse(database.migrateLegacyOnce(second));
+
+        DiagnosticsQuery.FeatureStats stats = database.queryHomeStats(
+                Collections.singletonList("legacy_feature"))
+                .features.get("legacy_feature");
+        assertEquals(7L, stats.observed);
+        assertEquals(3L, stats.blocked);
+        assertEquals(1L, stats.failOpen);
+        assertEquals("com.example.target", stats.lastPackage);
+
+        database.close();
+        database = open(policy(20, 20, 20, 60_000L));
+        assertFalse(database.migrateLegacyOnce(second));
+        assertEquals(7L, database.queryHomeStats(
+                Collections.singletonList("legacy_feature")).observed);
+    }
+
+    @Test
     public void eventTokenDeduplicatesNormalizedEventsButNotRawHits() {
         database = open(policy(20, 20, 20, 60_000L));
         long now = System.currentTimeMillis();
