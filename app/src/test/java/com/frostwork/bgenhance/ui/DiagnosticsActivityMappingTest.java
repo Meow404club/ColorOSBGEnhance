@@ -43,6 +43,15 @@ public final class DiagnosticsActivityMappingTest {
     }
 
     @Test
+    public void alarmDeliveryHasIndependentSupportAndSharedWakeStatistics() throws Exception {
+        assertEquals(Integer.valueOf(R.string.alarm_wake_delivery_support_title),
+                supportTitles().get(HookTargetIds.ALARM_WAKE_DELIVERY));
+        assertFalse(statTitles().containsKey(HookTargetIds.ALARM_WAKE_DELIVERY));
+        assertEquals(Integer.valueOf(R.string.hans_wake_stats_title),
+                statTitles().get(FeatureIds.HANS_WAKE));
+    }
+
+    @Test
     public void everyStableIdentifierHasExactlyOneDiagnosticsRow() throws Exception {
         assertEquals(new HashSet<>(HookTargetIds.all()), supportTitles().keySet());
         assertEquals(new HashSet<>(FeatureIds.all()), statTitles().keySet());

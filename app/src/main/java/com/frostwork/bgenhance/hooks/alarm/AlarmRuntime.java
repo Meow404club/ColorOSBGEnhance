@@ -16,6 +16,8 @@ public final class AlarmRuntime {
             "com.android.server.alarm.AlarmManagerServiceExtImpl";
     private static final String SERVICE_CLASS =
             "com.android.server.alarm.AlarmManagerService";
+    private static final String INJECTOR_CLASS =
+            "com.android.server.alarm.AlarmManagerService$Injector";
     private static final String HANS_MANAGER_CLASS =
             "com.android.server.am.OplusHansManager";
     private static final String ACTIVITY_MANAGER_INTERNAL_CLASS =
@@ -29,6 +31,7 @@ public final class AlarmRuntime {
         ClassLookup alarm = load(ALARM_CLASS, loader);
         ClassLookup ext = load(EXT_CLASS, loader);
         ClassLookup service = load(SERVICE_CLASS, loader);
+        ClassLookup injector = load(INJECTOR_CLASS, loader);
         ClassLookup hansManager = load(HANS_MANAGER_CLASS, loader);
         ClassLookup activityManagerInternal = load(
                 ACTIVITY_MANAGER_INTERNAL_CLASS, loader);
@@ -70,7 +73,9 @@ public final class AlarmRuntime {
                 pendingIntent,
                 workSource);
         entries.put(Capability.NOTE_FINISH_ACCESS, new Entry(completion.status, null));
-        return new CapabilityMatrix(entries, completion.access);
+        DriverResolution driver = resolveDriverAccess(ext, service, injector);
+        entries.put(Capability.NATIVE_DRIVER_ACCESS, new Entry(driver.status, null));
+        return new CapabilityMatrix(entries, completion.access, driver.access);
     }
 
     public static boolean matches(Capability capability, Method method) {
@@ -101,6 +106,7 @@ public final class AlarmRuntime {
                         && types(parameters, int.class, String.class, String.class);
             case ALARM_ACCESS:
             case NOTE_FINISH_ACCESS:
+            case NATIVE_DRIVER_ACCESS:
             default:
                 return false;
         }
@@ -180,6 +186,36 @@ public final class AlarmRuntime {
         }
     }
 
+    private static DriverResolution resolveDriverAccess(
+            ClassLookup ext, ClassLookup service, ClassLookup injector) {
+        if (!allAvailable(ext, service, injector)) {
+            return DriverResolution.failed(Status.DEPENDENCY_UNAVAILABLE);
+        }
+        try {
+            Field serviceField = exactInstanceField(ext.type, "mAlarmMS", service.type);
+            Field injectorField = exactInstanceField(
+                    service.type, "mInjector", injector.type);
+            Method present = injector.type.getDeclaredMethod("isAlarmDriverPresent");
+            if (present.getReturnType() != boolean.class
+                    || Modifier.isStatic(present.getModifiers())) {
+                return DriverResolution.failed(Status.INVALID_SIGNATURE);
+            }
+            serviceField.setAccessible(true);
+            injectorField.setAccessible(true);
+            present.setAccessible(true);
+            return DriverResolution.available(new DriverAccess(
+                    serviceField, injectorField, present));
+        } catch (InvalidFieldException error) {
+            return DriverResolution.failed(Status.INVALID_SIGNATURE);
+        } catch (NoSuchFieldException error) {
+            return DriverResolution.failed(Status.MISSING_FIELD);
+        } catch (NoSuchMethodException error) {
+            return DriverResolution.failed(Status.MISSING_METHOD);
+        } catch (LinkageError | RuntimeException error) {
+            return DriverResolution.failed(Status.LOOKUP_FAILED);
+        }
+    }
+
     private static Field exactInstanceField(
             Class<?> owner, String name, Class<?> expectedType)
             throws NoSuchFieldException, InvalidFieldException {
@@ -232,7 +268,8 @@ public final class AlarmRuntime {
         FILTER_HANS,
         DELIVERY_GATE,
         HANS_CHECK,
-        NOTE_FINISH_ACCESS
+        NOTE_FINISH_ACCESS,
+        NATIVE_DRIVER_ACCESS
     }
 
     public enum Status {
@@ -249,12 +286,15 @@ public final class AlarmRuntime {
     public static final class CapabilityMatrix {
         private final Map<Capability, Entry> entries;
         private final CompletionAccess completionAccess;
+        private final DriverAccess driverAccess;
 
         private CapabilityMatrix(
                 EnumMap<Capability, Entry> entries,
-                CompletionAccess completionAccess) {
+                CompletionAccess completionAccess,
+                DriverAccess driverAccess) {
             this.entries = Collections.unmodifiableMap(new EnumMap<>(entries));
             this.completionAccess = completionAccess;
+            this.driverAccess = driverAccess;
         }
 
         public Status status(Capability capability) {
@@ -271,11 +311,15 @@ public final class AlarmRuntime {
             return completionAccess;
         }
 
+        public DriverAccess driverAccessOrNull() {
+            return driverAccess;
+        }
+
         public boolean allAvailable() {
             for (Capability capability : Capability.values()) {
                 if (status(capability) != Status.AVAILABLE) return false;
             }
-            return completionAccess != null;
+            return completionAccess != null && driverAccess != null;
         }
 
         public String summary() {
@@ -322,6 +366,34 @@ public final class AlarmRuntime {
         }
     }
 
+    /** Immutable path used to reject the framework's direct-send fallback. */
+    public static final class DriverAccess {
+        private final Field serviceField;
+        private final Field injectorField;
+        private final Method presentMethod;
+
+        private DriverAccess(
+                Field serviceField, Field injectorField, Method presentMethod) {
+            this.serviceField = serviceField;
+            this.injectorField = injectorField;
+            this.presentMethod = presentMethod;
+        }
+
+        public boolean isNativeDriverPresent(Object extension)
+                throws ReflectiveOperationException {
+            Object service = serviceField.get(Objects.requireNonNull(
+                    extension, "extension"));
+            if (service == null) throw new IllegalStateException("alarm service unavailable");
+            Object injector = injectorField.get(service);
+            if (injector == null) throw new IllegalStateException("injector unavailable");
+            Object value = presentMethod.invoke(injector);
+            if (!(value instanceof Boolean)) {
+                throw new IllegalStateException("invalid driver state");
+            }
+            return ((Boolean) value).booleanValue();
+        }
+    }
+
     private static final class Entry {
         private final Status status;
         private final Method method;
@@ -347,6 +419,24 @@ public final class AlarmRuntime {
 
         private static CompletionResolution failed(Status status) {
             return new CompletionResolution(status, null);
+        }
+    }
+
+    private static final class DriverResolution {
+        private final Status status;
+        private final DriverAccess access;
+
+        private DriverResolution(Status status, DriverAccess access) {
+            this.status = status;
+            this.access = access;
+        }
+
+        private static DriverResolution available(DriverAccess access) {
+            return new DriverResolution(Status.AVAILABLE, access);
+        }
+
+        private static DriverResolution failed(Status status) {
+            return new DriverResolution(status, null);
         }
     }
 

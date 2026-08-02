@@ -1,6 +1,7 @@
 package com.frostwork.bgenhance;
 
 import androidx.annotation.NonNull;
+import com.frostwork.bgenhance.hooks.AlarmWakeHook;
 import com.frostwork.bgenhance.hooks.AthenaPeriodicHook;
 import com.frostwork.bgenhance.hooks.FastClearHook;
 import com.frostwork.bgenhance.hooks.HansExemptionHook;
@@ -89,6 +90,7 @@ public final class MainHook extends XposedModule {
                 new OsenseProcessKillHook(),
                 new HansFreezeHook(),
                 new HansWakeHook(),
+                new AlarmWakeHook(),
                 HansTimingHook.rToM(),
                 HansTimingHook.mToF(),
                 HansExemptionHook.core(),

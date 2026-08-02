@@ -90,7 +90,9 @@ public final class DiagnosticsActivity extends AppCompatActivity {
                     HookTargetIds.HANS_LCD_ON_EXEMPTION),
             new SupportItem(R.string.freeze_nav_title, HookTargetIds.HANS_FREEZE_DISPATCH),
             new SupportItem(R.string.hans_wake_support_title,
-                    HookTargetIds.HANS_WAKE_DISPATCH)
+                    HookTargetIds.HANS_WAKE_DISPATCH),
+            new SupportItem(R.string.alarm_wake_delivery_support_title,
+                    HookTargetIds.ALARM_WAKE_DELIVERY)
     );
 
 

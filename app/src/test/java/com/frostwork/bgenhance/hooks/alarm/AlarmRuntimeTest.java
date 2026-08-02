@@ -51,6 +51,7 @@ public final class AlarmRuntimeTest {
                 int.class, String.class, String.class);
         assertNull(matrix.methodOrNull(Capability.ALARM_ACCESS));
         assertNull(matrix.methodOrNull(Capability.NOTE_FINISH_ACCESS));
+        assertNull(matrix.methodOrNull(Capability.NATIVE_DRIVER_ACCESS));
 
         ActivityManagerInternal activityManager = new ActivityManagerInternal();
         AlarmManagerService service = new AlarmManagerService(activityManager);
@@ -63,6 +64,14 @@ public final class AlarmRuntimeTest {
         assertEquals("alarm-tag", activityManager.statsTag());
         assertNull(activityManager.operation());
         assertNull(activityManager.workSource());
+        assertTrue(matrix.driverAccessOrNull().isNativeDriverPresent(extension));
+
+        AlarmManagerService fallbackService = new AlarmManagerService(
+                new ActivityManagerInternal(), false);
+        AlarmManagerServiceExtImpl fallbackExtension =
+                new AlarmManagerServiceExtImpl(fallbackService);
+        assertFalse(matrix.driverAccessOrNull().isNativeDriverPresent(
+                fallbackExtension));
     }
 
     @Test
@@ -83,6 +92,7 @@ public final class AlarmRuntimeTest {
         assertEquals(1, matchingHans);
         assertFalse(AlarmRuntime.matches(Capability.ALARM_ACCESS, null));
         assertFalse(AlarmRuntime.matches(Capability.NOTE_FINISH_ACCESS, null));
+        assertFalse(AlarmRuntime.matches(Capability.NATIVE_DRIVER_ACCESS, null));
     }
 
     @Test
@@ -106,6 +116,7 @@ public final class AlarmRuntimeTest {
                 Status.DEPENDENCY_UNAVAILABLE,
                 matrix.status(Capability.NOTE_FINISH_ACCESS));
         assertNull(matrix.completionAccessOrNull());
+        assertNotNull(matrix.driverAccessOrNull());
     }
 
     @Test

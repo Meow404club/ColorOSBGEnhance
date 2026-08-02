@@ -25,6 +25,7 @@ public final class HookTargetIdsTest {
                 "osense_process_kill",
                 "hans_freeze_dispatch",
                 "hans_wake_dispatch",
+                "alarm_wake_delivery",
                 "hans_r_to_m_timing",
                 "hans_m_to_f_timing",
                 "hans_core_exemption",
