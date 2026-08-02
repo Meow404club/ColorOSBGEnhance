@@ -9,7 +9,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import com.frostwork.bgenhance.R;
 
-/** Shared three-metric summary used on the home and diagnostics pages. */
+/** Three-metric diagnostics summary shown on the home page. */
 public final class StatsOverviewView extends LinearLayout {
     private final TextView observedCount;
     private final TextView blockedCount;
@@ -69,11 +69,31 @@ public final class StatsOverviewView extends LinearLayout {
         addView(hintRow, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
     }
 
-    public void bind(int observed, int blocked, int failOpen, CharSequence hintText,
+    public void bind(long observed, long blocked, long failOpen, CharSequence hintText,
                      boolean actionable) {
         observedCount.setText(String.valueOf(observed));
         blockedCount.setText(String.valueOf(blocked));
         failOpenCount.setText(String.valueOf(failOpen));
+        bindHint(hintText, actionable);
+    }
+
+    public void bindLoading(CharSequence hintText, boolean actionable) {
+        bindPlaceholder("...");
+        bindHint(hintText, actionable);
+    }
+
+    public void bindUnavailable(CharSequence hintText, boolean actionable) {
+        bindPlaceholder("-");
+        bindHint(hintText, actionable);
+    }
+
+    private void bindPlaceholder(CharSequence value) {
+        observedCount.setText(value);
+        blockedCount.setText(value);
+        failOpenCount.setText(value);
+    }
+
+    private void bindHint(CharSequence hintText, boolean actionable) {
         hint.setText(hintText);
         hint.setGravity(actionable ? Gravity.START | Gravity.CENTER_VERTICAL : Gravity.CENTER);
         chevron.setVisibility(actionable ? View.VISIBLE : View.GONE);

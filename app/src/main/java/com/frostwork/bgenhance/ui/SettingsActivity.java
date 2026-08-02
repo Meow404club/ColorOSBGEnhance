@@ -5,10 +5,6 @@ import android.os.Bundle;
 import android.view.View;
 import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
-import com.frostwork.bgenhance.BridgeContract;
-import com.frostwork.bgenhance.DiagnosticsStore;
-import com.frostwork.bgenhance.FeatureIds;
-import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.ModuleApplication;
 import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
@@ -35,6 +31,7 @@ public final class SettingsActivity extends AppCompatActivity {
     private TextView effectNotice;
     private View customAdvancedSection;
     private StatsOverviewView statsOverview;
+    private HomeDiagnosticsViewModel homeDiagnostics;
     private boolean binding;
     private final ModuleApplication.StateListener moduleStateListener =
             () -> runOnUiThread(this::refreshAll);
@@ -46,6 +43,11 @@ public final class SettingsActivity extends AppCompatActivity {
         UiUtils.applyWindowStyle(this);
         ModuleSettings.ensureDefaults(this);
         bindViews();
+        homeDiagnostics = new HomeDiagnosticsViewModel(
+                HomeDiagnosticsViewModel.backendSource(
+                        ModuleApplication.initializeDiagnostics(this)),
+                this::runOnUiThread);
+        homeDiagnostics.setListener(this::renderHomeDiagnostics);
         bindListeners();
         refreshAll();
     }
@@ -60,6 +62,12 @@ public final class SettingsActivity extends AppCompatActivity {
     protected void onStop() {
         ModuleApplication.removeStateListener(moduleStateListener);
         super.onStop();
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (homeDiagnostics != null) homeDiagnostics.close();
+        super.onDestroy();
     }
 
     @Override
@@ -203,58 +211,64 @@ public final class SettingsActivity extends AppCompatActivity {
         findViewById(R.id.row_oguard_stop).setAlpha(master ? 1f : 0.55f);
         dryRunBanner.setVisibility(dryRunSwitch.isChecked() ? View.VISIBLE : View.GONE);
 
-        refreshHookStatus();
         refreshNavigationCounts();
         refreshResidencySummary();
+        homeDiagnostics.load();
     }
 
-    private void refreshHookStatus() {
-        String ogKill = DiagnosticsStore.getSupportStatus(this, HookTargetIds.OGUARD_KILL);
-        String ogStop = DiagnosticsStore.getSupportStatus(
-                this, HookTargetIds.OGUARD_FORCE_STOP);
-        String periodic = DiagnosticsStore.getSupportStatus(
-                this, HookTargetIds.ATHENA_PERIODIC);
-        String fast = DiagnosticsStore.getSupportStatus(
-                this, HookTargetIds.FAST_CLEAR_DISPATCH);
-        int installed = 0;
-        int known = 0;
-        for (String value : Arrays.asList(ogKill, ogStop, periodic, fast)) {
-            if (!"UNKNOWN".equals(value)) known++;
-            if (value.startsWith("INSTALLED")) installed++;
+    private void renderHomeDiagnostics(HomeDiagnosticsViewModel.State state) {
+        if (state.status == HomeDiagnosticsViewModel.Status.LOADING) {
+            statusTitle.setText(R.string.status_checking);
+            statusSummary.setText(R.string.status_checking_summary);
+            statsOverview.bindLoading(getString(R.string.home_stats_loading), true);
+            effectNotice.setVisibility(View.GONE);
+            return;
         }
-        if (installed >= 3) {
+        if (state.status == HomeDiagnosticsViewModel.Status.ERROR) {
+            statusTitle.setText(R.string.status_unavailable);
+            statusSummary.setText(R.string.status_unavailable_summary);
+            statsOverview.bindUnavailable(getString(R.string.home_stats_unavailable), true);
+            showEffectWarning(R.string.effect_runtime_unavailable);
+            return;
+        }
+
+        int localRevision = ModuleSettings.getConfigRevision(this);
+        HomeDiagnosticsStatus status = HomeDiagnosticsStatus.evaluate(
+                state.hookStates.items,
+                ModuleApplication.diagnosticsBootId(),
+                localRevision);
+        if (status.activation == HomeDiagnosticsStatus.Activation.ACTIVE) {
             statusTitle.setText(R.string.status_active);
-            statusSummary.setText(installed == 4
+            statusSummary.setText(status.installedPrimaryHooks == 4
                     ? R.string.status_active_summary : R.string.status_partial_summary);
-        } else if (known > 0) {
+        } else if (status.activation == HomeDiagnosticsStatus.Activation.PARTIAL) {
             statusTitle.setText(R.string.status_partial);
             statusSummary.setText(R.string.status_partial_summary);
         } else {
             statusTitle.setText(R.string.status_inactive);
             statusSummary.setText(R.string.status_inactive_summary);
         }
-        refreshEffectNotice(installed);
+        statsOverview.bind(
+                state.stats.observed,
+                state.stats.blocked,
+                state.stats.failOpen,
+                getString(R.string.home_stats_action),
+                true);
+        refreshEffectNotice(status);
     }
 
-    private void refreshEffectNotice(int installedHooks) {
-        DiagnosticsStore.ProcessSnapshot system = DiagnosticsStore.getProcess(
-                this, BridgeContract.PROCESS_SYSTEM_SERVER);
-        DiagnosticsStore.ProcessSnapshot athena = DiagnosticsStore.getProcess(
-                this, BridgeContract.PROCESS_ATHENA);
-        boolean systemCurrent = system.isCurrentBoot(this);
-        boolean athenaCurrent = athena.isCurrentBoot(this);
-        int revision = ModuleSettings.getConfigRevision(this);
-        boolean systemSynced = systemCurrent && system.configRevision >= revision;
-        boolean athenaSynced = athenaCurrent && athena.configRevision >= revision;
-
+    private void refreshEffectNotice(HomeDiagnosticsStatus status) {
         if (!ModuleApplication.isServiceConnected()) {
             showEffectWarning(R.string.effect_config_service_waiting);
         } else if (!ModuleApplication.isConfigSynced(this)) {
             showEffectWarning(R.string.effect_config_pending);
-        } else if (systemCurrent && athenaCurrent && systemSynced && athenaSynced
-                && installedHooks >= 3) {
+        } else if (status.systemProcessReady
+                && status.athenaProcessReady
+                && status.systemConfigSynced
+                && status.athenaConfigSynced
+                && status.installedPrimaryHooks >= 3) {
             effectNotice.setVisibility(View.GONE);
-        } else if ((systemCurrent && !systemSynced) || (athenaCurrent && !athenaSynced)) {
+        } else if (status.systemProcessReady && status.athenaProcessReady) {
             showEffectWarning(R.string.effect_config_pending);
         } else {
             showEffectWarning(R.string.effect_restart_required);
@@ -281,16 +295,6 @@ public final class SettingsActivity extends AppCompatActivity {
         setCount(R.id.status_freeze, Arrays.asList(
                 ModuleSettings.KEY_HANS, ModuleSettings.KEY_SUPER_FREEZE,
                 ModuleSettings.KEY_ANDROID_FREEZE));
-        int observed = 0;
-        int blocked = 0;
-        int failOpen = 0;
-        for (String feature : FeatureIds.all()) {
-            observed += DiagnosticsStore.getStatInt(this, feature, "observed");
-            blocked += DiagnosticsStore.getStatInt(this, feature, "blocked");
-            failOpen += DiagnosticsStore.getStatInt(this, feature, "fail_open");
-        }
-        statsOverview.bind(observed, blocked, failOpen,
-                getString(R.string.home_stats_action), true);
     }
 
     private void setCount(int textId, List<String> keys) {
