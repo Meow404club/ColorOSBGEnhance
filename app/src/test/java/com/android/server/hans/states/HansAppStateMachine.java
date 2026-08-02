@@ -2,11 +2,17 @@ package com.android.server.hans.states;
 
 import android.os.Message;
 import com.android.server.hans.OplusHansPackage;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /** Firmware-shaped fixture for reason-aware refreeze reflection tests. */
 public class HansAppStateMachine {
     private OplusHansPackage mHansPkg;
     private String mUnfreezeReason;
+    private boolean mMtoFinFastFreeze;
+    private final List<Integer> sentMessages = new ArrayList<>();
+    private final List<Object> sentMessageObjects = new ArrayList<>();
 
     public HansAppStateMachine(OplusHansPackage hansPackage, String reason) {
         this.mHansPkg = hansPackage;
@@ -15,6 +21,32 @@ public class HansAppStateMachine {
 
     public void setReason(String reason) {
         mUnfreezeReason = reason;
+    }
+
+    public void sendMessage(int what) {
+        sentMessages.add(what);
+        sentMessageObjects.add(null);
+    }
+
+    public void sendMessage(int what, Object object) {
+        sentMessages.add(what);
+        sentMessageObjects.add(object);
+    }
+
+    public void setMtoFinFastFreeze(boolean pending) {
+        mMtoFinFastFreeze = pending;
+    }
+
+    public boolean isMtoFinFastFreeze() {
+        return mMtoFinFastFreeze;
+    }
+
+    public List<Integer> sentMessages() {
+        return Collections.unmodifiableList(sentMessages);
+    }
+
+    public List<Object> sentMessageObjects() {
+        return Collections.unmodifiableList(sentMessageObjects);
     }
 
     public class MiddleState {

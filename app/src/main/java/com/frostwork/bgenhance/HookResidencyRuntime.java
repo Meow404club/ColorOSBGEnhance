@@ -98,6 +98,14 @@ public final class HookResidencyRuntime {
         CONTROLLER.updateConfig(state.snapshot());
     }
 
+    public static void addStateListener(ResidencyRuntimeController.StateListener listener) {
+        CONTROLLER.addStateListener(listener);
+    }
+
+    public static void removeStateListener(ResidencyRuntimeController.StateListener listener) {
+        CONTROLLER.removeStateListener(listener);
+    }
+
     public static ResidencyRuntimeState state() { return CONTROLLER.state(); }
     public static KillDecision decideKill(KillContext context) {
         return decisionEngine().decideKill(context);

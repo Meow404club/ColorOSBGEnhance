@@ -60,6 +60,12 @@ public final class DiagnosticsActivityMappingTest {
     }
 
     @Test
+    public void refreezeControlHasAUserFacingRuntimeRow() throws Exception {
+        assertEquals(Integer.valueOf(R.string.hans_refreeze_stats_title),
+                statTitles().get(FeatureIds.HANS_REFREEZE));
+    }
+
+    @Test
     public void everyStableIdentifierHasExactlyOneDiagnosticsRow() throws Exception {
         assertEquals(new HashSet<>(HookTargetIds.all()), supportTitles().keySet());
         assertEquals(new HashSet<>(FeatureIds.all()), statTitles().keySet());

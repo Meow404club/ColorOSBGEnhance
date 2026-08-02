@@ -1,6 +1,7 @@
 package com.frostwork.bgenhance.hooks.hans;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,6 +30,7 @@ public final class HansRefreezeStateAdapter {
                     stateMachineType, middleStateType, frozenStateType, packageType);
             if (shared == null || !HansObjectAdapter.prepare(packageType)) return false;
             AccessorSet ready = AccessorSet.ready(shared);
+            ACCESSORS.put(stateMachineType, ready);
             ACCESSORS.put(middleStateType, ready);
             ACCESSORS.put(frozenStateType, ready);
             return true;
@@ -64,6 +66,48 @@ public final class HansRefreezeStateAdapter {
         }
     }
 
+    public static Boolean fastFreezePendingOrNull(Object stateMachine) {
+        Accessors accessors = accessorsForStateMachine(stateMachine);
+        if (accessors == null) return null;
+        try {
+            return accessors.fastFreezePending.getBoolean(stateMachine);
+        } catch (ReflectiveOperationException | LinkageError | RuntimeException error) {
+            return null;
+        }
+    }
+
+    public static boolean clearFastFreezePending(Object stateMachine) {
+        return setFastFreezePending(stateMachine, false);
+    }
+
+    public static boolean setFastFreezePending(Object stateMachine, boolean pending) {
+        Accessors accessors = accessorsForStateMachine(stateMachine);
+        if (accessors == null) return false;
+        try {
+            accessors.fastFreezePending.setBoolean(stateMachine, pending);
+            return true;
+        } catch (ReflectiveOperationException | LinkageError | RuntimeException error) {
+            return false;
+        }
+    }
+
+    public static boolean requestMtoF(Object stateMachine, Object recoveryToken) {
+        Accessors accessors = accessorsForStateMachine(stateMachine);
+        if (accessors == null) return false;
+        try {
+            accessors.sendMessage.invoke(stateMachine, 8, recoveryToken);
+            return true;
+        } catch (ReflectiveOperationException | LinkageError | RuntimeException error) {
+            return false;
+        }
+    }
+
+    private static Accessors accessorsForStateMachine(Object stateMachine) {
+        if (stateMachine == null) return null;
+        AccessorSet set = ACCESSORS.get(stateMachine.getClass());
+        return set == null ? null : set.accessors;
+    }
+
     private static Accessors load(
             Class<?> stateMachineType,
             Class<?> middleStateType,
@@ -79,17 +123,31 @@ public final class HansRefreezeStateAdapter {
                 stateMachineType, "mHansPkg", packageType);
         Field reasonField = exactPrivateField(
                 stateMachineType, "mUnfreezeReason", String.class);
+        Field fastFreezeField = exactPrivateField(
+                stateMachineType, "mMtoFinFastFreeze", boolean.class);
+        Method sendMessage = stateMachineType.getMethod(
+                "sendMessage", int.class, Object.class);
+        int sendModifiers = sendMessage.getModifiers();
+        if (sendMessage.getReturnType() != void.class
+                || Modifier.isStatic(sendModifiers)
+                || !Modifier.isPublic(sendModifiers)) {
+            return null;
+        }
         middleOuter.setAccessible(true);
         frozenOuter.setAccessible(true);
         packageField.setAccessible(true);
         reasonField.setAccessible(true);
+        fastFreezeField.setAccessible(true);
+        sendMessage.setAccessible(true);
         return new Accessors(
                 middleStateType,
                 frozenStateType,
                 middleOuter,
                 frozenOuter,
                 packageField,
-                reasonField);
+                reasonField,
+                fastFreezeField,
+                sendMessage);
     }
 
     private static Field exactOuterField(Class<?> innerType, Class<?> outerType)
@@ -181,6 +239,8 @@ public final class HansRefreezeStateAdapter {
         private final Field frozenOuter;
         private final Field hansPackage;
         private final Field unfreezeReason;
+        private final Field fastFreezePending;
+        private final Method sendMessage;
         private final ValueAccessor outer;
 
         private Accessors(
@@ -189,13 +249,17 @@ public final class HansRefreezeStateAdapter {
                 Field middleOuter,
                 Field frozenOuter,
                 Field hansPackage,
-                Field unfreezeReason) {
+                Field unfreezeReason,
+                Field fastFreezePending,
+                Method sendMessage) {
             this.middleStateType = middleStateType;
             this.frozenStateType = frozenStateType;
             this.middleOuter = middleOuter;
             this.frozenOuter = frozenOuter;
             this.hansPackage = hansPackage;
             this.unfreezeReason = unfreezeReason;
+            this.fastFreezePending = fastFreezePending;
+            this.sendMessage = sendMessage;
             this.outer = value -> {
                 Class<?> type = value.getClass();
                 if (type == this.middleStateType) return this.middleOuter.get(value);

@@ -90,7 +90,7 @@
     <string name="hans_summary">减少系统冻结后台应用；可能会增加待机耗电</string>
     <string name="hans_detail">影响：后台应用可能更常保持运行</string>
     <string name="hans_r_to_m_timing_support_title">后台冻结准备时机</string>
-    <string name="hans_m_to_f_timing_support_title">后台冻结执行时机</string>
+    <string name="hans_m_to_f_timing_support_title">再次冻结执行控制</string>
     <string name="hans_core_exemption_support_title">完整冻结豁免</string>
     <string name="hans_lcd_on_exemption_support_title">亮屏状态冻结豁免</string>
     <string name="hans_wake_support_title">后台应用唤醒控制</string>
@@ -98,6 +98,7 @@
     <string name="hans_wake_stats_title">后台唤醒控制</string>
     <string name="hans_resource_support_title">后台资源保留控制</string>
     <string name="hans_resource_stats_title">后台资源保留</string>
+    <string name="hans_refreeze_stats_title">再次冻结控制</string>
     <string name="super_freeze_title">深度冻结保护</string>
     <string name="super_freeze_summary">减少系统对后台应用的深度冻结；可能明显增加耗电</string>
     <string name="super_freeze_detail">影响：后台应用保持运行的时间可能更长</string>

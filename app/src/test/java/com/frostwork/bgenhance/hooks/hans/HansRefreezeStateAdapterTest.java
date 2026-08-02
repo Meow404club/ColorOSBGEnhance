@@ -34,6 +34,19 @@ public final class HansRefreezeStateAdapterTest {
                 stateMachine,
                 "Alarm",
                 HansRefreezeStateAdapter.resolve(stateMachine.new FrozenState()));
+
+        assertEquals(Boolean.FALSE,
+                HansRefreezeStateAdapter.fastFreezePendingOrNull(stateMachine));
+        stateMachine.setMtoFinFastFreeze(true);
+        assertEquals(Boolean.TRUE,
+                HansRefreezeStateAdapter.fastFreezePendingOrNull(stateMachine));
+        assertTrue(HansRefreezeStateAdapter.clearFastFreezePending(stateMachine));
+        assertFalse(stateMachine.isMtoFinFastFreeze());
+        Object token = new Object();
+        assertTrue(HansRefreezeStateAdapter.requestMtoF(stateMachine, token));
+        assertEquals(1, stateMachine.sentMessages().size());
+        assertEquals(Integer.valueOf(8), stateMachine.sentMessages().get(0));
+        assertSame(token, stateMachine.sentMessageObjects().get(0));
     }
 
     @Test
@@ -51,6 +64,9 @@ public final class HansRefreezeStateAdapterTest {
         assertEquals(
                 HansRefreezeStateAdapter.Failure.ACCESSOR_NOT_PREPARED,
                 unprepared.failureOrNull());
+        assertNull(HansRefreezeStateAdapter.fastFreezePendingOrNull(new Object()));
+        assertFalse(HansRefreezeStateAdapter.clearFastFreezePending(new Object()));
+        assertFalse(HansRefreezeStateAdapter.requestMtoF(new Object(), new Object()));
     }
 
     @Test

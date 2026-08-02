@@ -9,6 +9,8 @@ import com.frostwork.bgenhance.residency.decision.FreezeDecision;
 import com.frostwork.bgenhance.residency.decision.ResidencyDecisionEngine;
 import com.frostwork.bgenhance.residency.decision.ResourceContext;
 import com.frostwork.bgenhance.residency.decision.ResourceDecision;
+import com.frostwork.bgenhance.residency.decision.RefreezeContext;
+import com.frostwork.bgenhance.residency.decision.RefreezeDecision;
 import com.frostwork.bgenhance.residency.decision.WakeContext;
 import com.frostwork.bgenhance.residency.decision.WakeDecision;
 import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
@@ -17,6 +19,8 @@ import com.frostwork.bgenhance.residency.model.ResidencyMode;
 import com.frostwork.bgenhance.residency.model.ResidencyPresets;
 import com.frostwork.bgenhance.residency.model.ResourcePolicy;
 import com.frostwork.bgenhance.residency.model.ResourceType;
+import com.frostwork.bgenhance.residency.model.RefreezeMode;
+import com.frostwork.bgenhance.residency.model.RefreezePolicy;
 import com.frostwork.bgenhance.residency.model.WakeChannelPolicy;
 import com.frostwork.bgenhance.residency.model.WakeMode;
 import com.frostwork.bgenhance.residency.model.WakePolicy;
@@ -114,6 +118,22 @@ public final class ResidencyDecisionReporterTest {
                 resourceDecision(kept, ResidencyIdentityIndex.invalidated())));
     }
 
+    @Test
+    public void mapsRefreezeDisabledDryRunSystemAndFailOpenResults() {
+        RuntimeConfigSnapshot disabled = refreezeSnapshot(RefreezeMode.DISABLED, false);
+        RuntimeConfigSnapshot dryRun = refreezeSnapshot(RefreezeMode.DISABLED, true);
+        RuntimeConfigSnapshot system = refreezeSnapshot(RefreezeMode.SYSTEM, false);
+
+        assertEquals(DiagnosticsResult.BLOCKED, ResidencyDecisionReporter.resultFor(
+                refreezeDecision(disabled, index(disabled))));
+        assertEquals(DiagnosticsResult.OBSERVED, ResidencyDecisionReporter.resultFor(
+                refreezeDecision(dryRun, index(dryRun))));
+        assertEquals(DiagnosticsResult.PASSED, ResidencyDecisionReporter.resultFor(
+                refreezeDecision(system, index(system))));
+        assertEquals(DiagnosticsResult.FAIL_OPEN, ResidencyDecisionReporter.resultFor(
+                refreezeDecision(disabled, ResidencyIdentityIndex.invalidated())));
+    }
+
     private static KillDecision decision(
             RuntimeConfigSnapshot snapshot,
             ResidencyIdentityIndex index,
@@ -161,6 +181,16 @@ public final class ResidencyDecisionReporterTest {
                         HookTargetIds.HANS_RESOURCE_DISPATCH));
     }
 
+    private static RefreezeDecision refreezeDecision(
+            RuntimeConfigSnapshot snapshot, ResidencyIdentityIndex index) {
+        return new ResidencyDecisionEngine(snapshot, index).decideRefreeze(
+                new RefreezeContext(
+                        new ResidencyTarget(PACKAGE, UID, -1),
+                        WakeSource.PACKET,
+                        FeatureIds.HANS_REFREEZE,
+                        HookTargetIds.HANS_M_TO_F_TIMING));
+    }
+
     private static RuntimeConfigSnapshot snapshot(boolean master, boolean dryRun) {
         AppResidencyPolicy policy = ResidencyPresets.create(PACKAGE, ResidencyMode.BALANCED);
         return RuntimeConfigSnapshot.available(
@@ -200,6 +230,22 @@ public final class ResidencyDecisionReporterTest {
                 base.wakePolicy(),
                 new ResourcePolicy(false, EnumSet.of(ResourceType.AUDIO)),
                 base.refreezePolicy());
+        return RuntimeConfigSnapshot.available(
+                1L, true, true, dryRun, 2L, Map.of(PACKAGE, policy));
+    }
+
+    private static RuntimeConfigSnapshot refreezeSnapshot(
+            RefreezeMode mode, boolean dryRun) {
+        AppResidencyPolicy base = ResidencyPresets.create(PACKAGE, ResidencyMode.CUSTOM);
+        AppResidencyPolicy policy = new AppResidencyPolicy(
+                PACKAGE,
+                true,
+                ResidencyMode.CUSTOM,
+                base.killPolicy(),
+                base.freezePolicy(),
+                base.wakePolicy(),
+                base.resourcePolicy(),
+                new RefreezePolicy(mode, 0L, 0L, 0L, 0L, 0L, 0L, 0L));
         return RuntimeConfigSnapshot.available(
                 1L, true, true, dryRun, 2L, Map.of(PACKAGE, policy));
     }

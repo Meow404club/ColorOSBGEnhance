@@ -123,6 +123,8 @@ public final class DiagnosticsActivity extends AppCompatActivity {
                     new StatItem(R.string.hans_wake_stats_title, FeatureIds.HANS_WAKE),
                     new StatItem(R.string.hans_resource_stats_title,
                             FeatureIds.HANS_RESOURCE),
+                    new StatItem(R.string.hans_refreeze_stats_title,
+                            FeatureIds.HANS_REFREEZE),
                     new StatItem(R.string.super_freeze_title, FeatureIds.SUPER_FREEZE),
                     new StatItem(R.string.android_freeze_title, FeatureIds.ANDROID_FREEZE, true))
     );

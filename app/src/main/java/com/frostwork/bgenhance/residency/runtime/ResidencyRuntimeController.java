@@ -14,7 +14,9 @@ import java.util.Collections;
 import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -22,7 +24,17 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class ResidencyRuntimeController {
     private static final StaleIdentityBuildException STALE_IDENTITY_BUILD =
             new StaleIdentityBuildException();
+    private static final Executor DEFAULT_LISTENER_EXECUTOR =
+            Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "BgEnhanceRuntimeObserver");
+        thread.setDaemon(true);
+        return thread;
+    });
     private final Executor identityExecutor;
+    private final Executor listenerExecutor;
+    private final CopyOnWriteArrayList<ListenerRegistration> stateListeners =
+            new CopyOnWriteArrayList<>();
+    private final Object listenerLock = new Object();
     private final AtomicLong generation = new AtomicLong();
     private final AtomicReference<ResidencyRuntimeState> state =
             new AtomicReference<>(new ResidencyRuntimeState(
@@ -34,7 +46,37 @@ public final class ResidencyRuntimeController {
     private PackageUidSource packageUidSource;
 
     public ResidencyRuntimeController(Executor identityExecutor) {
+        this(identityExecutor, DEFAULT_LISTENER_EXECUTOR);
+    }
+
+    ResidencyRuntimeController(Executor identityExecutor, Executor listenerExecutor) {
         this.identityExecutor = Objects.requireNonNull(identityExecutor, "identityExecutor");
+        this.listenerExecutor = Objects.requireNonNull(listenerExecutor, "listenerExecutor");
+    }
+
+    public void addStateListener(StateListener listener) {
+        StateListener value = Objects.requireNonNull(listener, "listener");
+        ListenerRegistration registration;
+        synchronized (listenerLock) {
+            for (ListenerRegistration existing : stateListeners) {
+                if (existing.listener == value) return;
+            }
+            registration = new ListenerRegistration(value);
+            stateListeners.add(registration);
+        }
+        dispatch(registration, state.get());
+    }
+
+    public void removeStateListener(StateListener listener) {
+        if (listener == null) return;
+        synchronized (listenerLock) {
+            for (ListenerRegistration registration : stateListeners) {
+                if (registration.listener != listener) continue;
+                registration.deactivate();
+                stateListeners.remove(registration);
+                return;
+            }
+        }
     }
 
     public synchronized void updateConfig(RuntimeConfigSnapshot snapshot) {
@@ -165,7 +207,12 @@ public final class ResidencyRuntimeController {
             ResidencyRuntimeState.Status status,
             long token,
             String error) {
-        state.set(new ResidencyRuntimeState(snapshot, index, status, token, error));
+        ResidencyRuntimeState next =
+                new ResidencyRuntimeState(snapshot, index, status, token, error);
+        state.set(next);
+        for (ListenerRegistration registration : stateListeners) {
+            dispatch(registration, next);
+        }
     }
 
     public ResidencyRuntimeState state() { return state.get(); }
@@ -188,6 +235,58 @@ public final class ResidencyRuntimeController {
 
     public RefreezeDecision decideRefreeze(RefreezeContext context) {
         return state.get().decisionEngine().decideRefreeze(context);
+    }
+
+    private void dispatch(
+            ListenerRegistration registration, ResidencyRuntimeState next) {
+        try {
+            listenerExecutor.execute(() -> registration.deliver(next));
+        } catch (Throwable ignored) {
+            // Runtime publication remains valid even when observer dispatch is unavailable.
+        }
+    }
+
+    public interface StateListener {
+        void onStateChanged(ResidencyRuntimeState state);
+    }
+
+    private static final class ListenerRegistration {
+        private final StateListener listener;
+        private long lastDeliveredGeneration = -1L;
+        private ResidencyRuntimeState.Status lastDeliveredStatus;
+        private boolean active = true;
+
+        private ListenerRegistration(StateListener listener) {
+            this.listener = Objects.requireNonNull(listener, "listener");
+        }
+
+        private void deliver(ResidencyRuntimeState next) {
+            synchronized (this) {
+                if (!active || next.generation() < lastDeliveredGeneration) return;
+                if (next.generation() == lastDeliveredGeneration
+                        && !advancesSameGeneration(next.status())) {
+                    return;
+                }
+                lastDeliveredGeneration = next.generation();
+                lastDeliveredStatus = next.status();
+            }
+            try {
+                listener.onStateChanged(next);
+            } catch (Throwable ignored) {
+                // Observers cannot interfere with atomic runtime publication.
+            }
+        }
+
+        private synchronized void deactivate() {
+            active = false;
+        }
+
+        private boolean advancesSameGeneration(ResidencyRuntimeState.Status nextStatus) {
+            return lastDeliveredStatus
+                    == ResidencyRuntimeState.Status.IDENTITY_REBUILD_PENDING
+                    && nextStatus
+                    != ResidencyRuntimeState.Status.IDENTITY_REBUILD_PENDING;
+        }
     }
 
     private static String errorText(Throwable error) {

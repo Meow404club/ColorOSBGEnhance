@@ -5,6 +5,7 @@ import com.frostwork.bgenhance.residency.decision.DecisionTrace;
 import com.frostwork.bgenhance.residency.decision.FreezeDecision;
 import com.frostwork.bgenhance.residency.decision.KillDecision;
 import com.frostwork.bgenhance.residency.decision.ResourceDecision;
+import com.frostwork.bgenhance.residency.decision.RefreezeDecision;
 import com.frostwork.bgenhance.residency.decision.WakeDecision;
 
 /** Converts typed residency decisions into the existing bounded diagnostics stream. */
@@ -61,6 +62,17 @@ public final class ResidencyDecisionReporter {
             HookDiagnostics.recordEventFromLockedPath(event, resultFor(decision));
         } catch (Throwable ignored) {
             // Diagnostics must never delay or change a HANS callback.
+        }
+    }
+
+    /** Records a timed refreeze decision without scheduling work from a HANS callback. */
+    public static void recordRefreezeFromLockedPath(
+            HookEvent event, RefreezeDecision decision) {
+        if (event == null || decision == null) return;
+        try {
+            HookDiagnostics.recordEventFromLockedPath(event, resultFor(decision));
+        } catch (Throwable ignored) {
+            // Diagnostics must never delay or change a HANS state transition.
         }
     }
 
@@ -136,6 +148,14 @@ public final class ResidencyDecisionReporter {
         if (disposition == DecisionDisposition.FAIL_OPEN) return DiagnosticsResult.FAIL_OPEN;
         if (disposition == DecisionDisposition.DRY_RUN) return DiagnosticsResult.OBSERVED;
         return decision.keepsResource()
+                ? DiagnosticsResult.BLOCKED : DiagnosticsResult.PASSED;
+    }
+
+    static String resultFor(RefreezeDecision decision) {
+        DecisionDisposition disposition = decision.trace().disposition();
+        if (disposition == DecisionDisposition.FAIL_OPEN) return DiagnosticsResult.FAIL_OPEN;
+        if (disposition == DecisionDisposition.DRY_RUN) return DiagnosticsResult.OBSERVED;
+        return decision.effectiveAction() == RefreezeDecision.Action.DISABLE_REFREEZE
                 ? DiagnosticsResult.BLOCKED : DiagnosticsResult.PASSED;
     }
 }
