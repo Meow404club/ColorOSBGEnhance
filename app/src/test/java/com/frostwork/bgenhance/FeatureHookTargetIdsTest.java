@@ -21,10 +21,8 @@ public final class FeatureHookTargetIdsTest {
             actual.add(targetId);
         }
 
-        HashSet<String> implementedTargets = new HashSet<>(HookTargetIds.all());
-        implementedTargets.remove(HookTargetIds.HANS_WAKE_DISPATCH);
-        assertEquals(implementedTargets, new HashSet<>(actual));
-        assertEquals(implementedTargets.size(), actual.size());
+        assertEquals(new HashSet<>(HookTargetIds.all()), new HashSet<>(actual));
+        assertEquals(HookTargetIds.all().size(), actual.size());
         assertEquals(actual.size(), new HashSet<>(actual).size());
     }
 }

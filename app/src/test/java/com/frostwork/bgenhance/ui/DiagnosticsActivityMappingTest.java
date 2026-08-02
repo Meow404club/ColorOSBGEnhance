@@ -8,6 +8,7 @@ import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.R;
 import java.lang.reflect.Field;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import org.junit.Test;
@@ -39,6 +40,12 @@ public final class DiagnosticsActivityMappingTest {
                 supportTitles().get(HookTargetIds.HANS_WAKE_DISPATCH));
         assertEquals(Integer.valueOf(R.string.hans_wake_stats_title),
                 statTitles().get(FeatureIds.HANS_WAKE));
+    }
+
+    @Test
+    public void everyStableIdentifierHasExactlyOneDiagnosticsRow() throws Exception {
+        assertEquals(new HashSet<>(HookTargetIds.all()), supportTitles().keySet());
+        assertEquals(new HashSet<>(FeatureIds.all()), statTitles().keySet());
     }
 
     @Test
@@ -86,6 +93,7 @@ public final class DiagnosticsActivityMappingTest {
             titleField.setAccessible(true);
             result.put((String) idField.get(support), titleField.getInt(support));
         }
+        assertEquals("duplicate support target", supports.size(), result.size());
         return result;
     }
 
@@ -94,10 +102,12 @@ public final class DiagnosticsActivityMappingTest {
         groupsField.setAccessible(true);
         List<?> groups = (List<?>) groupsField.get(null);
         Map<String, Integer> result = new HashMap<>();
+        int itemCount = 0;
         for (Object group : groups) {
             Field itemsField = group.getClass().getDeclaredField("items");
             itemsField.setAccessible(true);
             for (Object item : (List<?>) itemsField.get(group)) {
+                itemCount++;
                 Field idField = item.getClass().getDeclaredField("featureId");
                 Field titleField = item.getClass().getDeclaredField("titleRes");
                 idField.setAccessible(true);
@@ -105,6 +115,7 @@ public final class DiagnosticsActivityMappingTest {
                 result.put((String) idField.get(item), titleField.getInt(item));
             }
         }
+        assertEquals("duplicate statistics feature", itemCount, result.size());
         return result;
     }
 }
