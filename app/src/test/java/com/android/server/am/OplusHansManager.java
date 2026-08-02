@@ -3,7 +3,7 @@ package com.android.server.am;
 /** Firmware-shaped exemption target with overloads that must remain unsupported. */
 public class OplusHansManager {
     public boolean hansFreeze(int uid, String reason) {
-        return true;
+        return hansFreeze(uid, reason, false);
     }
 
     public boolean hansFreeze(int uid, String reason, boolean ignoreImportance) {

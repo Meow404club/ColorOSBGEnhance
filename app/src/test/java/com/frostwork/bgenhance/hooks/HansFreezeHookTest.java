@@ -169,20 +169,19 @@ public final class HansFreezeHookTest {
     }
 
     @Test
-    public void managerFallbackEvaluatesNestedOverloadsOnlyOnce() throws Throwable {
+    public void managerFallbackEvaluatesRealTwoToThreeArgumentDelegationOnlyOnce()
+            throws Exception {
         AtomicInteger decisions = new AtomicInteger();
         HansFreezeHook hook = new HansFreezeHook((target, source) -> {
             decisions.incrementAndGet();
             return allowedDecision(source);
         });
-        FakeChain inner = new FakeChain(Boolean.TRUE, UID, "", false);
-        FakeChain outer = FakeChain.calling(
-                () -> hook.interceptHans(inner), UID, "");
+        HookedHansManager manager = new HookedHansManager(hook);
 
-        assertEquals(Boolean.TRUE, hook.interceptHans(outer));
+        assertTrue(manager.hansFreeze(UID, ""));
         assertEquals(1, decisions.get());
-        assertEquals(1, outer.proceedCalls());
-        assertEquals(1, inner.proceedCalls());
+        assertEquals(1, manager.twoArgumentProceedCalls());
+        assertEquals(1, manager.threeArgumentProceedCalls());
     }
 
     @Test
@@ -422,26 +421,42 @@ public final class HansFreezeHookTest {
     private static final class FakeChain implements XposedInterface.Chain {
         private final List<Object> args;
         private final HansFreezeHook.OriginalCall originalCall;
+        private final Executable executable;
+        private final Object thisObject;
         private final AtomicInteger proceedCalls = new AtomicInteger();
 
         private FakeChain(Object result, Object... args) {
-            this(() -> result, args);
+            this(null, null, () -> result, args);
         }
 
-        private FakeChain(HansFreezeHook.OriginalCall originalCall, Object[] args) {
+        private FakeChain(
+                Executable executable,
+                Object thisObject,
+                HansFreezeHook.OriginalCall originalCall,
+                Object[] args) {
+            this.executable = executable;
+            this.thisObject = thisObject;
             this.originalCall = originalCall;
             this.args = Arrays.asList(args);
         }
 
         static FakeChain calling(
                 HansFreezeHook.OriginalCall originalCall, Object... args) {
-            return new FakeChain(originalCall, args);
+            return new FakeChain(null, null, originalCall, args);
+        }
+
+        static FakeChain calling(
+                Executable executable,
+                Object thisObject,
+                HansFreezeHook.OriginalCall originalCall,
+                Object... args) {
+            return new FakeChain(executable, thisObject, originalCall, args);
         }
 
         int proceedCalls() { return proceedCalls.get(); }
 
-        @Override public Executable getExecutable() { return null; }
-        @Override public Object getThisObject() { return null; }
+        @Override public Executable getExecutable() { return executable; }
+        @Override public Object getThisObject() { return thisObject; }
         @Override public List<Object> getArgs() { return args; }
         @Override public Object getArg(int index) { return args.get(index); }
         @Override public Object proceed() throws Throwable {
@@ -459,6 +474,70 @@ public final class HansFreezeHookTest {
         @Override public Object proceedWith(Object thisObject, Object[] nextArgs) throws Throwable {
             proceedCalls.incrementAndGet();
             return originalCall.proceed();
+        }
+    }
+
+    private static final class HookedHansManager extends OplusHansManager {
+        private static final Method TWO_ARGUMENTS;
+        private static final Method THREE_ARGUMENTS;
+
+        static {
+            try {
+                TWO_ARGUMENTS = OplusHansManager.class.getDeclaredMethod(
+                        "hansFreeze", int.class, String.class);
+                THREE_ARGUMENTS = OplusHansManager.class.getDeclaredMethod(
+                        "hansFreeze", int.class, String.class, boolean.class);
+            } catch (NoSuchMethodException error) {
+                throw new ExceptionInInitializerError(error);
+            }
+        }
+
+        private final HansFreezeHook hook;
+        private FakeChain twoArgumentChain;
+        private FakeChain threeArgumentChain;
+
+        private HookedHansManager(HansFreezeHook hook) {
+            this.hook = hook;
+        }
+
+        @Override
+        public boolean hansFreeze(int uid, String reason) {
+            twoArgumentChain = FakeChain.calling(
+                    TWO_ARGUMENTS,
+                    this,
+                    () -> HookedHansManager.super.hansFreeze(uid, reason),
+                    uid,
+                    reason);
+            return intercept(twoArgumentChain);
+        }
+
+        @Override
+        public boolean hansFreeze(int uid, String reason, boolean ignoreImportance) {
+            threeArgumentChain = FakeChain.calling(
+                    THREE_ARGUMENTS,
+                    this,
+                    () -> HookedHansManager.super.hansFreeze(
+                            uid, reason, ignoreImportance),
+                    uid,
+                    reason,
+                    ignoreImportance);
+            return intercept(threeArgumentChain);
+        }
+
+        int twoArgumentProceedCalls() {
+            return twoArgumentChain == null ? 0 : twoArgumentChain.proceedCalls();
+        }
+
+        int threeArgumentProceedCalls() {
+            return threeArgumentChain == null ? 0 : threeArgumentChain.proceedCalls();
+        }
+
+        private boolean intercept(FakeChain chain) {
+            try {
+                return (Boolean) hook.interceptHans(chain);
+            } catch (Throwable error) {
+                throw new AssertionError(error);
+            }
         }
     }
 }
