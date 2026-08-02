@@ -23,6 +23,7 @@ public final class FeatureIds {
     public static final String OSENSE_PER_PROCESS = "osense_per_process";
     public static final String HANS = "hans_freeze";
     public static final String HANS_WAKE = "hans_wake";
+    public static final String HANS_RESOURCE = "hans_resource";
     public static final String SUPER_FREEZE = "super_freeze";
     public static final String ANDROID_FREEZE = "android_freeze";
 
@@ -31,7 +32,7 @@ public final class FeatureIds {
             FAST_CAMERA_START, FAST_CAMERA_OPERATION, FAST_GAME_START, FAST_AI,
             TOURNAMENT, MEMORY_FORCE, MEMORY_OVER,
             NIRVANA, CAMERA_LOW_FREE, GAME_LOW_FREE, OSENSE_PER_PROCESS,
-            HANS, HANS_WAKE, SUPER_FREEZE, ANDROID_FREEZE
+            HANS, HANS_WAKE, SUPER_FREEZE, ANDROID_FREEZE, HANS_RESOURCE
     ));
 
     public static List<String> all() {

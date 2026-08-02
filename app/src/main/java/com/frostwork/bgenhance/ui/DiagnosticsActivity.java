@@ -92,7 +92,9 @@ public final class DiagnosticsActivity extends AppCompatActivity {
             new SupportItem(R.string.hans_wake_support_title,
                     HookTargetIds.HANS_WAKE_DISPATCH),
             new SupportItem(R.string.alarm_wake_delivery_support_title,
-                    HookTargetIds.ALARM_WAKE_DELIVERY)
+                    HookTargetIds.ALARM_WAKE_DELIVERY),
+            new SupportItem(R.string.hans_resource_support_title,
+                    HookTargetIds.HANS_RESOURCE_DISPATCH)
     );
 
 
@@ -119,6 +121,8 @@ public final class DiagnosticsActivity extends AppCompatActivity {
             new StatGroup(R.string.stats_group_freeze,
                     new StatItem(R.string.hans_title, FeatureIds.HANS),
                     new StatItem(R.string.hans_wake_stats_title, FeatureIds.HANS_WAKE),
+                    new StatItem(R.string.hans_resource_stats_title,
+                            FeatureIds.HANS_RESOURCE),
                     new StatItem(R.string.super_freeze_title, FeatureIds.SUPER_FREEZE),
                     new StatItem(R.string.android_freeze_title, FeatureIds.ANDROID_FREEZE, true))
     );

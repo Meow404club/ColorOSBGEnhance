@@ -29,7 +29,8 @@ public final class HookTargetIdsTest {
                 "hans_r_to_m_timing",
                 "hans_m_to_f_timing",
                 "hans_core_exemption",
-                "hans_lcd_on_exemption"
+                "hans_lcd_on_exemption",
+                "hans_resource_dispatch"
         ), HookTargetIds.all());
     }
 

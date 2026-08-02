@@ -19,6 +19,7 @@ public final class HookTargetIds {
     public static final String HANS_FREEZE_DISPATCH = "hans_freeze_dispatch";
     public static final String HANS_WAKE_DISPATCH = "hans_wake_dispatch";
     public static final String ALARM_WAKE_DELIVERY = "alarm_wake_delivery";
+    public static final String HANS_RESOURCE_DISPATCH = "hans_resource_dispatch";
     public static final String HANS_R_TO_M_TIMING = "hans_r_to_m_timing";
     public static final String HANS_M_TO_F_TIMING = "hans_m_to_f_timing";
     public static final String HANS_CORE_EXEMPTION = "hans_core_exemption";
@@ -39,7 +40,8 @@ public final class HookTargetIds {
             HANS_R_TO_M_TIMING,
             HANS_M_TO_F_TIMING,
             HANS_CORE_EXEMPTION,
-            HANS_LCD_ON_EXEMPTION
+            HANS_LCD_ON_EXEMPTION,
+            HANS_RESOURCE_DISPATCH
     ));
 
     public static List<String> all() {

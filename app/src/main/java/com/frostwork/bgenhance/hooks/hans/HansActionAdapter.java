@@ -40,7 +40,8 @@ public final class HansActionAdapter {
             if (!packageResolution.isResolved()) {
                 return Resolution.packageFailed(packageResolution.failureOrNull());
             }
-            return Resolution.resolved(packageResolution.targetOrNull());
+            return Resolution.resolved(
+                    packageResolution.targetOrNull(), hansPackage);
         } catch (IllegalAccessException | RuntimeException error) {
             return Resolution.failed(Failure.REFLECTION_FAILED);
         }
@@ -110,29 +111,39 @@ public final class HansActionAdapter {
 
     public static final class Resolution {
         private final HansObjectAdapter.Target target;
+        private final Object packageObject;
         private final Failure failure;
         private final HansObjectAdapter.Failure packageFailure;
 
         private Resolution(
                 HansObjectAdapter.Target target,
+                Object packageObject,
                 Failure failure,
                 HansObjectAdapter.Failure packageFailure) {
             this.target = target;
+            this.packageObject = packageObject;
             this.failure = failure;
             this.packageFailure = packageFailure;
         }
 
-        private static Resolution resolved(HansObjectAdapter.Target target) {
-            return new Resolution(Objects.requireNonNull(target, "target"), null, null);
+        private static Resolution resolved(
+                HansObjectAdapter.Target target, Object packageObject) {
+            return new Resolution(
+                    Objects.requireNonNull(target, "target"),
+                    Objects.requireNonNull(packageObject, "packageObject"),
+                    null,
+                    null);
         }
 
         private static Resolution failed(Failure failure) {
-            return new Resolution(null, Objects.requireNonNull(failure, "failure"), null);
+            return new Resolution(
+                    null, null, Objects.requireNonNull(failure, "failure"), null);
         }
 
         private static Resolution packageFailed(
                 HansObjectAdapter.Failure packageFailure) {
             return new Resolution(
+                    null,
                     null,
                     Failure.PACKAGE_RESOLUTION_FAILED,
                     Objects.requireNonNull(packageFailure, "packageFailure"));
@@ -140,6 +151,7 @@ public final class HansActionAdapter {
 
         public boolean isResolved() { return target != null; }
         public HansObjectAdapter.Target targetOrNull() { return target; }
+        public Object packageObjectOrNull() { return packageObject; }
         public Failure failureOrNull() { return failure; }
         public HansObjectAdapter.Failure packageFailureOrNull() {
             return packageFailure;

@@ -52,6 +52,14 @@ public final class DiagnosticsActivityMappingTest {
     }
 
     @Test
+    public void resourceControlHasUserFacingSupportAndRuntimeRows() throws Exception {
+        assertEquals(Integer.valueOf(R.string.hans_resource_support_title),
+                supportTitles().get(HookTargetIds.HANS_RESOURCE_DISPATCH));
+        assertEquals(Integer.valueOf(R.string.hans_resource_stats_title),
+                statTitles().get(FeatureIds.HANS_RESOURCE));
+    }
+
+    @Test
     public void everyStableIdentifierHasExactlyOneDiagnosticsRow() throws Exception {
         assertEquals(new HashSet<>(HookTargetIds.all()), supportTitles().keySet());
         assertEquals(new HashSet<>(FeatureIds.all()), statTitles().keySet());

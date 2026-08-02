@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import com.android.server.hans.OplusHansPackage;
@@ -27,6 +28,7 @@ public final class HansActionAdapterTest {
         assertEquals("fixture.package", target.packageName());
         assertTrue(target.frozen());
         assertFalse(target.superFreezeMode());
+        assertSame(hansPackage, resolution.packageObjectOrNull());
         assertNull(resolution.failureOrNull());
         assertNull(resolution.packageFailureOrNull());
     }
