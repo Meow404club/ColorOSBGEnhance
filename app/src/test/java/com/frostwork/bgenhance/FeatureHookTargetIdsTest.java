@@ -4,6 +4,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 import com.frostwork.bgenhance.hooks.HansActiveRecoveryHook;
+import com.frostwork.bgenhance.hooks.HansFastFreezeHook;
+import com.frostwork.bgenhance.hooks.HansFreezeHook;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -32,5 +34,18 @@ public final class FeatureHookTargetIdsTest {
     public void activeRecoveryInstallsAfterEveryHansBehaviorGate() {
         List<FeatureHook> hooks = MainHook.systemServerHooks();
         assertTrue(hooks.get(hooks.size() - 1) instanceof HansActiveRecoveryHook);
+    }
+
+    @Test
+    public void fastFreezeInstallsImmediatelyAfterObjectFreezeGate() {
+        List<FeatureHook> hooks = MainHook.systemServerHooks();
+        int freezeIndex = -1;
+        int fastIndex = -1;
+        for (int index = 0; index < hooks.size(); index++) {
+            if (hooks.get(index) instanceof HansFreezeHook) freezeIndex = index;
+            if (hooks.get(index) instanceof HansFastFreezeHook) fastIndex = index;
+        }
+        assertTrue(freezeIndex >= 0);
+        assertEquals(freezeIndex + 1, fastIndex);
     }
 }

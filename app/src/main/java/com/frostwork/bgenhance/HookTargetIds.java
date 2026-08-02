@@ -17,6 +17,7 @@ public final class HookTargetIds {
     public static final String OSENSE_GROUP_CLEAN = "osense_group_clean";
     public static final String OSENSE_PROCESS_KILL = "osense_process_kill";
     public static final String HANS_FREEZE_DISPATCH = "hans_freeze_dispatch";
+    public static final String HANS_FAST_FREEZE_DISPATCH = "hans_fast_freeze_dispatch";
     public static final String HANS_WAKE_DISPATCH = "hans_wake_dispatch";
     public static final String ALARM_WAKE_DELIVERY = "alarm_wake_delivery";
     public static final String HANS_RESOURCE_DISPATCH = "hans_resource_dispatch";
@@ -36,6 +37,7 @@ public final class HookTargetIds {
             OSENSE_GROUP_CLEAN,
             OSENSE_PROCESS_KILL,
             HANS_FREEZE_DISPATCH,
+            HANS_FAST_FREEZE_DISPATCH,
             HANS_WAKE_DISPATCH,
             ALARM_WAKE_DELIVERY,
             HANS_R_TO_M_TIMING,

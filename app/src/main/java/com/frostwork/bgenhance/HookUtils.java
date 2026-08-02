@@ -2,6 +2,7 @@ package com.frostwork.bgenhance;
 
 import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
+import java.lang.reflect.Executable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -55,6 +56,13 @@ public final class HookUtils {
 
     public static int installedHookCount() {
         return HANDLES.size();
+    }
+
+    public static boolean deoptimize(Executable executable) {
+        XposedModule module = sModule;
+        if (module == null) throw new IllegalStateException("Xposed module not initialized");
+        if (executable == null) return false;
+        return module.deoptimize(executable);
     }
 
     public static List<XposedInterface.HookHandle> hookHandles() {

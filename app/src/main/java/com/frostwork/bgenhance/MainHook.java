@@ -6,6 +6,7 @@ import com.frostwork.bgenhance.hooks.AthenaPeriodicHook;
 import com.frostwork.bgenhance.hooks.FastClearHook;
 import com.frostwork.bgenhance.hooks.HansExemptionHook;
 import com.frostwork.bgenhance.hooks.HansActiveRecoveryHook;
+import com.frostwork.bgenhance.hooks.HansFastFreezeHook;
 import com.frostwork.bgenhance.hooks.HansFreezeHook;
 import com.frostwork.bgenhance.hooks.HansResourceHook;
 import com.frostwork.bgenhance.hooks.HansRefreezeHook;
@@ -92,6 +93,7 @@ public final class MainHook extends XposedModule {
                 new NirvanaHook(),
                 new OsenseProcessKillHook(),
                 new HansFreezeHook(),
+                new HansFastFreezeHook(),
                 new HansWakeHook(),
                 new AlarmWakeHook(),
                 new HansResourceHook(),

@@ -43,6 +43,14 @@ public final class DiagnosticsActivityMappingTest {
     }
 
     @Test
+    public void fastFreezeHasIndependentUserFacingSupportStatus() throws Exception {
+        assertEquals(Integer.valueOf(R.string.hans_fast_freeze_support_title),
+                supportTitles().get(HookTargetIds.HANS_FAST_FREEZE_DISPATCH));
+        assertEquals(Integer.valueOf(R.string.hans_title),
+                statTitles().get(FeatureIds.HANS));
+    }
+
+    @Test
     public void alarmDeliveryHasIndependentSupportAndSharedWakeStatistics() throws Exception {
         assertEquals(Integer.valueOf(R.string.alarm_wake_delivery_support_title),
                 supportTitles().get(HookTargetIds.ALARM_WAKE_DELIVERY));

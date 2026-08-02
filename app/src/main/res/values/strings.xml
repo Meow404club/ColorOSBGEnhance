@@ -40,6 +40,7 @@
     <string name="nirvana_nav_title">应用分组清理保护</string>
     <string name="nirvana_nav_summary">控制相机、游戏等场景中的批量后台清理</string>
     <string name="freeze_nav_title">后台冻结</string>
+    <string name="hans_fast_freeze_support_title">快速冻结保护</string>
     <string name="freeze_nav_summary">控制后台应用冻结，并检测当前系统是否支持相关功能</string>
     <string name="diagnostics_title">Hook 诊断与统计</string>
     <string name="diagnostics_summary">检查系统进程是否加载模块、设置是否同步，以及各项保护是否实际触发</string>

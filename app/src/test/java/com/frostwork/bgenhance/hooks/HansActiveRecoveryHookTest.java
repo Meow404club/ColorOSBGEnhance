@@ -280,6 +280,7 @@ public final class HansActiveRecoveryHookTest {
                                 FreezeSource.NORMAL,
                                 FreezeSource.SUPER,
                                 FreezeSource.PRELOAD),
+                        false,
                         true,
                         true);
 
@@ -299,7 +300,7 @@ public final class HansActiveRecoveryHookTest {
     public void missingBehaviorGatesProduceNoRecoveryCapabilities() {
         HansActiveRecoveryPlanner.Capabilities capabilities =
                 HansActiveRecoveryHook.behaviorCapabilities(
-                        Collections.emptySet(), false, false);
+                        Collections.emptySet(), false, false, false);
 
         for (FreezeSource source : FreezeSource.values()) {
             assertFalse(capabilities.supportsFreeze(source));
@@ -310,6 +311,23 @@ public final class HansActiveRecoveryHookTest {
         for (ResourceType resource : ResourceType.values()) {
             assertFalse(capabilities.supportsResource(resource));
         }
+    }
+
+    @Test
+    public void fastFreezeRecoveryRequiresItsIndependentInstalledGate() {
+        HansActiveRecoveryPlanner.Capabilities withoutFast =
+                HansActiveRecoveryHook.behaviorCapabilities(
+                        EnumSet.of(FreezeSource.NORMAL, FreezeSource.FAST),
+                        false,
+                        true,
+                        true);
+        HansActiveRecoveryPlanner.Capabilities withFast =
+                HansActiveRecoveryHook.behaviorCapabilities(
+                        EnumSet.of(FreezeSource.NORMAL), true, true, true);
+
+        assertFalse(withoutFast.supportsFreeze(FreezeSource.FAST));
+        assertTrue(withFast.supportsFreeze(FreezeSource.FAST));
+        assertTrue(withFast.supportsFreeze(FreezeSource.NORMAL));
     }
 
     private HansActiveRecoveryHook hook(

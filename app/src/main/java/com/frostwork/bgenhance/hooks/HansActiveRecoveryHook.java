@@ -276,19 +276,27 @@ public final class HansActiveRecoveryHook implements FeatureHook {
                 FeatureRegistry.isInstalled(HookTargetIds.HANS_FREEZE_DISPATCH)
                         ? HansFreezeHook.installedFreezeSources()
                         : Collections.emptySet(),
+                FeatureRegistry.isInstalled(HookTargetIds.HANS_FAST_FREEZE_DISPATCH),
                 FeatureRegistry.isInstalled(HookTargetIds.HANS_LCD_ON_EXEMPTION),
                 FeatureRegistry.isInstalled(HookTargetIds.HANS_RESOURCE_DISPATCH));
     }
 
     static HansActiveRecoveryPlanner.Capabilities behaviorCapabilities(
             java.util.Set<FreezeSource> installedFreezeSources,
+            boolean fastFreezeInstalled,
             boolean lcdOnExemptionInstalled,
             boolean resourceInstalled) {
+        Objects.requireNonNull(installedFreezeSources, "installedFreezeSources");
+        EnumSet<FreezeSource> freezeSources = installedFreezeSources.isEmpty()
+                ? EnumSet.noneOf(FreezeSource.class)
+                : EnumSet.copyOf(installedFreezeSources);
+        freezeSources.remove(FreezeSource.FAST);
+        if (fastFreezeInstalled) freezeSources.add(FreezeSource.FAST);
         EnumSet<ResourceType> resources = resourceInstalled
                 ? EnumSet.allOf(ResourceType.class)
                 : EnumSet.noneOf(ResourceType.class);
         return new HansActiveRecoveryPlanner.Capabilities(
-                Objects.requireNonNull(installedFreezeSources, "installedFreezeSources"),
+                Collections.unmodifiableSet(freezeSources),
                 false,
                 lcdOnExemptionInstalled,
                 resourceInstalled,
