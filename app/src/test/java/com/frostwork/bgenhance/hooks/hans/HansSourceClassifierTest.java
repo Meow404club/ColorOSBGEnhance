@@ -23,6 +23,20 @@ public final class HansSourceClassifierTest {
     }
 
     @Test
+    public void classifiesManagerFallbackMarkersWithoutObjectMode() {
+        assertResolved(FreezeSource.NORMAL, HansSourceClassifier.classifyManager(""));
+        assertResolved(FreezeSource.FAST, HansSourceClassifier.classifyManager("enterFF"));
+        assertResolved(FreezeSource.PRELOAD, HansSourceClassifier.classifyManager("Preload_F"));
+        assertResolved(FreezeSource.SUPER, HansSourceClassifier.classifyManager("Super_F"));
+        assertFailure(
+                HansSourceClassifier.Failure.UNKNOWN_SOURCE,
+                HansSourceClassifier.classifyManager("future_freeze_source"));
+        assertFailure(
+                HansSourceClassifier.Failure.NULL_SOURCE,
+                HansSourceClassifier.classifyManager(null));
+    }
+
+    @Test
     public void failsOpenWhenSuperFlagConflictsWithFastOrPreloadMarker() {
         assertFailure(
                 HansSourceClassifier.Failure.CONFLICTING_SOURCE,

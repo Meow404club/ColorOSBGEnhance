@@ -22,11 +22,24 @@ import com.frostwork.bgenhance.residency.runtime.ResidencyTarget;
 import io.github.libxposed.api.XposedInterface;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.util.Objects;
 
 /** HANS freeze gate with an object-level terminal hook and old-ROM fallbacks. */
 public final class HansFreezeHook implements FeatureHook {
     private static final String CGROUP_CLASS = "com.android.server.hans.freeze.HansCGroup";
     private static final String MANAGER_CLASS = "com.android.server.am.OplusHansManager";
+    static final int UNKNOWN_SOURCE_CODE = -1;
+
+    private final FreezeDecisionResolver decisionResolver;
+    private final ThreadLocal<Boolean> managerFallbackActive = new ThreadLocal<>();
+
+    public HansFreezeHook() {
+        this(HansFreezeHook::decide);
+    }
+
+    HansFreezeHook(FreezeDecisionResolver decisionResolver) {
+        this.decisionResolver = Objects.requireNonNull(decisionResolver, "decisionResolver");
+    }
 
     @Override public String hookTargetId() { return HookTargetIds.HANS_FREEZE_DISPATCH; }
     @Override public String prefKey() { return ""; }
@@ -85,7 +98,7 @@ public final class HansFreezeHook implements FeatureHook {
                 + ",fast=" + fastStatus.name();
     }
 
-    private Object interceptObject(XposedInterface.Chain chain) throws Throwable {
+    Object interceptObject(XposedInterface.Chain chain) throws Throwable {
         Object packageObject = HookUtils.objectArg(chain, 0);
         Object sourceValue = HookUtils.objectArg(chain, 1);
         String sourceMarker = sourceValue instanceof String ? (String) sourceValue : null;
@@ -125,7 +138,7 @@ public final class HansFreezeHook implements FeatureHook {
 
         FreezeDecision decision;
         try {
-            decision = decide(new ResidencyTarget(
+            decision = decisionResolver.decide(new ResidencyTarget(
                     hansTarget.packageName(),
                     hansTarget.uid(),
                     ResidencyTarget.UNKNOWN_PID),
@@ -144,11 +157,36 @@ public final class HansFreezeHook implements FeatureHook {
         return complete(chain::proceed, decision, Boolean.FALSE);
     }
 
-    private Object interceptHans(XposedInterface.Chain chain) throws Throwable {
-        return interceptManager(chain, FreezeSource.NORMAL, false, HookUtils.stringArg(chain, 1));
+    Object interceptHans(XposedInterface.Chain chain) throws Throwable {
+        if (Boolean.TRUE.equals(managerFallbackActive.get())) {
+            return chain.proceed();
+        }
+        managerFallbackActive.set(Boolean.TRUE);
+        try {
+            return interceptHansTopLevel(chain);
+        } finally {
+            managerFallbackActive.remove();
+        }
     }
 
-    private Object interceptSuperFreeze(XposedInterface.Chain chain) throws Throwable {
+    private Object interceptHansTopLevel(XposedInterface.Chain chain) throws Throwable {
+        Object sourceValue = HookUtils.objectArg(chain, 1);
+        String sourceMarker = sourceValue instanceof String ? (String) sourceValue : null;
+        HansSourceClassifier.Resolution classified;
+        try {
+            classified = HansSourceClassifier.classifyManager(sourceMarker);
+        } catch (Throwable error) {
+            recordFailure(managerFailureEvent(chain, sourceMarker));
+            return chain.proceed();
+        }
+        if (!classified.isResolved()) {
+            recordFailure(managerFailureEvent(chain, sourceMarker));
+            return chain.proceed();
+        }
+        return interceptManager(chain, classified.sourceOrNull(), false, sourceMarker);
+    }
+
+    Object interceptSuperFreeze(XposedInterface.Chain chain) throws Throwable {
         return interceptManager(chain, FreezeSource.SUPER, true, "Super_F");
     }
 
@@ -172,7 +210,7 @@ public final class HansFreezeHook implements FeatureHook {
 
         FreezeDecision decision;
         try {
-            decision = decide(
+            decision = decisionResolver.decide(
                     new ResidencyTarget(null, uid, ResidencyTarget.UNKNOWN_PID), source);
         } catch (Throwable error) {
             recordFailure(event);
@@ -287,6 +325,30 @@ public final class HansFreezeHook implements FeatureHook {
                 marker == null ? "" : marker);
     }
 
+    static HookEvent failureEvent(
+            HansObjectAdapter.Target target, String marker) {
+        return new HookEvent(
+                target != null && target.superFreezeMode()
+                        ? FeatureIds.SUPER_FREEZE
+                        : FeatureIds.HANS,
+                UNKNOWN_SOURCE_CODE,
+                target == null ? ResidencyTarget.UNKNOWN_UID : target.uid(),
+                target == null ? "" : target.packageName(),
+                "",
+                marker == null ? "" : marker);
+    }
+
+    private static HookEvent managerFailureEvent(
+            XposedInterface.Chain chain, String marker) {
+        return new HookEvent(
+                FeatureIds.HANS,
+                UNKNOWN_SOURCE_CODE,
+                HookUtils.intArg(chain, 0, ResidencyTarget.UNKNOWN_UID),
+                "",
+                "",
+                marker == null ? "" : marker);
+    }
+
     private static void recordPassed(HookEvent event) {
         try {
             HookDiagnostics.recordEventFromLockedPath(event, "passed");
@@ -306,18 +368,12 @@ public final class HansFreezeHook implements FeatureHook {
     }
 
     private static void recordFailure(String marker) {
-        recordFailure(new HookEvent(
-                FeatureIds.HANS,
-                0,
-                ResidencyTarget.UNKNOWN_UID,
-                "",
-                "",
-                marker == null ? "" : marker));
+        recordFailure(failureEvent(null, marker));
     }
 
     private static void recordFailure(
             HansObjectAdapter.Target target, String marker) {
-        recordFailure(event(target, FreezeSource.NORMAL, marker));
+        recordFailure(failureEvent(target, marker));
     }
 
     private static void recordFailure(HookEvent event) {
@@ -330,5 +386,9 @@ public final class HansFreezeHook implements FeatureHook {
 
     interface OriginalCall {
         Object proceed() throws Throwable;
+    }
+
+    interface FreezeDecisionResolver {
+        FreezeDecision decide(ResidencyTarget target, FreezeSource source);
     }
 }

@@ -35,6 +35,14 @@ public final class HansSourceClassifier {
         return Resolution.failed(Failure.UNKNOWN_SOURCE);
     }
 
+    /** Classifies manager fallback markers when no package-object mode flag is available. */
+    public static Resolution classifyManager(String from) {
+        if (SUPER_FREEZE.equals(from)) {
+            return Resolution.resolved(FreezeSource.SUPER);
+        }
+        return classify(from, false);
+    }
+
     public enum Failure {
         NULL_SOURCE,
         UNKNOWN_SOURCE,
