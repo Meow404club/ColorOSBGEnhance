@@ -15,12 +15,17 @@ public final class WakeThrottleState {
     private final AtomicReference<Version> latestVersion =
             new AtomicReference<>(Version.initial());
     private final int bucketMask;
+    private final Runnable beforeThrottleVersionRecheck;
 
     public WakeThrottleState() {
-        this(DEFAULT_CAPACITY);
+        this(DEFAULT_CAPACITY, null);
     }
 
     WakeThrottleState(int capacity) {
+        this(capacity, null);
+    }
+
+    WakeThrottleState(int capacity, Runnable beforeThrottleVersionRecheck) {
         if (capacity < BUCKET_SIZE || (capacity & (capacity - 1)) != 0) {
             throw new IllegalArgumentException(
                     "capacity must be a power of two of at least " + BUCKET_SIZE);
@@ -28,6 +33,7 @@ public final class WakeThrottleState {
         int bucketCount = capacity / BUCKET_SIZE;
         buckets = new AtomicReferenceArray<>(bucketCount);
         bucketMask = bucketCount - 1;
+        this.beforeThrottleVersionRecheck = beforeThrottleVersionRecheck;
     }
 
     public Outcome evaluate(
@@ -69,7 +75,11 @@ public final class WakeThrottleState {
                 if (versionOrder == 0
                         && nowElapsedMs >= existing.lastAllowedElapsedMs
                         && nowElapsedMs - existing.lastAllowedElapsedMs < cooldownMs) {
-                    return Outcome.THROTTLED;
+                    Runnable probe = beforeThrottleVersionRecheck;
+                    if (probe != null) probe.run();
+                    return requestedVersion.equals(latestVersion.get())
+                            ? Outcome.THROTTLED
+                            : Outcome.FAIL_OPEN;
                 }
                 updated = current.withEntry(entryIndex, new Entry(
                         uid, source, requestedVersion, nowElapsedMs));

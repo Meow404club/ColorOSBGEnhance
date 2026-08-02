@@ -185,6 +185,24 @@ public final class WakeThrottleStateTest {
     }
 
     @Test
+    public void configAdvanceBeforeThrottleReturnMakesOldRequestFailOpen() throws Exception {
+        assertVersionAdvanceInvalidatesPendingThrottle(
+                CONFIG_REVISION + 1L, POLICY_REVISION, IDENTITY_GENERATION);
+    }
+
+    @Test
+    public void policyAdvanceBeforeThrottleReturnMakesOldRequestFailOpen() throws Exception {
+        assertVersionAdvanceInvalidatesPendingThrottle(
+                CONFIG_REVISION, POLICY_REVISION + 1L, IDENTITY_GENERATION);
+    }
+
+    @Test
+    public void identityAdvanceBeforeThrottleReturnMakesOldRequestFailOpen() throws Exception {
+        assertVersionAdvanceInvalidatesPendingThrottle(
+                CONFIG_REVISION, POLICY_REVISION, IDENTITY_GENERATION + 1L);
+    }
+
+    @Test
     public void storageNeverExceedsItsFixedCapacity() {
         WakeThrottleState state = new WakeThrottleState(8);
         for (int index = 0; index < 1_000; index++) {
@@ -244,5 +262,63 @@ public final class WakeThrottleStateTest {
                 IDENTITY_GENERATION,
                 COOLDOWN_MS,
                 nowElapsedMs);
+    }
+
+    private static void assertVersionAdvanceInvalidatesPendingThrottle(
+            long nextConfigRevision,
+            long nextPolicyRevision,
+            long nextIdentityGeneration) throws Exception {
+        CountDownLatch throttleCandidateReached = new CountDownLatch(1);
+        CountDownLatch resumeOldRequest = new CountDownLatch(1);
+        WakeThrottleState state = new WakeThrottleState(
+                WakeThrottleState.DEFAULT_CAPACITY,
+                () -> {
+                    throttleCandidateReached.countDown();
+                    awaitOrFail(resumeOldRequest);
+                });
+        assertEquals(WakeThrottleState.Outcome.ALLOWED,
+                evaluate(state, WakeSource.PACKET, 10_000L));
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<WakeThrottleState.Outcome> oldRequest =
+                executor.submit(() -> evaluate(state, WakeSource.PACKET, 10_001L));
+        try {
+            assertTrue(throttleCandidateReached.await(5L, TimeUnit.SECONDS));
+            assertEquals(WakeThrottleState.Outcome.ALLOWED, state.evaluate(
+                    UID,
+                    WakeSource.PACKET,
+                    nextConfigRevision,
+                    nextPolicyRevision,
+                    nextIdentityGeneration,
+                    COOLDOWN_MS,
+                    10_002L));
+
+            resumeOldRequest.countDown();
+            assertEquals(
+                    WakeThrottleState.Outcome.FAIL_OPEN,
+                    oldRequest.get(5L, TimeUnit.SECONDS));
+            assertEquals(WakeThrottleState.Outcome.THROTTLED, state.evaluate(
+                    UID,
+                    WakeSource.PACKET,
+                    nextConfigRevision,
+                    nextPolicyRevision,
+                    nextIdentityGeneration,
+                    COOLDOWN_MS,
+                    10_003L));
+        } finally {
+            resumeOldRequest.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    private static void awaitOrFail(CountDownLatch latch) {
+        try {
+            if (!latch.await(5L, TimeUnit.SECONDS)) {
+                throw new AssertionError("timed out waiting for controlled interleaving");
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(interrupted);
+        }
     }
 }
