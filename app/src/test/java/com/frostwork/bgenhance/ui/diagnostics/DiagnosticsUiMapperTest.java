@@ -5,6 +5,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import com.frostwork.bgenhance.DiagnosticsResult;
+import com.frostwork.bgenhance.DiagnosticsTargetIds;
 import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
@@ -25,12 +26,15 @@ public final class DiagnosticsUiMapperTest {
                 "com.example.reader", 110_101, "FREEZE", DiagnosticsResult.BLOCKED,
                 3_000_000_001L, 3_000_000_001L, 0L, 3_000_000_001L, 20L);
 
-        List<DiagnosticsUiMapper.ApplicationRow> rows =
-                mapper.mapApplications(Arrays.asList(passed, blocked));
+        List<DiagnosticsUiMapper.ApplicationRow> rows = mapper.mapApplications(
+                Collections.singletonList(new DiagnosticsDataSource.ManagedApplication(
+                        "com.example.reader", "Reader")),
+                Arrays.asList(passed, blocked));
 
         assertEquals(1, rows.size());
         DiagnosticsUiMapper.ApplicationRow item = rows.get(0);
         assertEquals("application:com.example.reader", item.stableId);
+        assertEquals("Reader", item.displayName);
         assertEquals(Arrays.asList(10_101, 110_101), item.observedUids);
         assertEquals(6_000_000_001L, item.totals.observed);
         assertEquals(3_000_000_001L, item.totals.blocked);
@@ -38,6 +42,29 @@ public final class DiagnosticsUiMapperTest {
         assertEquals(6_000_000_001L, item.totals.rawHits);
         assertEquals(3_000_000_001L,
                 item.behavior(DiagnosticsBehavior.FREEZE).observed);
+    }
+
+    @Test
+    public void managedApplicationsAreLeftJoinedAndKeepZeroEventRows() {
+        List<DiagnosticsUiMapper.ApplicationRow> rows = mapper.mapApplications(
+                Arrays.asList(
+                        new DiagnosticsDataSource.ManagedApplication(
+                                "com.example.zero", "Zero Events"),
+                        new DiagnosticsDataSource.ManagedApplication(
+                                "com.example.active", "Active App")),
+                Arrays.asList(
+                        row("com.example.active", 10_001, "WAKE", DiagnosticsResult.PASSED,
+                                3L, 0L, 0L, 3L, 2L),
+                        row("com.example.unmanaged", 10_002, "KILL", DiagnosticsResult.BLOCKED,
+                                9L, 9L, 0L, 9L, 3L)));
+
+        assertEquals(2, rows.size());
+        assertEquals("com.example.zero", rows.get(0).packageName);
+        assertEquals("Zero Events", rows.get(0).displayName);
+        assertTrue(rows.get(0).totals.isEmpty());
+        assertTrue(rows.get(0).observedUids.isEmpty());
+        assertEquals("com.example.active", rows.get(1).packageName);
+        assertEquals(3L, rows.get(1).totals.observed);
     }
 
     @Test
@@ -101,12 +128,88 @@ public final class DiagnosticsUiMapperTest {
                 "database_unavailable"));
     }
 
+    @Test
+    public void currentBootFilteringKeepsRuntimeRowsAndRejectsOldState() {
+        List<DiagnosticsHookState> states = Arrays.asList(
+                hookState(DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                        HookTargetIds.HANS_FAST_FREEZE_DISPATCH,
+                        "old_boot", "INSTALLED:old", 100L),
+                hookState(DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                        HookTargetIds.HANS_FAST_FREEZE_DISPATCH,
+                        "current_boot", "INSTALLED:current", 5L),
+                hookState(DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                        HookTargetIds.OGUARD_KILL,
+                        "old_boot", "INSTALLED:old", 200L),
+                hookState(DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                        DiagnosticsTargetIds.RUNTIME_PROCESS,
+                        "current_boot", "FEATURES_INSTALLED", 7L),
+                hookState(DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                        DiagnosticsTargetIds.RUNTIME_CONFIG,
+                        "current_boot", "CONFIG_READY", 8L),
+                hookState(DiagnosticsHookCatalog.PROCESS_ATHENA,
+                        DiagnosticsTargetIds.RUNTIME_PROCESS,
+                        "current_boot", "FEATURES_INSTALLED", 9L),
+                hookState(DiagnosticsHookCatalog.PROCESS_ATHENA,
+                        DiagnosticsTargetIds.RUNTIME_CONFIG,
+                        "current_boot", "CONFIG_READY", 10L));
+
+        List<DiagnosticsUiMapper.HookTargetRow> rows = mapper.mapHookTargets(
+                DiagnosticsDataSource.HookStatePage.success(states), "current_boot");
+
+        DiagnosticsUiMapper.HookTargetRow current = findHook(
+                rows,
+                DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                HookTargetIds.HANS_FAST_FREEZE_DISPATCH);
+        assertTrue(current.reported);
+        assertEquals(5L, current.rawHitCount);
+        assertEquals("current_boot", current.bootId);
+        assertFalse(findHook(rows,
+                DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                HookTargetIds.OGUARD_KILL).reported);
+
+        for (DiagnosticsHookCatalog.Entry runtime : DiagnosticsHookCatalog.runtimeRows()) {
+            DiagnosticsUiMapper.HookTargetRow row = findHook(
+                    rows, runtime.expectedProcessId, runtime.hookTargetId);
+            assertTrue(row.reported);
+            assertEquals(DiagnosticsUiMapper.HookStatus.READY, row.status);
+        }
+    }
+
     private static DiagnosticsUiMapper.HookTargetRow findHook(
             List<DiagnosticsUiMapper.HookTargetRow> rows, String hookTargetId) {
         for (DiagnosticsUiMapper.HookTargetRow row : rows) {
             if (hookTargetId.equals(row.hookTargetId)) return row;
         }
         throw new AssertionError("missing Hook row " + hookTargetId);
+    }
+
+    private static DiagnosticsUiMapper.HookTargetRow findHook(
+            List<DiagnosticsUiMapper.HookTargetRow> rows,
+            String processId,
+            String hookTargetId) {
+        for (DiagnosticsUiMapper.HookTargetRow row : rows) {
+            if (processId.equals(row.expectedProcessId)
+                    && hookTargetId.equals(row.hookTargetId)) return row;
+        }
+        throw new AssertionError("missing Hook row " + processId + ":" + hookTargetId);
+    }
+
+    private static DiagnosticsHookState hookState(
+            String processId,
+            String hookTargetId,
+            String bootId,
+            String status,
+            long count) {
+        return DiagnosticsHookState.builder()
+                .processId(processId)
+                .hookTargetId(hookTargetId)
+                .installStatus(status)
+                .bootId(bootId)
+                .rawHitCount(count)
+                .parsedCount(count)
+                .identityResolvedCount(count)
+                .updatedAt(count)
+                .build();
     }
 
     private static DiagnosticsQuery.AggregateRow row(

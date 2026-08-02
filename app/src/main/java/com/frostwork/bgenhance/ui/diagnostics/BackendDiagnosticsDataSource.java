@@ -1,6 +1,7 @@
 package com.frostwork.bgenhance.ui.diagnostics;
 
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
+import com.frostwork.bgenhance.diagnostics.DiagnosticsBootId;
 import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -9,9 +10,16 @@ final class BackendDiagnosticsDataSource implements DiagnosticsDataSource {
     private static final int MAX_HOOK_STATES = 512;
 
     private final ResidencyDiagnosticsBackend backend;
+    private final String currentBootId;
 
     BackendDiagnosticsDataSource(ResidencyDiagnosticsBackend backend) {
+        this(backend, DiagnosticsBootId.readCurrent());
+    }
+
+    BackendDiagnosticsDataSource(
+            ResidencyDiagnosticsBackend backend, String currentBootId) {
         this.backend = Objects.requireNonNull(backend, "backend");
+        this.currentBootId = currentBootId == null ? "" : currentBootId.trim();
     }
 
     @Override
@@ -33,5 +41,10 @@ final class BackendDiagnosticsDataSource implements DiagnosticsDataSource {
                     }
                     return HookStatePage.success(page.items);
                 });
+    }
+
+    @Override
+    public String currentBootId() {
+        return currentBootId;
     }
 }

@@ -1,6 +1,8 @@
 package com.frostwork.bgenhance.ui.diagnostics;
 
+import android.content.Context;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
+import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -84,10 +86,36 @@ public final class DiagnosticsViewModel implements AutoCloseable {
             View.APPLICATION, Status.IDLE, Collections.emptyList(), 0, false, "", 0L);
     private Listener listener;
     private View selectedView = View.APPLICATION;
+    private DiagnosticsDataSource.ManagedApplicationPage managedApplications =
+            DiagnosticsDataSource.ManagedApplicationPage.unsupported();
     private long generation;
     private int visibleLimit;
     private boolean requestInFlight;
+    private boolean aggregateComplete;
+    private boolean managedApplicationsComplete;
+    private boolean applicationMappingStarted;
     private boolean closed;
+
+    public static DiagnosticsViewModel create(
+            Context context, ResidencyDiagnosticsBackend backend) {
+        Context requested = Objects.requireNonNull(context, "context");
+        Context applicationContext = requested.getApplicationContext();
+        Context stableContext = applicationContext == null ? requested : applicationContext;
+        return create(stableContext, backend, stableContext.getMainExecutor());
+    }
+
+    public static DiagnosticsViewModel create(
+            Context context,
+            ResidencyDiagnosticsBackend backend,
+            Executor callbackExecutor) {
+        Objects.requireNonNull(callbackExecutor, "callbackExecutor");
+        return new DiagnosticsViewModel(
+                DiagnosticsDataSource.fromBackend(context, backend),
+                new DiagnosticsUiMapper(),
+                callbackExecutor,
+                DEFAULT_UI_PAGE_SIZE,
+                DEFAULT_QUERY_PAGE_SIZE);
+    }
 
     public DiagnosticsViewModel(DiagnosticsDataSource dataSource) {
         this(dataSource, new DiagnosticsUiMapper(), Runnable::run,
@@ -141,6 +169,10 @@ public final class DiagnosticsViewModel implements AutoCloseable {
             visibleLimit = uiPageSize;
             aggregateRows.clear();
             allRows = Collections.emptyList();
+            managedApplications = DiagnosticsDataSource.ManagedApplicationPage.unsupported();
+            aggregateComplete = false;
+            managedApplicationsComplete = view != View.APPLICATION;
+            applicationMappingStarted = false;
             loading = new State(
                     view, Status.LOADING, Collections.emptyList(), 0, false, "",
                     requestGeneration);
@@ -150,6 +182,9 @@ public final class DiagnosticsViewModel implements AutoCloseable {
         if (view == View.HOOK_TARGET) {
             requestHookStates(requestGeneration);
         } else {
+            if (view == View.APPLICATION) {
+                requestManagedApplications(requestGeneration);
+            }
             requestAggregatePage(requestGeneration, view, 0);
         }
     }
@@ -183,6 +218,7 @@ public final class DiagnosticsViewModel implements AutoCloseable {
 
     @Override
     public void close() {
+        boolean closeDataSource;
         synchronized (lock) {
             if (closed) return;
             closed = true;
@@ -191,6 +227,14 @@ public final class DiagnosticsViewModel implements AutoCloseable {
             listener = null;
             aggregateRows.clear();
             allRows = Collections.emptyList();
+            closeDataSource = true;
+        }
+        if (closeDataSource) {
+            try {
+                dataSource.close();
+            } catch (RuntimeException ignored) {
+                // A UI teardown cannot be failed by optional diagnostics cleanup.
+            }
         }
     }
 
@@ -262,11 +306,17 @@ public final class DiagnosticsViewModel implements AutoCloseable {
             long requestGeneration,
             View view,
             List<DiagnosticsQuery.AggregateRow> rows) {
+        if (view == View.APPLICATION) {
+            synchronized (lock) {
+                if (!isCurrentLocked(requestGeneration, view)) return;
+                aggregateComplete = true;
+            }
+            tryStartApplicationMapping(requestGeneration);
+            return;
+        }
         List<? extends DiagnosticsUiMapper.UiRow> mapped;
         try {
-            mapped = view == View.APPLICATION
-                    ? mapper.mapApplications(rows)
-                    : mapper.mapBehaviors(rows);
+            mapped = mapper.mapBehaviors(rows);
         } catch (RuntimeException error) {
             finishError(requestGeneration, view, "mapping_failed");
             return;
@@ -274,7 +324,69 @@ public final class DiagnosticsViewModel implements AutoCloseable {
         finishContent(requestGeneration, view, mapped);
     }
 
+    private void requestManagedApplications(long requestGeneration) {
+        CompletableFuture<DiagnosticsDataSource.ManagedApplicationPage> future;
+        try {
+            future = dataSource.queryManagedApplicationsAsync();
+        } catch (RuntimeException error) {
+            finishError(requestGeneration, View.APPLICATION, "catalog_unavailable");
+            return;
+        }
+        if (future == null) {
+            finishError(requestGeneration, View.APPLICATION, "catalog_unavailable");
+            return;
+        }
+        future.whenComplete((page, failure) -> {
+            if (failure != null || page == null) {
+                finishError(requestGeneration, View.APPLICATION, "catalog_unavailable");
+                return;
+            }
+            if (!page.isSuccessful()) {
+                finishError(requestGeneration, View.APPLICATION, page.errorCode);
+                return;
+            }
+            synchronized (lock) {
+                if (!isCurrentLocked(requestGeneration, View.APPLICATION)) return;
+                managedApplications = page;
+                managedApplicationsComplete = true;
+            }
+            tryStartApplicationMapping(requestGeneration);
+        });
+    }
+
+    private void tryStartApplicationMapping(long requestGeneration) {
+        List<DiagnosticsQuery.AggregateRow> aggregates;
+        DiagnosticsDataSource.ManagedApplicationPage applications;
+        synchronized (lock) {
+            if (!isCurrentLocked(requestGeneration, View.APPLICATION)
+                    || !aggregateComplete
+                    || !managedApplicationsComplete
+                    || applicationMappingStarted) return;
+            applicationMappingStarted = true;
+            aggregates = new ArrayList<>(aggregateRows);
+            applications = managedApplications;
+        }
+
+        List<DiagnosticsUiMapper.ApplicationRow> mapped;
+        try {
+            mapped = applications.authoritative
+                    ? mapper.mapApplications(applications.items, aggregates)
+                    : mapper.mapApplications(aggregates);
+        } catch (RuntimeException error) {
+            finishError(requestGeneration, View.APPLICATION, "mapping_failed");
+            return;
+        }
+        finishContent(requestGeneration, View.APPLICATION, mapped);
+    }
+
     private void requestHookStates(long requestGeneration) {
+        String currentBootId;
+        try {
+            currentBootId = dataSource.currentBootId();
+        } catch (RuntimeException error) {
+            finishError(requestGeneration, View.HOOK_TARGET, "query_failed");
+            return;
+        }
         CompletableFuture<DiagnosticsDataSource.HookStatePage> future;
         try {
             future = dataSource.queryHookStatesAsync(MAX_HOOK_STATES);
@@ -297,7 +409,7 @@ public final class DiagnosticsViewModel implements AutoCloseable {
             }
             List<DiagnosticsUiMapper.HookTargetRow> mapped;
             try {
-                mapped = mapper.mapHookTargets(page);
+                mapped = mapper.mapHookTargets(page, currentBootId);
             } catch (RuntimeException error) {
                 finishError(requestGeneration, View.HOOK_TARGET, "mapping_failed");
                 return;
@@ -332,6 +444,9 @@ public final class DiagnosticsViewModel implements AutoCloseable {
             requestInFlight = false;
             aggregateRows.clear();
             allRows = Collections.emptyList();
+            aggregateComplete = false;
+            managedApplicationsComplete = false;
+            applicationMappingStarted = false;
             String errorCode = normalizeError(requestedErrorCode);
             error = new State(view, Status.ERROR, Collections.emptyList(), 0, false,
                     errorCode, requestGeneration);

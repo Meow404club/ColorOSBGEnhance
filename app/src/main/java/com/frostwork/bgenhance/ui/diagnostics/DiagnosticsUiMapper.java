@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -19,6 +20,7 @@ public final class DiagnosticsUiMapper {
     }
 
     public enum HookStatus {
+        READY,
         INSTALLED,
         FAILED,
         UNSUPPORTED,
@@ -64,17 +66,21 @@ public final class DiagnosticsUiMapper {
     public static final class ApplicationRow implements UiRow {
         public final String stableId;
         public final String packageName;
+        public final String displayName;
         public final List<Integer> observedUids;
         public final Map<DiagnosticsBehavior, Metrics> behaviors;
         public final Metrics totals;
 
         private ApplicationRow(
                 String packageName,
+                String displayName,
                 List<Integer> observedUids,
                 Map<DiagnosticsBehavior, Metrics> behaviors,
                 Metrics totals) {
             this.stableId = "application:" + packageName;
             this.packageName = packageName;
+            this.displayName = displayName == null || displayName.isEmpty()
+                    ? packageName : displayName;
             this.observedUids = Collections.unmodifiableList(new ArrayList<>(observedUids));
             this.behaviors = Collections.unmodifiableMap(
                     new EnumMap<>(behaviors));
@@ -119,6 +125,7 @@ public final class DiagnosticsUiMapper {
         public final String expectedProcessId;
         public final String titleKey;
         public final String fallbackTitle;
+        public final DiagnosticsHookCatalog.Kind kind;
         public final boolean reported;
         public final HookStatus status;
         public final String installStatus;
@@ -143,6 +150,7 @@ public final class DiagnosticsUiMapper {
             expectedProcessId = entry.expectedProcessId;
             titleKey = entry.titleKey;
             fallbackTitle = entry.fallbackTitle;
+            kind = entry.kind;
             reported = state != null;
             status = state == null ? HookStatus.MISSING : hookStatus(state.installStatus);
             installStatus = state == null ? "" : state.installStatus;
@@ -168,6 +176,19 @@ public final class DiagnosticsUiMapper {
 
     public List<ApplicationRow> mapApplications(
             List<DiagnosticsQuery.AggregateRow> rows) {
+        return mapApplicationsInternal(null, rows);
+    }
+
+    public List<ApplicationRow> mapApplications(
+            List<DiagnosticsDataSource.ManagedApplication> managedApplications,
+            List<DiagnosticsQuery.AggregateRow> rows) {
+        Objects.requireNonNull(managedApplications, "managedApplications");
+        return mapApplicationsInternal(managedApplications, rows);
+    }
+
+    private List<ApplicationRow> mapApplicationsInternal(
+            List<DiagnosticsDataSource.ManagedApplication> managedApplications,
+            List<DiagnosticsQuery.AggregateRow> rows) {
         LinkedHashMap<String, ApplicationAccumulator> applications = new LinkedHashMap<>();
         if (rows != null) {
             for (DiagnosticsQuery.AggregateRow row : rows) {
@@ -181,8 +202,21 @@ public final class DiagnosticsUiMapper {
         }
 
         ArrayList<ApplicationRow> result = new ArrayList<>();
+        if (managedApplications != null) {
+            LinkedHashSet<String> addedPackages = new LinkedHashSet<>();
+            for (DiagnosticsDataSource.ManagedApplication application : managedApplications) {
+                if (application == null || !addedPackages.add(application.packageName)) continue;
+                ApplicationAccumulator accumulator = applications.get(application.packageName);
+                if (accumulator == null) {
+                    accumulator = new ApplicationAccumulator(application.packageName);
+                }
+                result.add(accumulator.build(application.displayName));
+            }
+            return immutable(result);
+        }
+
         for (ApplicationAccumulator accumulator : applications.values()) {
-            result.add(accumulator.build());
+            result.add(accumulator.build(accumulator.packageName));
         }
         result.sort((left, right) -> {
             int compared = Long.compare(right.totals.observed, left.totals.observed);
@@ -215,6 +249,11 @@ public final class DiagnosticsUiMapper {
     }
 
     public List<HookTargetRow> mapHookTargets(DiagnosticsDataSource.HookStatePage page) {
+        return mapHookTargets(page, "");
+    }
+
+    public List<HookTargetRow> mapHookTargets(
+            DiagnosticsDataSource.HookStatePage page, String currentBootId) {
         Objects.requireNonNull(page, "page");
         if (!page.isSuccessful()) {
             throw new IllegalArgumentException(
@@ -222,10 +261,13 @@ public final class DiagnosticsUiMapper {
         }
 
         LinkedHashMap<String, DiagnosticsHookState> byIdentity = new LinkedHashMap<>();
+        String expectedBootId = currentBootId == null ? "" : currentBootId.trim();
         for (DiagnosticsHookState state : page.items) {
             if (state == null) continue;
-            DiagnosticsHookCatalog.Entry entry = DiagnosticsHookCatalog.find(state.hookTargetId);
-            if (entry == null || !entry.expectedProcessId.equals(state.processId)) continue;
+            if (!expectedBootId.isEmpty() && !expectedBootId.equals(state.bootId)) continue;
+            DiagnosticsHookCatalog.Entry entry = DiagnosticsHookCatalog.find(
+                    state.processId, state.hookTargetId);
+            if (entry == null) continue;
             String key = identity(entry.expectedProcessId, entry.hookTargetId);
             DiagnosticsHookState previous = byIdentity.get(key);
             if (previous == null || compareState(state, previous) > 0) {
@@ -259,8 +301,13 @@ public final class DiagnosticsUiMapper {
 
     private static HookStatus hookStatus(String installStatus) {
         String value = installStatus == null ? "" : installStatus;
+        if (value.startsWith("FEATURES_INSTALLED")
+                || value.startsWith("ENTRY_LOADED")
+                || value.startsWith("CONFIG_READY")) return HookStatus.READY;
         if (value.startsWith("INSTALLED")) return HookStatus.INSTALLED;
-        if (value.startsWith("FAILED")) return HookStatus.FAILED;
+        if (value.startsWith("FAILED")
+                || value.startsWith("BOOTSTRAP_FAILED")
+                || value.startsWith("CONFIG_ERROR")) return HookStatus.FAILED;
         if (value.startsWith("UNSUPPORTED")) return HookStatus.UNSUPPORTED;
         if (value.startsWith("SKIPPED")) return HookStatus.SKIPPED;
         if (value.startsWith("PENDING")) return HookStatus.PENDING;
@@ -296,14 +343,15 @@ public final class DiagnosticsUiMapper {
             totals.add(row);
         }
 
-        ApplicationRow build() {
+        ApplicationRow build(String displayName) {
             EnumMap<DiagnosticsBehavior, Metrics> immutableMetrics = new EnumMap<>(
                     DiagnosticsBehavior.class);
             for (DiagnosticsBehavior behavior : DiagnosticsBehavior.all()) {
                 immutableMetrics.put(behavior, behaviors.get(behavior).build());
             }
             return new ApplicationRow(
-                    packageName, new ArrayList<>(uids), immutableMetrics, totals.build());
+                    packageName, displayName, new ArrayList<>(uids),
+                    immutableMetrics, totals.build());
         }
     }
 

@@ -2,6 +2,7 @@ package com.frostwork.bgenhance.ui.diagnostics;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
@@ -11,6 +12,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.Test;
 
 public final class DiagnosticsViewModelTest {
@@ -70,6 +75,62 @@ public final class DiagnosticsViewModelTest {
         assertEquals(2, secondUiPage.items.size());
         assertFalse(secondUiPage.hasMore);
         assertEquals(2, source.aggregateRequests.size());
+    }
+
+    @Test
+    public void managedApplicationWithoutEventsIsStillPublishedWithDisplayName() {
+        FakeDataSource source = new FakeDataSource();
+        source.provideManagedCatalog = true;
+        DiagnosticsViewModel viewModel = viewModel(source, 10, 10);
+
+        viewModel.load(DiagnosticsViewModel.View.APPLICATION);
+        source.aggregateRequests.get(0).future.complete(page(
+                Collections.emptyList(), false, 0));
+        assertEquals(DiagnosticsViewModel.Status.LOADING, viewModel.state().status);
+
+        source.managedRequests.get(0).complete(
+                DiagnosticsDataSource.ManagedApplicationPage.success(
+                        Collections.singletonList(
+                                new DiagnosticsDataSource.ManagedApplication(
+                                        "com.example.zero", "Zero Events"))));
+
+        DiagnosticsViewModel.State state = viewModel.state();
+        assertEquals(DiagnosticsViewModel.Status.CONTENT, state.status);
+        assertEquals(1, state.items.size());
+        DiagnosticsUiMapper.ApplicationRow row =
+                (DiagnosticsUiMapper.ApplicationRow) state.items.get(0);
+        assertEquals("Zero Events", row.displayName);
+        assertTrue(row.totals.isEmpty());
+    }
+
+    @Test
+    public void lateManagedCatalogResultFromOlderGenerationIsDiscarded() {
+        FakeDataSource source = new FakeDataSource();
+        source.provideManagedCatalog = true;
+        DiagnosticsViewModel viewModel = viewModel(source, 10, 10);
+
+        viewModel.load(DiagnosticsViewModel.View.APPLICATION);
+        viewModel.refresh();
+        source.aggregateRequests.get(1).future.complete(page(
+                Collections.emptyList(), false, 0));
+        source.managedRequests.get(1).complete(
+                DiagnosticsDataSource.ManagedApplicationPage.success(
+                        Collections.singletonList(
+                                new DiagnosticsDataSource.ManagedApplication(
+                                        "com.example.new", "New"))));
+        DiagnosticsViewModel.State accepted = viewModel.state();
+
+        source.managedRequests.get(0).complete(
+                DiagnosticsDataSource.ManagedApplicationPage.success(
+                        Collections.singletonList(
+                                new DiagnosticsDataSource.ManagedApplication(
+                                        "com.example.old", "Old"))));
+        source.aggregateRequests.get(0).future.complete(page(
+                Collections.singletonList(row("com.example.old", "KILL", 50L)),
+                false, 0));
+
+        assertSame(accepted, viewModel.state());
+        assertEquals("application:com.example.new", accepted.items.get(0).stableId());
     }
 
     @Test
@@ -151,6 +212,38 @@ public final class DiagnosticsViewModelTest {
 
         assertTrue(viewModel.isClosed());
         assertEquals(deliveredBeforeClose, delivered.size());
+        assertEquals(1, source.closeCalls);
+    }
+
+    @Test
+    public void managedCatalogLoaderIsAsyncAndViewModelCloseReleasesExecutor()
+            throws Exception {
+        FakeDataSource delegate = new FakeDataSource();
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        AtomicReference<Thread> loaderThread = new AtomicReference<>();
+        ManagedCatalogDiagnosticsDataSource source = new ManagedCatalogDiagnosticsDataSource(
+                delegate,
+                () -> {
+                    loaderThread.set(Thread.currentThread());
+                    return Collections.singletonList(
+                            new DiagnosticsDataSource.ManagedApplication(
+                                    "com.example.managed", "Managed"));
+                },
+                executor,
+                "boot");
+
+        Thread caller = Thread.currentThread();
+        DiagnosticsDataSource.ManagedApplicationPage page =
+                source.queryManagedApplicationsAsync().get(5, TimeUnit.SECONDS);
+        assertTrue(page.authoritative);
+        assertNotEquals(caller, loaderThread.get());
+
+        DiagnosticsViewModel viewModel = viewModel(source, 10, 10);
+        viewModel.close();
+        viewModel.close();
+
+        assertTrue(source.isCatalogExecutorShutdown());
+        assertEquals(1, delegate.closeCalls);
     }
 
     private static DiagnosticsViewModel viewModel(
@@ -197,9 +290,13 @@ public final class DiagnosticsViewModelTest {
         }
     }
 
-    private static final class FakeDataSource implements DiagnosticsDataSource {
+    private static class FakeDataSource implements DiagnosticsDataSource {
         final List<AggregateRequest> aggregateRequests = new ArrayList<>();
         final List<CompletableFuture<HookStatePage>> hookRequests = new ArrayList<>();
+        final List<CompletableFuture<ManagedApplicationPage>> managedRequests =
+                new ArrayList<>();
+        boolean provideManagedCatalog;
+        int closeCalls;
 
         @Override
         public CompletableFuture<DiagnosticsQuery.AggregatePage> queryAggregatesAsync(
@@ -214,6 +311,21 @@ public final class DiagnosticsViewModelTest {
             CompletableFuture<HookStatePage> request = new CompletableFuture<>();
             hookRequests.add(request);
             return request;
+        }
+
+        @Override
+        public CompletableFuture<ManagedApplicationPage> queryManagedApplicationsAsync() {
+            if (!provideManagedCatalog) {
+                return DiagnosticsDataSource.super.queryManagedApplicationsAsync();
+            }
+            CompletableFuture<ManagedApplicationPage> request = new CompletableFuture<>();
+            managedRequests.add(request);
+            return request;
+        }
+
+        @Override
+        public void close() {
+            closeCalls++;
         }
     }
 }
