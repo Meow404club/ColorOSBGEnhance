@@ -1,7 +1,6 @@
 package com.frostwork.bgenhance;
 
 import android.os.Bundle;
-import android.os.Process;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsWireParser;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsWriteBatch;
 import java.util.function.LongSupplier;
@@ -23,6 +22,7 @@ final class DiagnosticsProviderController {
     }
 
     private final int moduleUid;
+    private final int systemUid;
     private final int athenaUid;
     private final String currentBootId;
     private final LongSupplier currentEpoch;
@@ -31,12 +31,14 @@ final class DiagnosticsProviderController {
 
     DiagnosticsProviderController(
             int moduleUid,
+            int systemUid,
             int athenaUid,
             String currentBootId,
             LongSupplier currentEpoch,
             BatchSink sink,
             DiagnosticsWireParser parser) {
         this.moduleUid = moduleUid;
+        this.systemUid = systemUid;
         this.athenaUid = athenaUid;
         this.currentBootId = currentBootId == null ? "" : currentBootId;
         this.currentEpoch = currentEpoch;
@@ -57,33 +59,28 @@ final class DiagnosticsProviderController {
             out.putString(BridgeContract.EXTRA_ERROR, "unsupported_bridge_method");
             return out;
         }
+        String expectedProcessId = reportProcessIdForCaller(callerUid);
+        if (expectedProcessId == null) {
+            return rejectedBatch(epoch, "sender_identity_mismatch", 1);
+        }
         if (!ready(epoch) || extras == null) {
-            Bundle out = baseResponse(false, epoch);
-            out.putString(BridgeContract.EXTRA_ERROR,
-                    extras == null ? "missing_extras" : "bridge_not_ready");
-            out.putInt(BridgeContract.EXTRA_DROPPED_ITEMS, 1);
-            return out;
+            return rejectedBatch(
+                    epoch, extras == null ? "missing_extras" : "bridge_not_ready", 1);
         }
 
         DiagnosticsWireParser.ParseResult parsed = parser.parseSnapshot(extras);
         if (!parsed.accepted()) {
-            Bundle out = baseResponse(false, epoch);
-            out.putString(BridgeContract.EXTRA_ERROR, parsed.errorCode);
-            out.putInt(BridgeContract.EXTRA_DROPPED_ITEMS, parsed.droppedItems);
-            return out;
+            return rejectedBatch(epoch, parsed.errorCode, parsed.droppedItems);
         }
         DiagnosticsWriteBatch.BatchIdentity identity = parsed.batch.batchIdentity;
-        if (identity == null || !currentBootId.equals(identity.bootId)) {
-            Bundle out = baseResponse(false, epoch);
-            out.putString(BridgeContract.EXTRA_ERROR, "boot_mismatch");
-            out.putInt(BridgeContract.EXTRA_DROPPED_ITEMS, parsed.acceptedItems);
-            return out;
+        if (identity == null || !expectedProcessId.equals(identity.processId)) {
+            return rejectedBatch(epoch, "sender_identity_mismatch", parsed.acceptedItems);
+        }
+        if (!currentBootId.equals(identity.bootId)) {
+            return rejectedBatch(epoch, "boot_mismatch", parsed.acceptedItems);
         }
         if (identity.epoch != epoch) {
-            Bundle out = baseResponse(false, epoch);
-            out.putString(BridgeContract.EXTRA_ERROR, "epoch_mismatch");
-            out.putInt(BridgeContract.EXTRA_DROPPED_ITEMS, parsed.acceptedItems);
-            return out;
+            return rejectedBatch(epoch, "epoch_mismatch", parsed.acceptedItems);
         }
 
         BatchResult accepted = sink.enqueue(parsed.batch);
@@ -96,9 +93,19 @@ final class DiagnosticsProviderController {
     }
 
     boolean isAllowedCaller(int uid) {
-        return uid == moduleUid
-                || uid == Process.SYSTEM_UID
-                || (athenaUid >= 0 && uid == athenaUid);
+        return uid >= 0 && (uid == moduleUid
+                || uid == systemUid
+                || (athenaUid >= 0 && uid == athenaUid));
+    }
+
+    private String reportProcessIdForCaller(int uid) {
+        if (uid < 0 || uid == moduleUid) return null;
+        boolean isSystem = systemUid >= 0 && uid == systemUid;
+        boolean isAthena = athenaUid >= 0 && uid == athenaUid;
+        if (isSystem == isAthena) return null;
+        return isSystem
+                ? BridgeContract.PROCESS_SYSTEM_SERVER
+                : BridgeContract.PROCESS_ATHENA;
     }
 
     private void enforceAllowedCaller(int uid) {
@@ -107,6 +114,14 @@ final class DiagnosticsProviderController {
 
     private boolean ready(long epoch) {
         return sink != null && !currentBootId.isEmpty() && epoch >= 0L;
+    }
+
+    private Bundle rejectedBatch(long epoch, String errorCode, int droppedItems) {
+        Bundle out = baseResponse(false, epoch);
+        out.putString(BridgeContract.EXTRA_ERROR, errorCode);
+        out.putInt(BridgeContract.EXTRA_ACCEPTED_ITEMS, 0);
+        out.putInt(BridgeContract.EXTRA_DROPPED_ITEMS, Math.max(0, droppedItems));
+        return out;
     }
 
     private Bundle baseResponse(boolean ok, long epoch) {

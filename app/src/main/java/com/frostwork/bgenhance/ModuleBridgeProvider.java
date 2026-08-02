@@ -30,6 +30,7 @@ public final class ModuleBridgeProvider extends ContentProvider {
         int athenaUid = resolveAthenaUid(context.getPackageManager());
         controller = new DiagnosticsProviderController(
                 Process.myUid(),
+                Process.SYSTEM_UID,
                 athenaUid,
                 ModuleApplication.diagnosticsBootId(),
                 ModuleApplication::diagnosticsEpoch,

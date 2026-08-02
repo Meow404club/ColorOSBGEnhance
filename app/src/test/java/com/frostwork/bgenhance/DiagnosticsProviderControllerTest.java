@@ -21,6 +21,7 @@ import org.robolectric.annotation.Config;
 @Config(sdk = 34, manifest = Config.NONE)
 public final class DiagnosticsProviderControllerTest {
     private static final int MODULE_UID = 12_345;
+    private static final int SYSTEM_UID = Process.SYSTEM_UID;
     private static final int ATHENA_UID = 23_456;
     private static final long EPOCH = 7L;
 
@@ -29,7 +30,7 @@ public final class DiagnosticsProviderControllerTest {
         DiagnosticsProviderController controller = controller(batch -> accepted(batch.size()));
 
         assertTrue(controller.isAllowedCaller(MODULE_UID));
-        assertTrue(controller.isAllowedCaller(Process.SYSTEM_UID));
+        assertTrue(controller.isAllowedCaller(SYSTEM_UID));
         assertTrue(controller.isAllowedCaller(ATHENA_UID));
         assertFalse(controller.isAllowedCaller(99_999));
 
@@ -60,10 +61,11 @@ public final class DiagnosticsProviderControllerTest {
             calls.incrementAndGet();
             return accepted(batch.size());
         });
-        DiagnosticsWriteBatch batch = batch("boot", EPOCH, 4L);
+        DiagnosticsWriteBatch batch = batch(
+                BridgeContract.PROCESS_SYSTEM_SERVER, "boot", EPOCH, 4L);
 
         Bundle response = controller.handle(
-                Process.SYSTEM_UID,
+                SYSTEM_UID,
                 BridgeContract.METHOD_REPORT_BATCH,
                 DiagnosticsWireEncoder.encodeTyped(batch));
 
@@ -74,6 +76,99 @@ public final class DiagnosticsProviderControllerTest {
     }
 
     @Test
+    public void athenaBatchIsEnqueuedExactlyOnceAndFullyAcknowledged() {
+        AtomicInteger calls = new AtomicInteger();
+        DiagnosticsProviderController controller = controller(batch -> {
+            calls.incrementAndGet();
+            assertEquals(BridgeContract.PROCESS_ATHENA, batch.batchIdentity.processId);
+            return accepted(batch.size());
+        });
+        DiagnosticsWriteBatch batch = batch(
+                BridgeContract.PROCESS_ATHENA, "boot", EPOCH, 5L);
+
+        Bundle response = controller.handle(
+                ATHENA_UID,
+                BridgeContract.METHOD_REPORT_BATCH,
+                DiagnosticsWireEncoder.encodeTyped(batch));
+
+        assertEquals(1, calls.get());
+        assertTrue(response.getBoolean(BridgeContract.EXTRA_OK));
+        assertEquals(batch.size(), response.getInt(BridgeContract.EXTRA_ACCEPTED_ITEMS));
+        assertEquals(0, response.getInt(BridgeContract.EXTRA_DROPPED_ITEMS));
+    }
+
+    @Test
+    public void systemAndAthenaCannotImpersonateEachOther() {
+        AtomicInteger calls = new AtomicInteger();
+        DiagnosticsProviderController controller = controller(batch -> {
+            calls.incrementAndGet();
+            return accepted(batch.size());
+        });
+        DiagnosticsWriteBatch athenaBatch = batch(
+                BridgeContract.PROCESS_ATHENA, "boot", EPOCH, 6L, 3);
+        DiagnosticsWriteBatch systemBatch = batch(
+                BridgeContract.PROCESS_SYSTEM_SERVER, "boot", EPOCH, 7L, 2);
+
+        Bundle forgedBySystem = controller.handle(
+                SYSTEM_UID,
+                BridgeContract.METHOD_REPORT_BATCH,
+                DiagnosticsWireEncoder.encodeTyped(athenaBatch));
+        Bundle forgedByAthena = controller.handle(
+                ATHENA_UID,
+                BridgeContract.METHOD_REPORT_BATCH,
+                DiagnosticsWireEncoder.encodeTyped(systemBatch));
+
+        assertEquals(0, calls.get());
+        assertRejectedIdentity(forgedBySystem, athenaBatch.size());
+        assertRejectedIdentity(forgedByAthena, systemBatch.size());
+    }
+
+    @Test
+    public void moduleUidCannotSubmitHookBatches() {
+        AtomicInteger calls = new AtomicInteger();
+        DiagnosticsProviderController controller = controller(batch -> {
+            calls.incrementAndGet();
+            return accepted(batch.size());
+        });
+
+        Bundle system = controller.handle(
+                MODULE_UID,
+                BridgeContract.METHOD_REPORT_BATCH,
+                DiagnosticsWireEncoder.encodeTyped(batch(
+                        BridgeContract.PROCESS_SYSTEM_SERVER, "boot", EPOCH, 8L)));
+        Bundle athena = controller.handle(
+                MODULE_UID,
+                BridgeContract.METHOD_REPORT_BATCH,
+                DiagnosticsWireEncoder.encodeTyped(batch(
+                        BridgeContract.PROCESS_ATHENA, "boot", EPOCH, 9L)));
+
+        assertEquals(0, calls.get());
+        assertRejectedIdentity(system, 1);
+        assertRejectedIdentity(athena, 1);
+    }
+
+    @Test
+    public void ambiguousHookUidFailsClosed() {
+        AtomicInteger calls = new AtomicInteger();
+        DiagnosticsProviderController controller = new DiagnosticsProviderController(
+                MODULE_UID, SYSTEM_UID, SYSTEM_UID, "boot", () -> EPOCH,
+                batch -> {
+                    calls.incrementAndGet();
+                    return accepted(batch.size());
+                },
+                new DiagnosticsWireParser());
+
+        Bundle response = controller.handle(
+                SYSTEM_UID,
+                BridgeContract.METHOD_REPORT_BATCH,
+                DiagnosticsWireEncoder.encodeTyped(batch(
+                        BridgeContract.PROCESS_SYSTEM_SERVER, "boot", EPOCH, 10L)));
+
+        assertEquals(0, calls.get());
+        assertRejectedIdentity(response, 1);
+    }
+
+    @Test
     public void bootAndEpochMismatchNeverReachBackend() {
         AtomicInteger calls = new AtomicInteger();
         DiagnosticsProviderController controller = controller(batch -> {
@@ -81,10 +176,12 @@ public final class DiagnosticsProviderControllerTest {
             return accepted(batch.size());
         });
 
-        Bundle boot = controller.handle(MODULE_UID, BridgeContract.METHOD_REPORT_BATCH,
-                DiagnosticsWireEncoder.encodeTyped(batch("other-boot", EPOCH, 0L)));
-        Bundle epoch = controller.handle(MODULE_UID, BridgeContract.METHOD_REPORT_BATCH,
-                DiagnosticsWireEncoder.encodeTyped(batch("boot", EPOCH + 1L, 0L)));
+        Bundle boot = controller.handle(SYSTEM_UID, BridgeContract.METHOD_REPORT_BATCH,
+                DiagnosticsWireEncoder.encodeTyped(batch(
+                        BridgeContract.PROCESS_SYSTEM_SERVER, "other-boot", EPOCH, 0L)));
+        Bundle epoch = controller.handle(SYSTEM_UID, BridgeContract.METHOD_REPORT_BATCH,
+                DiagnosticsWireEncoder.encodeTyped(batch(
+                        BridgeContract.PROCESS_SYSTEM_SERVER, "boot", EPOCH + 1L, 0L)));
 
         assertEquals(0, calls.get());
         assertFalse(boot.getBoolean(BridgeContract.EXTRA_OK));
@@ -103,11 +200,12 @@ public final class DiagnosticsProviderControllerTest {
         });
 
         Bundle invalid = controller.handle(
-                MODULE_UID, BridgeContract.METHOD_REPORT_BATCH, new Bundle());
+                SYSTEM_UID, BridgeContract.METHOD_REPORT_BATCH, new Bundle());
         Bundle busy = controller.handle(
-                MODULE_UID,
+                SYSTEM_UID,
                 BridgeContract.METHOD_REPORT_BATCH,
-                DiagnosticsWireEncoder.encodeTyped(batch("boot", EPOCH, 0L)));
+                DiagnosticsWireEncoder.encodeTyped(batch(
+                        BridgeContract.PROCESS_SYSTEM_SERVER, "boot", EPOCH, 0L)));
 
         assertEquals(1, calls.get());
         assertFalse(invalid.getBoolean(BridgeContract.EXTRA_OK));
@@ -122,7 +220,7 @@ public final class DiagnosticsProviderControllerTest {
     @Test
     public void unresolvedAthenaUidDoesNotAuthorizeArbitraryNegativeUid() {
         DiagnosticsProviderController controller = new DiagnosticsProviderController(
-                MODULE_UID, -1, "boot", () -> EPOCH,
+                MODULE_UID, SYSTEM_UID, -1, "boot", () -> EPOCH,
                 batch -> accepted(batch.size()), new DiagnosticsWireParser());
 
         assertFalse(controller.isAllowedCaller(-1));
@@ -131,7 +229,7 @@ public final class DiagnosticsProviderControllerTest {
     private static DiagnosticsProviderController controller(
             DiagnosticsProviderController.BatchSink sink) {
         return new DiagnosticsProviderController(
-                MODULE_UID, ATHENA_UID, "boot", () -> EPOCH,
+                MODULE_UID, SYSTEM_UID, ATHENA_UID, "boot", () -> EPOCH,
                 sink, new DiagnosticsWireParser());
     }
 
@@ -139,31 +237,46 @@ public final class DiagnosticsProviderControllerTest {
         return new DiagnosticsProviderController.BatchResult(count, 0);
     }
 
-    private static DiagnosticsWriteBatch batch(String bootId, long epoch, long sequence) {
-        NormalizedDiagnosticsEvent event = NormalizedDiagnosticsEvent.builder()
-                .timestampMillis(System.currentTimeMillis())
-                .bootId(bootId)
-                .processId("system_server")
-                .featureId(FeatureIds.HANS)
-                .hookTargetId(HookTargetIds.HANS_FREEZE_DISPATCH)
-                .behavior("FREEZE")
-                .source("FAST")
-                .packageName("com.example.target")
-                .uid(10_123)
-                .decision("POLICY_BLOCKS_FREEZE")
-                .result(DiagnosticsResult.BLOCKED)
-                .eventToken("event-1")
-                .build();
-        return DiagnosticsWriteBatch.builder()
+    private static void assertRejectedIdentity(Bundle response, int droppedItems) {
+        assertFalse(response.getBoolean(BridgeContract.EXTRA_OK));
+        assertEquals("sender_identity_mismatch",
+                response.getString(BridgeContract.EXTRA_ERROR));
+        assertEquals(0, response.getInt(BridgeContract.EXTRA_ACCEPTED_ITEMS));
+        assertEquals(droppedItems, response.getInt(BridgeContract.EXTRA_DROPPED_ITEMS));
+    }
+
+    private static DiagnosticsWriteBatch batch(
+            String processId, String bootId, long epoch, long sequence) {
+        return batch(processId, bootId, epoch, sequence, 1);
+    }
+
+    private static DiagnosticsWriteBatch batch(
+            String processId, String bootId, long epoch, long sequence, int eventCount) {
+        DiagnosticsWriteBatch.Builder builder = DiagnosticsWriteBatch.builder()
                 .wireIdentity(
                         DiagnosticsWireParser.WIRE_VERSION,
                         bootId,
-                        "system_server",
+                        processId,
                         "sender-instance",
                         epoch,
                         sequence)
-                .countingMode(DiagnosticsWriteBatch.CountingMode.TYPED)
-                .addEvent(event)
-                .build();
+                .countingMode(DiagnosticsWriteBatch.CountingMode.TYPED);
+        for (int index = 0; index < eventCount; index++) {
+            builder.addEvent(NormalizedDiagnosticsEvent.builder()
+                    .timestampMillis(System.currentTimeMillis())
+                    .bootId(bootId)
+                    .processId(processId)
+                    .featureId(FeatureIds.HANS)
+                    .hookTargetId(HookTargetIds.HANS_FREEZE_DISPATCH)
+                    .behavior("FREEZE")
+                    .source("FAST")
+                    .packageName("com.example.target")
+                    .uid(10_123)
+                    .decision("POLICY_BLOCKS_FREEZE")
+                    .result(DiagnosticsResult.BLOCKED)
+                    .eventToken("event-" + sequence + "-" + index)
+                    .build());
+        }
+        return builder.build();
     }
 }
