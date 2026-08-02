@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -46,6 +47,7 @@ public final class HookDiagnostics {
     private static final int MAX_PENDING_EVENTS = 512;
     private static final int MAX_STICKY_STATES = 64;
     private static final Object OUTBOX_LOCK = new Object();
+    private static final Object FLUSH_SCHEDULE_LOCK = new Object();
     private static final ArrayDeque<PendingEvent> EVENT_OUTBOX = new ArrayDeque<>();
     private static final Map<String, String> FEATURE_STATUSES = new ConcurrentHashMap<>();
     private static final Map<String, Long> FEATURE_UPDATED_AT = new ConcurrentHashMap<>();
@@ -75,6 +77,8 @@ public final class HookDiagnostics {
     private static volatile long sEpoch = -1L;
     private static volatile long sNextBatchSequence;
     private static volatile InFlightBatch sInFlight;
+    private static ScheduledFuture<?> sScheduledFlush;
+    private static long sScheduledFlushDeadlineNanos = Long.MAX_VALUE;
     private static volatile String sTransportError = "";
     private static volatile long sLastTransportLogAt;
 
@@ -210,17 +214,39 @@ public final class HookDiagnostics {
     }
 
     private static void scheduleFlush(long delayMs) {
-        if (!FLUSH_SCHEDULED.compareAndSet(false, true)) return;
-        try {
-            EXECUTOR.schedule(() -> {
+        long boundedDelayMs = Math.max(0L, delayMs);
+        long deadlineNanos = System.nanoTime()
+                + TimeUnit.MILLISECONDS.toNanos(boundedDelayMs);
+        synchronized (FLUSH_SCHEDULE_LOCK) {
+            ScheduledFuture<?> scheduled = sScheduledFlush;
+            if (scheduled != null && !scheduled.isDone()) {
+                if (sScheduledFlushDeadlineNanos <= deadlineNanos) return;
+                if (!scheduled.cancel(false)) return;
+            }
+            try {
+                FLUSH_SCHEDULED.set(true);
+                sScheduledFlushDeadlineNanos = deadlineNanos;
+                sScheduledFlush = EXECUTOR.schedule(
+                        HookDiagnostics::runScheduledFlush,
+                        boundedDelayMs,
+                        TimeUnit.MILLISECONDS);
+            } catch (Throwable error) {
+                sScheduledFlush = null;
+                sScheduledFlushDeadlineNanos = Long.MAX_VALUE;
                 FLUSH_SCHEDULED.set(false);
-                flushSnapshot();
-                if (hasPendingData()) scheduleFlush(FLUSH_INTERVAL_MS);
-            }, Math.max(0L, delayMs), TimeUnit.MILLISECONDS);
-        } catch (Throwable error) {
-            FLUSH_SCHEDULED.set(false);
-            logTransportFailure("schedule_flush", error);
+                logTransportFailure("schedule_flush", error);
+            }
         }
+    }
+
+    private static void runScheduledFlush() {
+        synchronized (FLUSH_SCHEDULE_LOCK) {
+            sScheduledFlush = null;
+            sScheduledFlushDeadlineNanos = Long.MAX_VALUE;
+            FLUSH_SCHEDULED.set(false);
+        }
+        flushSnapshot();
+        if (hasPendingData()) scheduleFlush(FLUSH_INTERVAL_MS);
     }
 
     private static void flushSnapshot() {
@@ -289,13 +315,22 @@ public final class HookDiagnostics {
     private static void sendInFlight(InFlightBatch inFlight) {
         Bundle response = callProvider(BridgeContract.METHOD_REPORT_BATCH, inFlight.payload);
         if (response == null) return;
+        if (response.getInt(BridgeContract.EXTRA_BRIDGE_VERSION, -1)
+                != BridgeContract.BRIDGE_VERSION) {
+            sTransportError = "bridge_version_mismatch";
+            return;
+        }
         String remoteBoot = response.getString(BridgeContract.EXTRA_BOOT_ID, "");
         long remoteEpoch = response.getLong(BridgeContract.EXTRA_DIAGNOSTICS_EPOCH, -1L);
         if (!BOOT_ID.equals(remoteBoot)) {
             sTransportError = "bridge_boot_mismatch";
             return;
         }
-        if (remoteEpoch >= 0L && remoteEpoch != inFlight.epoch) {
+        if (remoteEpoch < 0L) {
+            sTransportError = "bridge_epoch_missing";
+            return;
+        }
+        if (remoteEpoch != inFlight.epoch) {
             resetForEpoch(remoteEpoch);
             return;
         }
@@ -452,7 +487,7 @@ public final class HookDiagnostics {
         return "";
     }
 
-    private static String hookTargetFor(HookEvent event, DecisionTrace trace) {
+    static String hookTargetFor(HookEvent event, DecisionTrace trace) {
         if (trace != null && !stableId(trace.hookTargetId(), "").isEmpty()) {
             return stableId(trace.hookTargetId(), "unmapped_event");
         }
@@ -464,14 +499,16 @@ public final class HookDiagnostics {
                 || FeatureIds.FAST_CAMERA_OPERATION.equals(feature)
                 || FeatureIds.FAST_GAME_START.equals(feature)
                 || FeatureIds.FAST_AI.equals(feature)
-                || FeatureIds.FAST_CLEAR_OTHER.equals(feature)
-                || FeatureIds.ATHENA_OTHER.equals(feature)) {
+                || FeatureIds.FAST_CLEAR_OTHER.equals(feature)) {
             return HookTargetIds.FAST_CLEAR_DISPATCH;
         }
         if (FeatureIds.TOURNAMENT.equals(feature)) return HookTargetIds.TOURNAMENT;
         if (FeatureIds.MEMORY_FORCE.equals(feature)
                 || FeatureIds.MEMORY_OVER.equals(feature)
                 || FeatureIds.MEMORY_GUARD_OTHER.equals(feature)) {
+            return HookTargetIds.MEMORY_GUARD_DISPATCH;
+        }
+        if (FeatureIds.ATHENA_OTHER.equals(feature)) {
             return HookTargetIds.MEMORY_GUARD_DISPATCH;
         }
         if (FeatureIds.NIRVANA.equals(feature)
@@ -481,6 +518,9 @@ public final class HookDiagnostics {
         }
         if (FeatureIds.OSENSE_PER_PROCESS.equals(feature)) {
             return HookTargetIds.OSENSE_PROCESS_KILL;
+        }
+        if (FeatureIds.SUPER_FREEZE.equals(feature)) {
+            return HookTargetIds.HANS_FREEZE_DISPATCH;
         }
         if (FeatureIds.HANS.equals(feature)) {
             return event.scene.contains("cgroup_v2")
@@ -510,6 +550,7 @@ public final class HookDiagnostics {
     }
 
     static String sourceFor(HookEvent event) {
+        if (FeatureIds.ATHENA_OTHER.equals(event.feature)) return "OTHER";
         if (FeatureIds.HANS.equals(event.feature)) {
             FreezeSource[] values = FreezeSource.values();
             if (event.code >= 0 && event.code < values.length) return values[event.code].name();

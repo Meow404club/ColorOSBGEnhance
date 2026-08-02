@@ -547,14 +547,14 @@ public final class AthenaTerminalGate {
                 scene);
     }
 
-    private static ActionProfile unknownActionProfile(int code) {
+    static ActionProfile unknownActionProfile(int code) {
         return new ActionProfile(
                 KillContext.Path.MEMORY_GUARD,
                 FeatureIds.ATHENA_OTHER,
                 HookTargetIds.MEMORY_GUARD_DISPATCH,
                 "",
                 code,
-                "athena_unknown");
+                "memory_guard_unknown");
     }
 
     private static HookEvent event(ActionProfile profile, Identity identity) {
@@ -717,6 +717,7 @@ public final class AthenaTerminalGate {
         String hookTargetId() { return hookTargetId; }
         String featureKey() { return featureKey; }
         int code() { return code; }
+        String scene() { return scene; }
     }
 
     private static final class Activation {

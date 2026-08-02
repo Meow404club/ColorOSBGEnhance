@@ -471,6 +471,7 @@ public final class AthenaTerminalGateTest {
         assertEquals(0, decisions.get());
         assertEquals(3, diagnostics.failures.size());
         assertEquals(FeatureIds.ATHENA_OTHER, diagnostics.failures.get(2).feature);
+        assertEquals("memory_guard_unknown", diagnostics.failures.get(2).scene);
     }
 
     @Test
@@ -533,6 +534,12 @@ public final class AthenaTerminalGateTest {
         assertEquals(
                 HookTargetIds.MEMORY_GUARD_DISPATCH,
                 AthenaTerminalGate.profileForActionCode(4001).hookTargetId());
+        AthenaTerminalGate.ActionProfile unknown =
+                AthenaTerminalGate.unknownActionProfile(9999);
+        assertEquals(KillContext.Path.MEMORY_GUARD, unknown.path());
+        assertEquals(FeatureIds.ATHENA_OTHER, unknown.featureId());
+        assertEquals(HookTargetIds.MEMORY_GUARD_DISPATCH, unknown.hookTargetId());
+        assertEquals("memory_guard_unknown", unknown.scene());
     }
 
     @Test
