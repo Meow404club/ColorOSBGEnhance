@@ -73,6 +73,14 @@ public final class HansRuntimeTest {
                 int.class, String.class);
         assertExactMethod(
                 matrix,
+                Capability.KERNEL_WAKE_7,
+                OplusHansManager.class,
+                "unfreezeForKernel",
+                void.class,
+                int.class, int.class, int.class, int.class,
+                int.class, String.class, int.class);
+        assertExactMethod(
+                matrix,
                 Capability.FREEZE_GATE,
                 HansCGroup.class,
                 "hansFreezeLocked",
@@ -110,6 +118,10 @@ public final class HansRuntimeTest {
                 OplusHansManager.class,
                 "isLcdOnNonRestrictPkg");
         assertSingleMatchingOverload(
+                Capability.KERNEL_WAKE_7,
+                OplusHansManager.class,
+                "unfreezeForKernel");
+        assertSingleMatchingOverload(
                 Capability.FREEZE_GATE,
                 HansCGroup.class,
                 "hansFreezeLocked");
@@ -127,12 +139,19 @@ public final class HansRuntimeTest {
         Method pidUnfreeze = HansCGroup.class.getDeclaredMethod(
                 "hansUnfreezeLocked",
                 int.class, String.class, String.class, String.class);
+        Method fiveArgumentKernelWake = OplusHansManager.class.getDeclaredMethod(
+                "unfreezeForKernel",
+                int.class, int.class, int.class, String.class, int.class);
         assertFalse(HansRuntime.matches(Capability.FREEZE_GATE, pidFreeze));
         assertFalse(HansRuntime.matches(Capability.UNFREEZE_GATE, pidUnfreeze));
+        assertFalse(HansRuntime.matches(Capability.KERNEL_WAKE_7, fiveArgumentKernelWake));
 
         CapabilityMatrix matrix = HansRuntime.inspect(OplusHansPackage.class.getClassLoader());
         assertNotEquals(pidFreeze, matrix.methodOrNull(Capability.FREEZE_GATE));
         assertNotEquals(pidUnfreeze, matrix.methodOrNull(Capability.UNFREEZE_GATE));
+        assertNotEquals(
+                fiveArgumentKernelWake,
+                matrix.methodOrNull(Capability.KERNEL_WAKE_7));
     }
 
     @Test
@@ -147,8 +166,27 @@ public final class HansRuntimeTest {
                 "isHansCoreApp", Integer.class, String.class);
         Method wrongReturnExemption = OplusHansManager.class.getDeclaredMethod(
                 "isHansCoreApp", int.class, CharSequence.class);
+        Method staticKernelWake = OplusHansManager.class.getDeclaredMethod(
+                "unfreezeForKernel",
+                Integer.class, int.class, int.class, int.class,
+                int.class, String.class, int.class);
+        Method wrongReturnKernelWake = OplusHansManager.class.getDeclaredMethod(
+                "unfreezeForKernel",
+                int.class, int.class, int.class, int.class,
+                int.class, CharSequence.class, int.class);
+        Method wrongParameterKernelWake = OplusHansManager.class.getDeclaredMethod(
+                "unfreezeForKernel",
+                int.class, int.class, int.class, int.class,
+                long.class, String.class, int.class);
         Method staticFreeze = HansCGroup.class.getDeclaredMethod(
                 "hansFreezeLocked", Object.class, String.class);
+        Method staticUnfreeze = HansCGroup.class.getDeclaredMethod(
+                "hansUnfreezeLocked", Object.class, String.class, String.class);
+        Method wrongReturnUnfreeze = HansCGroup.class.getDeclaredMethod(
+                "hansUnfreezeLocked",
+                OplusHansPackage.class, String.class, CharSequence.class);
+        Method wrongParameterUnfreeze = HansCGroup.class.getDeclaredMethod(
+                "hansUnfreezeLocked", Object.class, String.class, CharSequence.class);
         Method staticFastV2 = HansCGroup.class.getDeclaredMethod(
                 "FastFreezeEnter", Integer.class);
         Method wrongReturnFastV2 = HansCGroup.class.getDeclaredMethod(
@@ -162,8 +200,18 @@ public final class HansRuntimeTest {
         assertFalse(HansRuntime.matches(Capability.CORE_EXEMPTION, staticExemption));
         assertEquals(int.class, wrongReturnExemption.getReturnType());
         assertFalse(HansRuntime.matches(Capability.CORE_EXEMPTION, wrongReturnExemption));
+        assertTrue(Modifier.isStatic(staticKernelWake.getModifiers()));
+        assertFalse(HansRuntime.matches(Capability.KERNEL_WAKE_7, staticKernelWake));
+        assertEquals(boolean.class, wrongReturnKernelWake.getReturnType());
+        assertFalse(HansRuntime.matches(Capability.KERNEL_WAKE_7, wrongReturnKernelWake));
+        assertFalse(HansRuntime.matches(Capability.KERNEL_WAKE_7, wrongParameterKernelWake));
         assertTrue(Modifier.isStatic(staticFreeze.getModifiers()));
         assertFalse(HansRuntime.matches(Capability.FREEZE_GATE, staticFreeze));
+        assertTrue(Modifier.isStatic(staticUnfreeze.getModifiers()));
+        assertFalse(HansRuntime.matches(Capability.UNFREEZE_GATE, staticUnfreeze));
+        assertEquals(int.class, wrongReturnUnfreeze.getReturnType());
+        assertFalse(HansRuntime.matches(Capability.UNFREEZE_GATE, wrongReturnUnfreeze));
+        assertFalse(HansRuntime.matches(Capability.UNFREEZE_GATE, wrongParameterUnfreeze));
         assertTrue(Modifier.isStatic(staticFastV2.getModifiers()));
         assertFalse(HansRuntime.matches(Capability.FAST_FREEZE_V2_PATH, staticFastV2));
         assertEquals(boolean.class, wrongReturnFastV2.getReturnType());

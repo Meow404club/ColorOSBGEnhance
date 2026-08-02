@@ -34,6 +34,16 @@ public class HansCGroup {
         return false;
     }
 
+    public int hansUnfreezeLocked(
+            OplusHansPackage target, String reason, CharSequence componentInfo) {
+        return -1;
+    }
+
+    public boolean hansUnfreezeLocked(
+            Object target, String reason, CharSequence componentInfo) {
+        return false;
+    }
+
     public static void FastFreezeEnter(Integer uid) {}
 
     public boolean FastFreezeEnter(long uid) {

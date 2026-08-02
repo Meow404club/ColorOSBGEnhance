@@ -59,6 +59,13 @@ public final class HansRuntime {
                 "isLcdOnNonRestrictPkg",
                 boolean.class,
                 int.class, String.class));
+        entries.put(Capability.KERNEL_WAKE_7, resolve(
+                Capability.KERNEL_WAKE_7,
+                managerType,
+                "unfreezeForKernel",
+                void.class,
+                int.class, int.class, int.class, int.class,
+                int.class, String.class, int.class));
 
         Entry freeze = resolveWithVendorPackage(
                 Capability.FREEZE_GATE,
@@ -127,6 +134,13 @@ public final class HansRuntime {
                         && method.getName().equals("isLcdOnNonRestrictPkg")
                         && method.getReturnType() == boolean.class
                         && types(parameters, int.class, String.class);
+            case KERNEL_WAKE_7:
+                return MANAGER_CLASS.equals(owner)
+                        && method.getName().equals("unfreezeForKernel")
+                        && method.getReturnType() == void.class
+                        && types(parameters,
+                        int.class, int.class, int.class, int.class,
+                        int.class, String.class, int.class);
             case FREEZE_GATE:
                 return CGROUP_CLASS.equals(owner)
                         && method.getName().equals("hansFreezeLocked")
@@ -224,6 +238,7 @@ public final class HansRuntime {
         M_TO_F_TIMING,
         CORE_EXEMPTION,
         LCD_ON_EXEMPTION,
+        KERNEL_WAKE_7,
         FREEZE_GATE,
         UNFREEZE_GATE,
         FAST_FREEZE_V2_PATH

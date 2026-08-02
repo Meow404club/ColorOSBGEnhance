@@ -20,6 +20,47 @@ public class OplusHansManager {
         return false;
     }
 
+    public void unfreezeForKernel(
+            int type,
+            int callerPid,
+            int callerUid,
+            int targetPid,
+            int targetUid,
+            String rpcName,
+            int code) {}
+
+    public void unfreezeForKernel(
+            int type, int callerPid, int targetUid, String rpcName, int code) {}
+
+    public static void unfreezeForKernel(
+            Integer type,
+            int callerPid,
+            int callerUid,
+            int targetPid,
+            int targetUid,
+            String rpcName,
+            int code) {}
+
+    public boolean unfreezeForKernel(
+            int type,
+            int callerPid,
+            int callerUid,
+            int targetPid,
+            int targetUid,
+            CharSequence rpcName,
+            int code) {
+        return false;
+    }
+
+    public void unfreezeForKernel(
+            int type,
+            int callerPid,
+            int callerUid,
+            int targetPid,
+            long targetUid,
+            String rpcName,
+            int code) {}
+
     public static boolean isHansCoreApp(Integer uid, String packageName) {
         return true;
     }
