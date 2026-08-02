@@ -175,6 +175,26 @@ public final class DiagnosticsUiMapperTest {
         }
     }
 
+    @Test
+    public void processEntryBeforeFeatureInstallationRemainsPending() {
+        DiagnosticsHookState entry = hookState(
+                DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                DiagnosticsTargetIds.RUNTIME_PROCESS,
+                "current_boot",
+                "ENTRY_LOADED",
+                0L);
+
+        DiagnosticsUiMapper.HookTargetRow row = findHook(
+                mapper.mapHookTargets(
+                        DiagnosticsDataSource.HookStatePage.success(
+                                Collections.singletonList(entry)),
+                        "current_boot"),
+                DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                DiagnosticsTargetIds.RUNTIME_PROCESS);
+
+        assertEquals(DiagnosticsUiMapper.HookStatus.PENDING, row.status);
+    }
+
     private static DiagnosticsUiMapper.HookTargetRow findHook(
             List<DiagnosticsUiMapper.HookTargetRow> rows, String hookTargetId) {
         for (DiagnosticsUiMapper.HookTargetRow row : rows) {

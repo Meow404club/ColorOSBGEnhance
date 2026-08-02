@@ -19,4 +19,9 @@
     <color name="chip_text">#FF5F6068</color>
     <color name="banner_warning">#FFFFF1D6</color>
     <color name="banner_warning_text">#FF7A4D00</color>
+    <color name="status_success_bg">#FFE3F3EA</color>
+    <color name="status_success_text">#FF14633D</color>
+    <color name="status_warning_bg">#FFFFE9C2</color>
+    <color name="status_error_bg">#FFFCE5E5</color>
+    <color name="status_error_text">#FF9F2525</color>
 </resources>

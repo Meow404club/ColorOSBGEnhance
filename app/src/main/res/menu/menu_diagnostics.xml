@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <item
+        android:id="@+id/action_refresh_diagnostics"
+        android:icon="@drawable/ic_diagnostics_refresh"
+        android:title="@string/refresh_diagnostics"
+        app:showAsAction="ifRoom" />
+
+    <item
+        android:id="@+id/action_export_diagnostics"
+        android:icon="@drawable/ic_diagnostics_export"
+        android:title="@string/copy_debug"
+        app:showAsAction="ifRoom" />
+
+    <item
+        android:id="@+id/action_clear_diagnostics"
+        android:title="@string/reset_stats"
+        app:showAsAction="never" />
+</menu>

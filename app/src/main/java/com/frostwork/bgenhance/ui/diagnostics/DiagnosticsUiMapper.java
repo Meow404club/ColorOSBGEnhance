@@ -302,8 +302,8 @@ public final class DiagnosticsUiMapper {
     private static HookStatus hookStatus(String installStatus) {
         String value = installStatus == null ? "" : installStatus;
         if (value.startsWith("FEATURES_INSTALLED")
-                || value.startsWith("ENTRY_LOADED")
                 || value.startsWith("CONFIG_READY")) return HookStatus.READY;
+        if (value.startsWith("ENTRY_LOADED")) return HookStatus.PENDING;
         if (value.startsWith("INSTALLED")) return HookStatus.INSTALLED;
         if (value.startsWith("FAILED")
                 || value.startsWith("BOOTSTRAP_FAILED")
