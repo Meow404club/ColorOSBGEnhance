@@ -8,6 +8,9 @@ import androidx.annotation.NonNull;
 import com.frostwork.bgenhance.residency.config.GlobalFeatureConfig;
 import com.frostwork.bgenhance.residency.config.RuntimeConfigCodec;
 import com.frostwork.bgenhance.residency.config.RuntimeConfigDocument;
+import com.frostwork.bgenhance.diagnostics.DiagnosticsBootId;
+import com.frostwork.bgenhance.diagnostics.DiagnosticsRetentionPolicy;
+import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
 import io.github.libxposed.service.XposedService;
 import io.github.libxposed.service.XposedServiceHelper;
 import java.util.Map;
@@ -16,6 +19,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** Owns the modern Xposed service connection and mirrors local UI settings to RemotePreferences. */
 public final class ModuleApplication extends Application
@@ -34,15 +38,20 @@ public final class ModuleApplication extends Application
     private static final RuntimeConfigCodec RUNTIME_CONFIG_CODEC = new RuntimeConfigCodec();
     private static final CopyOnWriteArraySet<StateListener> STATE_LISTENERS =
             new CopyOnWriteArraySet<>();
+    private static final Object DIAGNOSTICS_LOCK = new Object();
+    private static final AtomicLong DIAGNOSTICS_EPOCH = new AtomicLong(-1L);
 
     private static volatile XposedService sService;
     private static volatile int sServiceApi = -1;
     private static volatile int sSyncedRevision = -1;
     private static volatile String sSyncError = "service_not_connected";
+    private static volatile ResidencyDiagnosticsBackend sDiagnosticsBackend;
+    private static volatile String sDiagnosticsBootId = "";
 
     @Override
     public void onCreate() {
         super.onCreate();
+        initializeDiagnostics(this);
         ModuleSettings.ensureDefaults(this);
         ModuleSettings.prefs(this).registerOnSharedPreferenceChangeListener(this);
         XposedServiceHelper.registerListener(this);
@@ -130,6 +139,52 @@ public final class ModuleApplication extends Application
     public static boolean isConfigSynced(Context context) {
         return isServiceConnected()
                 && sSyncedRevision >= ModuleSettings.getConfigRevision(context);
+    }
+
+    /** Returns the process-wide diagnostics backend, creating it at most once. */
+    public static ResidencyDiagnosticsBackend initializeDiagnostics(Context context) {
+        if (context == null) throw new IllegalArgumentException("diagnostics context required");
+        ResidencyDiagnosticsBackend current = sDiagnosticsBackend;
+        synchronized (DIAGNOSTICS_LOCK) {
+            current = sDiagnosticsBackend;
+            if (current == null) {
+                Context application = context.getApplicationContext();
+                if (application == null) application = context;
+                String bootId = DiagnosticsBootId.readCurrent();
+                current = ResidencyDiagnosticsBackend.open(
+                        application, DiagnosticsRetentionPolicy.defaults(), bootId);
+                sDiagnosticsBootId = bootId;
+                sDiagnosticsBackend = current;
+                current.currentEpochAsync().whenComplete((epoch, error) -> {
+                    if (error == null && epoch != null && epoch >= 0L) {
+                        DIAGNOSTICS_EPOCH.set(epoch);
+                    } else {
+                        DIAGNOSTICS_EPOCH.set(-1L);
+                        if (error != null) {
+                            Log.w(ModuleSettings.TAG,
+                                    "diagnostics epoch initialization failed", error);
+                        }
+                    }
+                });
+            }
+            return current;
+        }
+    }
+
+    public static ResidencyDiagnosticsBackend diagnosticsBackend() {
+        return sDiagnosticsBackend;
+    }
+
+    public static String diagnosticsBootId() {
+        return sDiagnosticsBootId;
+    }
+
+    public static long diagnosticsEpoch() {
+        return DIAGNOSTICS_EPOCH.get();
+    }
+
+    public static void publishDiagnosticsEpoch(long epoch) {
+        if (epoch >= 0L) DIAGNOSTICS_EPOCH.set(epoch);
     }
 
     private void requestConfigSync() {

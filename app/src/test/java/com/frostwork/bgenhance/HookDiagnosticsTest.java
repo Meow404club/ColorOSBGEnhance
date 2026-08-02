@@ -1,5 +1,6 @@
 package com.frostwork.bgenhance;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
@@ -61,6 +62,22 @@ public final class HookDiagnosticsTest {
         Field pendingField = HookDiagnostics.class.getDeclaredField("PENDING_EVENTS");
         pendingField.setAccessible(true);
         ((AtomicInteger) pendingField.get(null)).set(0);
+    }
+
+    @Test
+    public void resourceAndRefreezeSourcesUseStableCodesInsteadOfFreeText() {
+        assertEquals("SERVICE", HookDiagnostics.sourceFor(new HookEvent(
+                FeatureIds.HANS_RESOURCE, 1, 10001, "pkg", "", "private:text")));
+        assertEquals("BLUETOOTH_SCAN", HookDiagnostics.sourceFor(new HookEvent(
+                FeatureIds.HANS_RESOURCE, 10, 10001, "pkg", "", "private:text")));
+        assertEquals("NETWORK", HookDiagnostics.sourceFor(new HookEvent(
+                FeatureIds.HANS_RESOURCE, 100, 10001, "pkg", "", "private:text")));
+        assertEquals("PACKET", HookDiagnostics.sourceFor(new HookEvent(
+                FeatureIds.HANS_REFREEZE, 1, 10001, "pkg", "", "private:text")));
+        assertEquals("OTHER", HookDiagnostics.sourceFor(new HookEvent(
+                FeatureIds.HANS_REFREEZE, 17, 10001, "pkg", "", "private:text")));
+        assertEquals("", HookDiagnostics.sourceFor(new HookEvent(
+                FeatureIds.HANS_RESOURCE, -1, 10001, "pkg", "", "private:text")));
     }
 
     private static HookDiagnostics.ConfigReportState state(

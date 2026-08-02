@@ -34,7 +34,8 @@ public final class ResidencyDecisionReporter {
             HookEvent event, FreezeDecision decision) {
         if (event == null || decision == null) return;
         try {
-            HookDiagnostics.recordEventFromLockedPath(event, resultFor(decision));
+            HookDiagnostics.recordDecisionFromLockedPath(
+                    event, resultFor(decision), decision.trace());
         } catch (Throwable ignored) {
             // Diagnostics must never delay or change a HANS-locked callback.
         }
@@ -47,8 +48,8 @@ public final class ResidencyDecisionReporter {
             WakeRuntimeOutcome runtimeOutcome) {
         if (event == null || decision == null) return;
         try {
-            HookDiagnostics.recordEventFromLockedPath(
-                    event, resultFor(decision, runtimeOutcome));
+            HookDiagnostics.recordDecisionFromLockedPath(
+                    event, resultFor(decision, runtimeOutcome), decision.trace());
         } catch (Throwable ignored) {
             // Diagnostics must never delay or change a HANS-locked callback.
         }
@@ -59,7 +60,8 @@ public final class ResidencyDecisionReporter {
             HookEvent event, ResourceDecision decision) {
         if (event == null || decision == null) return;
         try {
-            HookDiagnostics.recordEventFromLockedPath(event, resultFor(decision));
+            HookDiagnostics.recordDecisionFromLockedPath(
+                    event, resultFor(decision), decision.trace());
         } catch (Throwable ignored) {
             // Diagnostics must never delay or change a HANS callback.
         }
@@ -70,7 +72,8 @@ public final class ResidencyDecisionReporter {
             HookEvent event, RefreezeDecision decision) {
         if (event == null || decision == null) return;
         try {
-            HookDiagnostics.recordEventFromLockedPath(event, resultFor(decision));
+            HookDiagnostics.recordDecisionFromLockedPath(
+                    event, resultFor(decision), decision.trace());
         } catch (Throwable ignored) {
             // Diagnostics must never delay or change a HANS state transition.
         }
@@ -82,9 +85,10 @@ public final class ResidencyDecisionReporter {
         String result = resultFor(decision);
         try {
             if (writeLog) {
-                HookDiagnostics.recordEvent(event, result);
+                HookDiagnostics.recordDecision(event, result, decision.trace());
             } else {
-                HookDiagnostics.recordEventFromLockedPath(event, result);
+                HookDiagnostics.recordDecisionFromLockedPath(
+                        event, result, decision.trace());
             }
             if (!writeLog) return;
             DecisionTrace trace = decision.trace();

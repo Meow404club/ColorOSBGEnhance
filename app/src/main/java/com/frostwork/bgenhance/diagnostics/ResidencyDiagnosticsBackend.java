@@ -2,6 +2,15 @@ package com.frostwork.bgenhance.diagnostics;
 
 import android.content.Context;
 import android.database.sqlite.SQLiteFullException;
+import com.frostwork.bgenhance.DiagnosticsResult;
+import com.frostwork.bgenhance.DiagnosticsTargetIds;
+import com.frostwork.bgenhance.FeatureIds;
+import com.frostwork.bgenhance.HookTargetIds;
+import com.frostwork.bgenhance.residency.decision.DecisionReason;
+import com.frostwork.bgenhance.residency.model.FreezeSource;
+import com.frostwork.bgenhance.residency.model.ResidencyMode;
+import com.frostwork.bgenhance.residency.model.ResourceType;
+import com.frostwork.bgenhance.residency.model.WakeSource;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -23,6 +32,7 @@ import java.util.function.Supplier;
  */
 public final class ResidencyDiagnosticsBackend implements AutoCloseable {
     public static final int EXPORT_FORMAT_VERSION = 1;
+    private static final String UNKNOWN_EXPORTED_VALUE = "unknown";
     private static final int MAX_PENDING_COMMANDS = 64;
 
     private final DiagnosticsRetentionPolicy policy;
@@ -52,6 +62,13 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
 
     public static ResidencyDiagnosticsBackend open(
             Context context, DiagnosticsRetentionPolicy retentionPolicy) {
+        return open(context, retentionPolicy, DiagnosticsBootId.readCurrent());
+    }
+
+    public static ResidencyDiagnosticsBackend open(
+            Context context,
+            DiagnosticsRetentionPolicy retentionPolicy,
+            String currentBootId) {
         Context applicationContext = context == null ? null : context.getApplicationContext();
         DiagnosticsRetentionPolicy policy = retentionPolicy == null
                 ? DiagnosticsRetentionPolicy.defaults() : retentionPolicy;
@@ -63,7 +80,6 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
         });
         worker.setRemoveOnCancelPolicy(true);
         worker.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
-        String currentBootId = DiagnosticsBootId.readCurrent();
         return new ResidencyDiagnosticsBackend(policy, () -> {
             if (applicationContext == null) {
                 throw new IllegalStateException("diagnostics context unavailable");
@@ -470,11 +486,13 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 || !currentBootId.equals(identity.bootId))) return false;
         for (RawHookHit hit : batch.rawHits) {
             if (hit == null || !hit.isStorable()
+                    || !matchesCurrentBoot(hit.bootId)
                     || (identity != null && (!identity.processId.equals(hit.processId)
                     || !identity.bootId.equals(hit.bootId)))) return false;
         }
         for (NormalizedDiagnosticsEvent event : batch.events) {
             if (event == null || !event.isStorable()
+                    || !matchesCurrentBoot(event.bootId)
                     || (identity != null && (!identity.processId.equals(event.processId)
                     || !identity.bootId.equals(event.bootId)))) return false;
         }
@@ -483,9 +501,15 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
         }
         for (DiagnosticsHookState state : batch.hookStates) {
             if (state == null || !state.isStorable()
+                    || !matchesCurrentBoot(state.bootId)
                     || (identity != null && !state.matchesBatchIdentity(identity))) return false;
         }
         return true;
+    }
+
+    private boolean matchesCurrentBoot(String payloadBootId) {
+        return payloadBootId == null || payloadBootId.isEmpty()
+                || (!currentBootId.isEmpty() && currentBootId.equals(payloadBootId));
     }
 
     private ResidencyDiagnosticsStorage storageOrNull() {
@@ -562,6 +586,13 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                     .scene(options.includeSensitiveDetails ? event.scene : "")
                     .failOpenReason(
                             options.includeSensitiveDetails ? event.failOpenReason : "")
+                    .featureId(exportFeatureId(event.featureId, options))
+                    .hookTargetId(exportHookTargetId(event.hookTargetId, options))
+                    .behavior(exportBehavior(event.behavior, options))
+                    .source(exportSource(event.source, options))
+                    .mode(exportMode(event.mode, options))
+                    .decision(exportDecision(event.decision, options))
+                    .result(exportResult(event.result, options))
                     .eventToken("")
                     .build());
         }
@@ -570,8 +601,12 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
             aggregates.add(new DiagnosticsQuery.AggregateRow(
                     exportPackage(row.packageName, options),
                     options.includeUids ? row.uid : -1,
-                    row.featureId, row.hookTargetId, row.behavior, row.source,
-                    row.decision, row.result, row.rawHitCount, row.eventCount,
+                    exportFeatureId(row.featureId, options),
+                    exportHookTargetId(row.hookTargetId, options),
+                    exportBehavior(row.behavior, options),
+                    exportSource(row.source, options),
+                    exportDecision(row.decision, options),
+                    exportResult(row.result, options), row.rawHitCount, row.eventCount,
                     row.blockedCount, row.failOpenCount, row.identityResolvedCount,
                     row.latencyMicrosTotal, row.latencyMicrosMax, row.firstAt, row.lastAt));
         }
@@ -579,21 +614,22 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
         for (Map.Entry<String, DiagnosticsQuery.FeatureStats> entry
                 : source.homeStats.features.entrySet()) {
             DiagnosticsQuery.FeatureStats value = entry.getValue();
-            featureStats.put(entry.getKey(), new DiagnosticsQuery.FeatureStats(
-                    value.featureId, value.observed, value.blocked, value.failOpen,
+            String featureId = exportFeatureId(value.featureId, options);
+            featureStats.put(featureId, new DiagnosticsQuery.FeatureStats(
+                    featureId, value.observed, value.blocked, value.failOpen,
                     value.lastAt,
                     exportPackage(value.lastPackage, options),
                     options.includeSensitiveDetails ? value.lastProcess : "",
                     options.includeSensitiveDetails ? value.lastScene : "",
                     options.includeSensitiveDetails ? value.lastReason : "",
-                    value.lastResult));
+                    exportResult(value.lastResult, options)));
         }
         ArrayList<DiagnosticsQuery.RawHookSummary> rawHooks = new ArrayList<>();
         for (DiagnosticsQuery.RawHookSummary value : source.rawHooks) {
             rawHooks.add(new DiagnosticsQuery.RawHookSummary(
                     options.includeSensitiveDetails ? value.processId : "",
-                    value.featureId,
-                    value.hookTargetId,
+                    exportFeatureId(value.featureId, options),
+                    exportHookTargetId(value.hookTargetId, options),
                     value.hitCount,
                     value.parsedCount,
                     value.identityResolvedCount,
@@ -604,8 +640,8 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
         for (DiagnosticsHookState value : source.hookStates) {
             hookStates.add(DiagnosticsHookState.builder()
                     .processId(options.includeSensitiveDetails ? value.processId : "")
-                    .featureId(value.featureId)
-                    .hookTargetId(value.hookTargetId)
+                    .featureId(exportFeatureId(value.featureId, options))
+                    .hookTargetId(exportHookTargetId(value.hookTargetId, options))
                     .installStatus(options.includeSensitiveDetails
                             ? value.installStatus : stableInstallStatus(value.installStatus))
                     .bootId(options.includeSensitiveDetails ? value.bootId : "")
@@ -643,6 +679,90 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
         if (normalized.startsWith("SKIPPED")) return "SKIPPED";
         if (normalized.startsWith("PENDING")) return "PENDING";
         return "UNKNOWN";
+    }
+
+    private static String exportFeatureId(
+            String value, DiagnosticsQuery.ExportOptions options) {
+        if (options.includeSensitiveDetails) return value;
+        return FeatureIds.all().contains(value) ? value : UNKNOWN_EXPORTED_VALUE;
+    }
+
+    private static String exportHookTargetId(
+            String value, DiagnosticsQuery.ExportOptions options) {
+        if (options.includeSensitiveDetails) return value;
+        if (DiagnosticsTargetIds.isKnown(value)) return value;
+        return UNKNOWN_EXPORTED_VALUE;
+    }
+
+    private static String exportBehavior(
+            String value, DiagnosticsQuery.ExportOptions options) {
+        if (options.includeSensitiveDetails) return value;
+        if ("KILL".equals(value) || "FREEZE".equals(value) || "WAKE".equals(value)
+                || "RESOURCE".equals(value) || "REFREEZE".equals(value)
+                || "RECOVERY".equals(value)) return value;
+        return UNKNOWN_EXPORTED_VALUE;
+    }
+
+    private static String exportSource(
+            String value, DiagnosticsQuery.ExportOptions options) {
+        if (options.includeSensitiveDetails || value == null || value.isEmpty()) return value;
+        if ("NETWORK".equals(value)
+                || enumContains(FreezeSource.class, value)
+                || enumContains(WakeSource.class, value)
+                || enumContains(ResourceType.class, value)) return value;
+        return UNKNOWN_EXPORTED_VALUE;
+    }
+
+    private static String exportMode(
+            String value, DiagnosticsQuery.ExportOptions options) {
+        if (options.includeSensitiveDetails || value == null || value.isEmpty()) return value;
+        return enumContains(ResidencyMode.class, value) ? value : UNKNOWN_EXPORTED_VALUE;
+    }
+
+    private static String exportDecision(
+            String value, DiagnosticsQuery.ExportOptions options) {
+        if (options.includeSensitiveDetails) return value;
+        if (enumContains(DecisionReason.class, value)
+                || "BLOCK_ACTION".equals(value)
+                || "THROTTLE_BLOCK".equals(value)
+                || "THROTTLE_ALLOW".equals(value)
+                || "DRY_RUN".equals(value)
+                || "FILTER_CANDIDATE".equals(value)
+                || "RECOVER".equals(value)
+                || "NO_ACTION".equals(value)
+                || "SAFETY_ABORT".equals(value)
+                || "FAIL_OPEN".equals(value)
+                || "ALLOW_SYSTEM".equals(value)) return value;
+        return UNKNOWN_EXPORTED_VALUE;
+    }
+
+    private static String exportResult(
+            String value, DiagnosticsQuery.ExportOptions options) {
+        if (options.includeSensitiveDetails) return value;
+        if (DiagnosticsResult.PASSED.equals(value)
+                || DiagnosticsResult.BLOCKED.equals(value)
+                || DiagnosticsResult.OBSERVED.equals(value)
+                || DiagnosticsResult.CANDIDATE_FILTERED.equals(value)
+                || DiagnosticsResult.FAIL_OPEN.equals(value)
+                || DiagnosticsResult.CONFIG_UNAVAILABLE.equals(value)
+                || DiagnosticsResult.THROTTLE_ALLOWED.equals(value)
+                || DiagnosticsResult.THROTTLE_BLOCKED.equals(value)
+                || DiagnosticsResult.RUNTIME_FAIL_OPEN.equals(value)
+                || DiagnosticsResult.RECOVERED.equals(value)
+                || DiagnosticsResult.NO_ACTION_NEEDED.equals(value)
+                || DiagnosticsResult.SAFETY_ABORTED.equals(value)) return value;
+        return UNKNOWN_EXPORTED_VALUE;
+    }
+
+    private static <T extends Enum<T>> boolean enumContains(
+            Class<T> type, String value) {
+        if (value == null || value.isEmpty()) return false;
+        try {
+            Enum.valueOf(type, value);
+            return true;
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
     }
 
     private List<String> copyFeatureIds(Iterable<String> values) {

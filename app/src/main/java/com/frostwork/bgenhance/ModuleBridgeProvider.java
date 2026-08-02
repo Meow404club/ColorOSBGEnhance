@@ -9,7 +9,8 @@ import android.net.Uri;
 import android.os.Binder;
 import android.os.Bundle;
 import android.os.Process;
-import android.text.TextUtils;
+import com.frostwork.bgenhance.diagnostics.DiagnosticsWireParser;
+import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
 
 /**
  * Restricted, write-only diagnostics bridge used by hooked processes.
@@ -17,115 +18,69 @@ import android.text.TextUtils;
  * Only the module process, system UID and the scoped Athena package may call it.
  */
 public final class ModuleBridgeProvider extends ContentProvider {
+    private static final String ATHENA_PACKAGE = "com.oplus.athena";
+
+    private volatile DiagnosticsProviderController controller;
+
     @Override
     public boolean onCreate() {
         Context context = getContext();
-        if (context != null) ModuleSettings.ensureDefaults(context);
+        if (context == null) return false;
+        ResidencyDiagnosticsBackend backend = ModuleApplication.initializeDiagnostics(context);
+        int athenaUid = resolveAthenaUid(context.getPackageManager());
+        controller = new DiagnosticsProviderController(
+                Process.myUid(),
+                athenaUid,
+                ModuleApplication.diagnosticsBootId(),
+                ModuleApplication::diagnosticsEpoch,
+                batch -> {
+                    ResidencyDiagnosticsBackend.EnqueueResult result = backend.enqueue(batch);
+                    return new DiagnosticsProviderController.BatchResult(
+                            result.accepted, result.dropped);
+                },
+                new DiagnosticsWireParser());
         return true;
     }
 
     @Override
     public Bundle call(String method, String arg, Bundle extras) {
-        enforceAllowedCaller();
-        Context context = getContext();
-        Bundle out = new Bundle();
-        if (context == null) {
-            out.putBoolean(BridgeContract.EXTRA_OK, false);
-            out.putString(BridgeContract.EXTRA_ERROR, "provider context unavailable");
-            return out;
+        DiagnosticsProviderController current = controller;
+        if (current == null) {
+            int callerUid = Binder.getCallingUid();
+            if (callerUid != Process.myUid() && callerUid != Process.SYSTEM_UID) {
+                throw new SecurityException("diagnostics caller rejected");
+            }
+            return unavailableResponse("bridge_not_ready");
         }
         try {
-            if (BridgeContract.METHOD_PING.equals(method)) {
-                out.putBoolean(BridgeContract.EXTRA_OK, true);
-                out.putInt(BridgeContract.EXTRA_BRIDGE_VERSION, BridgeContract.BRIDGE_VERSION);
-                out.putInt(BridgeContract.EXTRA_CONFIG_REVISION,
-                        ModuleSettings.getConfigRevision(context));
-                return out;
-            }
-            if (BridgeContract.METHOD_REPORT_PROCESS.equals(method)) {
-                requireExtras(extras);
-                DiagnosticsStore.reportProcess(context,
-                        extras.getString(BridgeContract.EXTRA_PROCESS_ID, "unknown"),
-                        extras.getString(BridgeContract.EXTRA_PACKAGE, ""),
-                        extras.getString(BridgeContract.EXTRA_PROCESS, ""),
-                        extras.getString(BridgeContract.EXTRA_STAGE, "LOADED"),
-                        extras.getString(BridgeContract.EXTRA_ERROR, ""));
-                out.putBoolean(BridgeContract.EXTRA_OK, true);
-                return out;
-            }
-            if (BridgeContract.METHOD_REPORT_CONFIG.equals(method)) {
-                requireExtras(extras);
-                DiagnosticsStore.reportConfigLoaded(context,
-                        extras.getString(BridgeContract.EXTRA_PROCESS_ID, "unknown"),
-                        extras.getString(BridgeContract.EXTRA_PACKAGE, ""),
-                        extras.getString(BridgeContract.EXTRA_PROCESS, ""),
-                        extras.getInt(BridgeContract.EXTRA_CONFIG_REVISION, -1),
-                        extras.getString(BridgeContract.EXTRA_CONFIG_SOURCE, ""),
-                        extras.getString(BridgeContract.EXTRA_CONFIG_PATH, ""),
-                        extras.getLong(BridgeContract.EXTRA_RELOAD_LATENCY, 0L),
-                        extras.getString(BridgeContract.EXTRA_ERROR, ""));
-                out.putBoolean(BridgeContract.EXTRA_OK, true);
-                return out;
-            }
-            if (BridgeContract.METHOD_REPORT_FEATURE.equals(method)) {
-                requireExtras(extras);
-                DiagnosticsStore.setSupportStatus(context,
-                        extras.getString(BridgeContract.EXTRA_FEATURE, ""),
-                        extras.getString(BridgeContract.EXTRA_STATUS, "UNKNOWN"));
-                out.putBoolean(BridgeContract.EXTRA_OK, true);
-                return out;
-            }
-            if (BridgeContract.METHOD_REPORT_SNAPSHOT.equals(method)) {
-                requireExtras(extras);
-                DiagnosticsStore.mergeSnapshot(context, extras);
-                out.putBoolean(BridgeContract.EXTRA_OK, true);
-                return out;
-            }
-            if (BridgeContract.METHOD_RECORD_EVENT.equals(method)) {
-                requireExtras(extras);
-                HookEvent event = new HookEvent(
-                        extras.getString(BridgeContract.EXTRA_FEATURE, ""),
-                        extras.getInt(BridgeContract.EXTRA_CODE, 0),
-                        extras.getInt(BridgeContract.EXTRA_UID, -1),
-                        extras.getString(BridgeContract.EXTRA_PACKAGE, ""),
-                        extras.getString(BridgeContract.EXTRA_PROCESS, ""),
-                        extras.getString(BridgeContract.EXTRA_SCENE, ""));
-                DiagnosticsStore.recordEvent(context, event,
-                        extras.getString(BridgeContract.EXTRA_RESULT, "passed"));
-                out.putBoolean(BridgeContract.EXTRA_OK, true);
-                return out;
-            }
-            return super.call(method, arg, extras);
+            return current.handle(Binder.getCallingUid(), method, extras);
+        } catch (SecurityException denied) {
+            throw denied;
         } catch (Throwable t) {
-            out.putBoolean(BridgeContract.EXTRA_OK, false);
-            out.putString(BridgeContract.EXTRA_ERROR,
-                    t.getClass().getSimpleName() + ":" + safe(t.getMessage()));
-            return out;
+            return unavailableResponse("provider_error");
         }
     }
 
-    private void enforceAllowedCaller() {
-        int uid = Binder.getCallingUid();
-        if (uid == Process.myUid() || uid == Process.SYSTEM_UID) return;
-        Context context = getContext();
-        if (context != null) {
-            PackageManager pm = context.getPackageManager();
-            String[] packages = pm.getPackagesForUid(uid);
-            if (packages != null) {
-                for (String packageName : packages) {
-                    if ("com.oplus.athena".equals(packageName)) return;
-                }
-            }
+    private static int resolveAthenaUid(PackageManager packageManager) {
+        if (packageManager == null) return -1;
+        try {
+            return packageManager.getPackageUid(
+                    ATHENA_PACKAGE, PackageManager.MATCH_DISABLED_COMPONENTS);
+        } catch (Throwable ignored) {
+            return -1;
         }
-        throw new SecurityException("caller uid " + uid + " is not in LSPosed scope");
     }
 
-    private static void requireExtras(Bundle extras) {
-        if (extras == null) throw new IllegalArgumentException("missing extras");
-    }
-
-    private static String safe(String value) {
-        return TextUtils.isEmpty(value) ? "" : value;
+    private static Bundle unavailableResponse(String errorCode) {
+        Bundle out = new Bundle();
+        out.putBoolean(BridgeContract.EXTRA_OK, false);
+        out.putInt(BridgeContract.EXTRA_BRIDGE_VERSION, BridgeContract.BRIDGE_VERSION);
+        out.putLong(
+                BridgeContract.EXTRA_DIAGNOSTICS_EPOCH,
+                ModuleApplication.diagnosticsEpoch());
+        out.putString(BridgeContract.EXTRA_BOOT_ID, ModuleApplication.diagnosticsBootId());
+        out.putString(BridgeContract.EXTRA_ERROR, errorCode);
+        return out;
     }
 
     @Override public Cursor query(Uri uri, String[] projection, String selection,

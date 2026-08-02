@@ -7,6 +7,8 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import android.database.sqlite.SQLiteFullException;
+import com.frostwork.bgenhance.FeatureIds;
+import com.frostwork.bgenhance.HookTargetIds;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -178,6 +180,24 @@ public final class ResidencyDiagnosticsBackendTest {
     }
 
     @Test
+    public void unversionedPayloadFromDifferentBootIsRejectedBeforeQueueing() throws Exception {
+        FakeStorage storage = new FakeStorage();
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 4, 60_000L));
+        DiagnosticsWriteBatch batch = DiagnosticsWriteBatch.builder()
+                .addEvent(event("stale-event", "pkg", 1).copyBuilder()
+                        .bootId("stale-boot")
+                        .build())
+                .build();
+
+        ResidencyDiagnosticsBackend.EnqueueResult result = backend.enqueue(batch);
+        backend.flushAsync().get(5, TimeUnit.SECONDS);
+
+        assertEquals(0, result.accepted);
+        assertEquals(1, result.dropped);
+        assertEquals(0, storage.written);
+    }
+
+    @Test
     public void storageFailuresCompleteQueriesAndFlushFailOpen() throws Exception {
         FakeStorage storage = new FakeStorage();
         storage.failWrites = true;
@@ -221,20 +241,20 @@ public final class ResidencyDiagnosticsBackendTest {
                 .failOpenReason("private exception message")
                 .build());
         storage.rawHooks.add(new DiagnosticsQuery.RawHookSummary(
-                "system_server", "freeze", "freeze_target",
+                "system_server", FeatureIds.HANS, HookTargetIds.HANS_FREEZE_DISPATCH,
                 1L, 1L, 1L, 1L, "private raw error"));
         storage.hookStates.add(DiagnosticsHookState.builder()
                 .processId("system_server")
-                .featureId("freeze")
-                .hookTargetId("freeze_target")
+                .featureId(FeatureIds.HANS)
+                .hookTargetId(HookTargetIds.HANS_FREEZE_DISPATCH)
                 .installStatus("FAILED_FAIL_OPEN:PrivateException")
                 .bootId("boot")
                 .lastError("private hook error")
                 .updatedAt(1L)
                 .build());
         LinkedHashMap<String, DiagnosticsQuery.FeatureStats> home = new LinkedHashMap<>();
-        home.put("freeze", new DiagnosticsQuery.FeatureStats(
-                "freeze", 1L, 1L, 0L, 1L,
+        home.put(FeatureIds.HANS, new DiagnosticsQuery.FeatureStats(
+                FeatureIds.HANS, 1L, 1L, 0L, 1L,
                 "com.private.target", "system_server", "private scene",
                 "private reason", "blocked"));
         storage.homeStats = new DiagnosticsQuery.HomeStatsSnapshot(home, "");
@@ -242,7 +262,7 @@ public final class ResidencyDiagnosticsBackendTest {
 
         DiagnosticsQuery.ExportSnapshot snapshot = backend.exportAsync(
                 DiagnosticsQuery.ExportOptions.redactedDefaults(),
-                Collections.singletonList("freeze")).get(5, TimeUnit.SECONDS);
+                Collections.singletonList(FeatureIds.HANS)).get(5, TimeUnit.SECONDS);
 
         assertEquals("", snapshot.recentEvents.get(0).packageName);
         assertEquals(-1, snapshot.recentEvents.get(0).uid);
@@ -251,7 +271,7 @@ public final class ResidencyDiagnosticsBackendTest {
         assertEquals("", snapshot.recentEvents.get(0).scene);
         assertEquals("", snapshot.recentEvents.get(0).failOpenReason);
         assertEquals("", snapshot.recentEvents.get(0).eventToken);
-        DiagnosticsQuery.FeatureStats feature = snapshot.homeStats.features.get("freeze");
+        DiagnosticsQuery.FeatureStats feature = snapshot.homeStats.features.get(FeatureIds.HANS);
         assertEquals("", feature.lastPackage);
         assertEquals("", feature.lastProcess);
         assertEquals("", feature.lastScene);
@@ -265,6 +285,55 @@ public final class ResidencyDiagnosticsBackendTest {
         assertFalse(snapshot.packageNamesIncluded);
         assertFalse(snapshot.uidsIncluded);
         assertFalse(snapshot.sensitiveDetailsIncluded);
+    }
+
+    @Test
+    public void defaultExportReplacesUnknownProtocolValues() throws Exception {
+        FakeStorage storage = new FakeStorage();
+        storage.events.add(event("private-token", "pkg", 1).copyBuilder()
+                .featureId("private_feature")
+                .hookTargetId("private_hook")
+                .behavior("PRIVATE_BEHAVIOR")
+                .source("PRIVATE_SOURCE")
+                .mode("PRIVATE_MODE")
+                .decision("PRIVATE_DECISION")
+                .result("private_result")
+                .build());
+        storage.rawHooks.add(new DiagnosticsQuery.RawHookSummary(
+                "system_server", "private_feature", "private_hook",
+                1L, 1L, 1L, 1L, ""));
+        storage.hookStates.add(DiagnosticsHookState.builder()
+                .processId("system_server")
+                .featureId("private_feature")
+                .hookTargetId("private_hook")
+                .installStatus("INSTALLED:1")
+                .bootId("boot")
+                .updatedAt(1L)
+                .build());
+        LinkedHashMap<String, DiagnosticsQuery.FeatureStats> home = new LinkedHashMap<>();
+        home.put("private_feature", new DiagnosticsQuery.FeatureStats(
+                "private_feature", 1L, 0L, 0L, 1L,
+                "", "", "", "", "private_result"));
+        storage.homeStats = new DiagnosticsQuery.HomeStatsSnapshot(home, "");
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 2, 60_000L));
+
+        DiagnosticsQuery.ExportSnapshot snapshot = backend.exportAsync(
+                DiagnosticsQuery.ExportOptions.redactedDefaults(),
+                Collections.singletonList("private_feature")).get(5, TimeUnit.SECONDS);
+
+        NormalizedDiagnosticsEvent event = snapshot.recentEvents.get(0);
+        assertEquals("unknown", event.featureId);
+        assertEquals("unknown", event.hookTargetId);
+        assertEquals("unknown", event.behavior);
+        assertEquals("unknown", event.source);
+        assertEquals("unknown", event.mode);
+        assertEquals("unknown", event.decision);
+        assertEquals("unknown", event.result);
+        assertEquals("unknown", snapshot.rawHooks.get(0).featureId);
+        assertEquals("unknown", snapshot.rawHooks.get(0).hookTargetId);
+        assertEquals("unknown", snapshot.hookStates.get(0).featureId);
+        assertEquals("unknown", snapshot.hookStates.get(0).hookTargetId);
+        assertEquals("unknown", snapshot.homeStats.features.get("unknown").lastResult);
     }
 
     @Test
