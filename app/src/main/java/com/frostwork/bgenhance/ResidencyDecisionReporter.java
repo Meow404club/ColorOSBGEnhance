@@ -4,10 +4,19 @@ import com.frostwork.bgenhance.residency.decision.DecisionDisposition;
 import com.frostwork.bgenhance.residency.decision.DecisionTrace;
 import com.frostwork.bgenhance.residency.decision.FreezeDecision;
 import com.frostwork.bgenhance.residency.decision.KillDecision;
+import com.frostwork.bgenhance.residency.decision.WakeDecision;
 
 /** Converts typed residency decisions into the existing bounded diagnostics stream. */
 public final class ResidencyDecisionReporter {
     private ResidencyDecisionReporter() {}
+
+    /** Runtime outcome needed when a typed wake decision delegates to a throttle gate. */
+    public enum WakeRuntimeOutcome {
+        DECISION_APPLIED,
+        THROTTLE_ALLOWED,
+        THROTTLE_BLOCKED,
+        FAIL_OPEN
+    }
 
     public static void recordKill(HookEvent event, KillDecision decision) {
         recordKill(event, decision, true);
@@ -24,6 +33,20 @@ public final class ResidencyDecisionReporter {
         if (event == null || decision == null) return;
         try {
             HookDiagnostics.recordEventFromLockedPath(event, resultFor(decision));
+        } catch (Throwable ignored) {
+            // Diagnostics must never delay or change a HANS-locked callback.
+        }
+    }
+
+    /** Records a wake decision without scheduling work while a HANS lock is held. */
+    public static void recordWakeFromLockedPath(
+            HookEvent event,
+            WakeDecision decision,
+            WakeRuntimeOutcome runtimeOutcome) {
+        if (event == null || decision == null) return;
+        try {
+            HookDiagnostics.recordEventFromLockedPath(
+                    event, resultFor(decision, runtimeOutcome));
         } catch (Throwable ignored) {
             // Diagnostics must never delay or change a HANS-locked callback.
         }
@@ -59,15 +82,40 @@ public final class ResidencyDecisionReporter {
 
     static String resultFor(KillDecision decision) {
         DecisionDisposition disposition = decision.trace().disposition();
-        if (disposition == DecisionDisposition.FAIL_OPEN) return "fail_open";
-        if (disposition == DecisionDisposition.DRY_RUN) return "observed";
-        return decision.blocksAction() ? "blocked" : "passed";
+        if (disposition == DecisionDisposition.FAIL_OPEN) return DiagnosticsResult.FAIL_OPEN;
+        if (disposition == DecisionDisposition.DRY_RUN) return DiagnosticsResult.OBSERVED;
+        return decision.blocksAction()
+                ? DiagnosticsResult.BLOCKED : DiagnosticsResult.PASSED;
     }
 
     static String resultFor(FreezeDecision decision) {
         DecisionDisposition disposition = decision.trace().disposition();
-        if (disposition == DecisionDisposition.FAIL_OPEN) return "fail_open";
-        if (disposition == DecisionDisposition.DRY_RUN) return "observed";
-        return decision.blocksFreeze() ? "blocked" : "passed";
+        if (disposition == DecisionDisposition.FAIL_OPEN) return DiagnosticsResult.FAIL_OPEN;
+        if (disposition == DecisionDisposition.DRY_RUN) return DiagnosticsResult.OBSERVED;
+        return decision.blocksFreeze()
+                ? DiagnosticsResult.BLOCKED : DiagnosticsResult.PASSED;
+    }
+
+    static String resultFor(
+            WakeDecision decision, WakeRuntimeOutcome runtimeOutcome) {
+        DecisionDisposition disposition = decision.trace().disposition();
+        if (disposition == DecisionDisposition.FAIL_OPEN) return DiagnosticsResult.FAIL_OPEN;
+        if (disposition == DecisionDisposition.DRY_RUN) return DiagnosticsResult.OBSERVED;
+        if (runtimeOutcome == WakeRuntimeOutcome.FAIL_OPEN) {
+            return DiagnosticsResult.RUNTIME_FAIL_OPEN;
+        }
+        if (decision.effectiveAction() == WakeDecision.Action.BLOCK_WAKE) {
+            return DiagnosticsResult.BLOCKED;
+        }
+        if (decision.effectiveAction() != WakeDecision.Action.THROTTLE_WAKE) {
+            return DiagnosticsResult.PASSED;
+        }
+        if (runtimeOutcome == WakeRuntimeOutcome.THROTTLE_ALLOWED) {
+            return DiagnosticsResult.THROTTLE_ALLOWED;
+        }
+        if (runtimeOutcome == WakeRuntimeOutcome.THROTTLE_BLOCKED) {
+            return DiagnosticsResult.THROTTLE_BLOCKED;
+        }
+        return DiagnosticsResult.RUNTIME_FAIL_OPEN;
     }
 }

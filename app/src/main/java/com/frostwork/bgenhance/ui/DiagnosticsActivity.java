@@ -14,6 +14,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import com.frostwork.bgenhance.BridgeContract;
+import com.frostwork.bgenhance.DiagnosticsResult;
 import com.frostwork.bgenhance.DiagnosticsStore;
 import com.frostwork.bgenhance.FeatureIds;
 import com.frostwork.bgenhance.HookTargetIds;
@@ -87,7 +88,9 @@ public final class DiagnosticsActivity extends AppCompatActivity {
                     HookTargetIds.HANS_CORE_EXEMPTION),
             new SupportItem(R.string.hans_lcd_on_exemption_support_title,
                     HookTargetIds.HANS_LCD_ON_EXEMPTION),
-            new SupportItem(R.string.freeze_nav_title, HookTargetIds.HANS_FREEZE_DISPATCH)
+            new SupportItem(R.string.freeze_nav_title, HookTargetIds.HANS_FREEZE_DISPATCH),
+            new SupportItem(R.string.hans_wake_support_title,
+                    HookTargetIds.HANS_WAKE_DISPATCH)
     );
 
 
@@ -113,6 +116,7 @@ public final class DiagnosticsActivity extends AppCompatActivity {
                             FeatureIds.OSENSE_PER_PROCESS)),
             new StatGroup(R.string.stats_group_freeze,
                     new StatItem(R.string.hans_title, FeatureIds.HANS),
+                    new StatItem(R.string.hans_wake_stats_title, FeatureIds.HANS_WAKE),
                     new StatItem(R.string.super_freeze_title, FeatureIds.SUPER_FREEZE),
                     new StatItem(R.string.android_freeze_title, FeatureIds.ANDROID_FREEZE, true))
     );
@@ -395,11 +399,22 @@ public final class DiagnosticsActivity extends AppCompatActivity {
     }
 
     private String friendlyResult(String result) {
-        if ("blocked".equals(result)) return getString(R.string.result_blocked);
-        if ("observed".equals(result)) return getString(R.string.result_observed);
-        if ("passed".equals(result)) return getString(R.string.result_passed);
-        if ("fail_open".equals(result)) return getString(R.string.result_fail_open);
-        if ("config_unavailable".equals(result)) return getString(R.string.result_config_unavailable);
+        if (DiagnosticsResult.BLOCKED.equals(result)) return getString(R.string.result_blocked);
+        if (DiagnosticsResult.OBSERVED.equals(result)) return getString(R.string.result_observed);
+        if (DiagnosticsResult.PASSED.equals(result)) return getString(R.string.result_passed);
+        if (DiagnosticsResult.FAIL_OPEN.equals(result)) return getString(R.string.result_fail_open);
+        if (DiagnosticsResult.CONFIG_UNAVAILABLE.equals(result)) {
+            return getString(R.string.result_config_unavailable);
+        }
+        if (DiagnosticsResult.THROTTLE_ALLOWED.equals(result)) {
+            return getString(R.string.result_throttle_allowed);
+        }
+        if (DiagnosticsResult.THROTTLE_BLOCKED.equals(result)) {
+            return getString(R.string.result_throttle_blocked);
+        }
+        if (DiagnosticsResult.RUNTIME_FAIL_OPEN.equals(result)) {
+            return getString(R.string.result_runtime_fail_open);
+        }
         return getString(R.string.result_unknown, result);
     }
 

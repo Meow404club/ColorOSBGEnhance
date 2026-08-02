@@ -1,6 +1,7 @@
 package com.frostwork.bgenhance;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 public final class FeatureIds {
@@ -21,16 +22,19 @@ public final class FeatureIds {
     public static final String GAME_LOW_FREE = "game_low_free";
     public static final String OSENSE_PER_PROCESS = "osense_per_process";
     public static final String HANS = "hans_freeze";
+    public static final String HANS_WAKE = "hans_wake";
     public static final String SUPER_FREEZE = "super_freeze";
     public static final String ANDROID_FREEZE = "android_freeze";
 
+    private static final List<String> ALL = Collections.unmodifiableList(Arrays.asList(
+            ATHENA_PERIODIC, OGUARD_KILL, OGUARD_FORCE_STOP,
+            FAST_CAMERA_START, FAST_CAMERA_OPERATION, FAST_GAME_START, FAST_AI,
+            TOURNAMENT, MEMORY_FORCE, MEMORY_OVER,
+            NIRVANA, CAMERA_LOW_FREE, GAME_LOW_FREE, OSENSE_PER_PROCESS,
+            HANS, HANS_WAKE, SUPER_FREEZE, ANDROID_FREEZE
+    ));
+
     public static List<String> all() {
-        return Arrays.asList(
-                ATHENA_PERIODIC, OGUARD_KILL, OGUARD_FORCE_STOP,
-                FAST_CAMERA_START, FAST_CAMERA_OPERATION, FAST_GAME_START, FAST_AI,
-                TOURNAMENT, MEMORY_FORCE, MEMORY_OVER,
-                NIRVANA, CAMERA_LOW_FREE, GAME_LOW_FREE, OSENSE_PER_PROCESS,
-                HANS, SUPER_FREEZE, ANDROID_FREEZE
-        );
+        return ALL;
     }
 }

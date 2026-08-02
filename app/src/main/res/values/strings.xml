@@ -93,6 +93,8 @@
     <string name="hans_m_to_f_timing_support_title">后台冻结执行时机</string>
     <string name="hans_core_exemption_support_title">完整冻结豁免</string>
     <string name="hans_lcd_on_exemption_support_title">亮屏状态冻结豁免</string>
+    <string name="hans_wake_support_title">后台应用唤醒控制</string>
+    <string name="hans_wake_stats_title">后台唤醒控制</string>
     <string name="super_freeze_title">深度冻结保护</string>
     <string name="super_freeze_summary">减少系统对后台应用的深度冻结；可能明显增加耗电</string>
     <string name="super_freeze_detail">影响：后台应用保持运行的时间可能更长</string>
@@ -187,6 +189,9 @@
     <string name="diagnostics_refresh_sent">正在重新同步设置并检查运行状态</string>
     <string name="result_config_unavailable">配置不可用，已安全放行</string>
     <string name="result_fail_open">条件无法确认，已安全放行</string>
+    <string name="result_throttle_allowed">已按间隔放行</string>
+    <string name="result_throttle_blocked">间隔内重复唤醒，已阻止</string>
+    <string name="result_runtime_fail_open">运行状态无法确认，已安全放行</string>
     <string name="result_unknown_short">未知错误</string>
 
     <string name="diagnostics_bridge_title">运行状态回传</string>

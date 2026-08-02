@@ -1,0 +1,25 @@
+package com.frostwork.bgenhance;
+
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+import org.junit.Test;
+
+public final class DiagnosticsResultTest {
+    @Test
+    public void blockedCountersIncludeThrottleWindowBlocks() {
+        assertTrue(DiagnosticsResult.countsAsBlocked(DiagnosticsResult.BLOCKED));
+        assertTrue(DiagnosticsResult.countsAsBlocked(DiagnosticsResult.THROTTLE_BLOCKED));
+        assertFalse(DiagnosticsResult.countsAsBlocked(DiagnosticsResult.PASSED));
+        assertFalse(DiagnosticsResult.countsAsBlocked(DiagnosticsResult.THROTTLE_ALLOWED));
+    }
+
+    @Test
+    public void failOpenCountersIncludePolicyConfigurationAndRuntimeFallbacks() {
+        assertTrue(DiagnosticsResult.countsAsFailOpen(DiagnosticsResult.FAIL_OPEN));
+        assertTrue(DiagnosticsResult.countsAsFailOpen(DiagnosticsResult.CONFIG_UNAVAILABLE));
+        assertTrue(DiagnosticsResult.countsAsFailOpen(DiagnosticsResult.RUNTIME_FAIL_OPEN));
+        assertFalse(DiagnosticsResult.countsAsFailOpen(DiagnosticsResult.PASSED));
+        assertFalse(DiagnosticsResult.countsAsFailOpen(DiagnosticsResult.THROTTLE_BLOCKED));
+    }
+}

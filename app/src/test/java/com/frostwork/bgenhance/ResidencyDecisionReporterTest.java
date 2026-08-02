@@ -7,13 +7,20 @@ import com.frostwork.bgenhance.residency.decision.KillDecision;
 import com.frostwork.bgenhance.residency.decision.FreezeContext;
 import com.frostwork.bgenhance.residency.decision.FreezeDecision;
 import com.frostwork.bgenhance.residency.decision.ResidencyDecisionEngine;
+import com.frostwork.bgenhance.residency.decision.WakeContext;
+import com.frostwork.bgenhance.residency.decision.WakeDecision;
 import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
 import com.frostwork.bgenhance.residency.model.FreezeSource;
 import com.frostwork.bgenhance.residency.model.ResidencyMode;
 import com.frostwork.bgenhance.residency.model.ResidencyPresets;
+import com.frostwork.bgenhance.residency.model.WakeChannelPolicy;
+import com.frostwork.bgenhance.residency.model.WakeMode;
+import com.frostwork.bgenhance.residency.model.WakePolicy;
+import com.frostwork.bgenhance.residency.model.WakeSource;
 import com.frostwork.bgenhance.residency.runtime.ResidencyIdentityIndex;
 import com.frostwork.bgenhance.residency.runtime.ResidencyTarget;
 import com.frostwork.bgenhance.residency.runtime.RuntimeConfigSnapshot;
+import java.util.EnumSet;
 import java.util.Map;
 import org.junit.Test;
 
@@ -53,6 +60,40 @@ public final class ResidencyDecisionReporterTest {
                 freezeDecision(blocked, ResidencyIdentityIndex.invalidated(), PACKAGE)));
     }
 
+    @Test
+    public void mapsWakePolicyThrottleRuntimeAndDryRunResultsIndependently() {
+        RuntimeConfigSnapshot passed = snapshot(true, false);
+        assertEquals(DiagnosticsResult.PASSED, ResidencyDecisionReporter.resultFor(
+                wakeDecision(passed, index(passed), WakeSource.ASYNC_BINDER),
+                ResidencyDecisionReporter.WakeRuntimeOutcome.DECISION_APPLIED));
+
+        RuntimeConfigSnapshot blocked = wakeSnapshot(blockedWakePolicy(), false);
+        assertEquals(DiagnosticsResult.BLOCKED, ResidencyDecisionReporter.resultFor(
+                wakeDecision(blocked, index(blocked), WakeSource.ASYNC_BINDER),
+                ResidencyDecisionReporter.WakeRuntimeOutcome.DECISION_APPLIED));
+
+        RuntimeConfigSnapshot throttled = wakeSnapshot(throttledWakePolicy(), false);
+        WakeDecision throttleDecision = wakeDecision(
+                throttled, index(throttled), WakeSource.PACKET);
+        assertEquals(DiagnosticsResult.THROTTLE_ALLOWED,
+                ResidencyDecisionReporter.resultFor(throttleDecision,
+                        ResidencyDecisionReporter.WakeRuntimeOutcome.THROTTLE_ALLOWED));
+        assertEquals(DiagnosticsResult.THROTTLE_BLOCKED,
+                ResidencyDecisionReporter.resultFor(throttleDecision,
+                        ResidencyDecisionReporter.WakeRuntimeOutcome.THROTTLE_BLOCKED));
+        assertEquals(DiagnosticsResult.RUNTIME_FAIL_OPEN,
+                ResidencyDecisionReporter.resultFor(throttleDecision,
+                        ResidencyDecisionReporter.WakeRuntimeOutcome.FAIL_OPEN));
+
+        RuntimeConfigSnapshot dryRun = wakeSnapshot(throttledWakePolicy(), true);
+        assertEquals(DiagnosticsResult.OBSERVED, ResidencyDecisionReporter.resultFor(
+                wakeDecision(dryRun, index(dryRun), WakeSource.PACKET),
+                ResidencyDecisionReporter.WakeRuntimeOutcome.THROTTLE_BLOCKED));
+        assertEquals(DiagnosticsResult.FAIL_OPEN, ResidencyDecisionReporter.resultFor(
+                wakeDecision(throttled, ResidencyIdentityIndex.invalidated(), WakeSource.PACKET),
+                ResidencyDecisionReporter.WakeRuntimeOutcome.FAIL_OPEN));
+    }
+
     private static KillDecision decision(
             RuntimeConfigSnapshot snapshot,
             ResidencyIdentityIndex index,
@@ -79,6 +120,17 @@ public final class ResidencyDecisionReporterTest {
                 HookTargetIds.HANS_FREEZE_DISPATCH));
     }
 
+    private static WakeDecision wakeDecision(
+            RuntimeConfigSnapshot snapshot,
+            ResidencyIdentityIndex index,
+            WakeSource source) {
+        return new ResidencyDecisionEngine(snapshot, index).decideWake(new WakeContext(
+                new ResidencyTarget(PACKAGE, UID, -1),
+                source,
+                FeatureIds.HANS_WAKE,
+                HookTargetIds.HANS_WAKE_DISPATCH));
+    }
+
     private static RuntimeConfigSnapshot snapshot(boolean master, boolean dryRun) {
         AppResidencyPolicy policy = ResidencyPresets.create(PACKAGE, ResidencyMode.BALANCED);
         return RuntimeConfigSnapshot.available(
@@ -89,5 +141,35 @@ public final class ResidencyDecisionReporterTest {
         AppResidencyPolicy policy = ResidencyPresets.create(PACKAGE, ResidencyMode.ACTIVE);
         return RuntimeConfigSnapshot.available(
                 1L, true, true, dryRun, 2L, Map.of(PACKAGE, policy));
+    }
+
+    private static RuntimeConfigSnapshot wakeSnapshot(
+            WakePolicy wakePolicy, boolean dryRun) {
+        AppResidencyPolicy base = ResidencyPresets.create(PACKAGE, ResidencyMode.CUSTOM);
+        AppResidencyPolicy policy = new AppResidencyPolicy(
+                PACKAGE,
+                true,
+                ResidencyMode.CUSTOM,
+                base.killPolicy(),
+                base.freezePolicy(),
+                wakePolicy,
+                base.resourcePolicy(),
+                base.refreezePolicy());
+        return RuntimeConfigSnapshot.available(
+                1L, true, true, dryRun, 2L, Map.of(PACKAGE, policy));
+    }
+
+    private static WakePolicy blockedWakePolicy() {
+        return new WakePolicy(
+                WakeChannelPolicy.allow(),
+                WakeChannelPolicy.allow(),
+                EnumSet.of(WakeSource.ASYNC_BINDER));
+    }
+
+    private static WakePolicy throttledWakePolicy() {
+        return new WakePolicy(
+                new WakeChannelPolicy(WakeMode.THROTTLE, 60_000L),
+                WakeChannelPolicy.allow(),
+                EnumSet.noneOf(WakeSource.class));
     }
 }

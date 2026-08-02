@@ -144,8 +144,8 @@ public final class HookDiagnostics {
             counter = COUNTERS.computeIfAbsent(event.feature, key -> new Counter());
         }
         counter.observed.incrementAndGet();
-        if ("blocked".equals(result)) counter.blocked.incrementAndGet();
-        if ("config_unavailable".equals(result) || "fail_open".equals(result)) {
+        if (DiagnosticsResult.countsAsBlocked(result)) counter.blocked.incrementAndGet();
+        if (DiagnosticsResult.countsAsFailOpen(result)) {
             counter.failOpen.incrementAndGet();
         }
         counter.last.set(new LastEvent(event, result, System.currentTimeMillis()));
@@ -305,7 +305,7 @@ public final class HookDiagnostics {
         final long timestamp;
         LastEvent(HookEvent event, String result, long timestamp) {
             this.event = event;
-            this.result = result == null ? "passed" : result;
+            this.result = result == null ? DiagnosticsResult.PASSED : result;
             this.timestamp = timestamp;
         }
     }

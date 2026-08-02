@@ -3,6 +3,7 @@ package com.frostwork.bgenhance.ui;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 
+import com.frostwork.bgenhance.FeatureIds;
 import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.R;
 import java.lang.reflect.Field;
@@ -30,6 +31,14 @@ public final class DiagnosticsActivityMappingTest {
                 supportTitles.get(HookTargetIds.HANS_CORE_EXEMPTION));
         assertEquals(Integer.valueOf(R.string.hans_lcd_on_exemption_support_title),
                 supportTitles.get(HookTargetIds.HANS_LCD_ON_EXEMPTION));
+    }
+
+    @Test
+    public void wakeControlHasUserFacingSupportAndRuntimeRows() throws Exception {
+        assertEquals(Integer.valueOf(R.string.hans_wake_support_title),
+                supportTitles().get(HookTargetIds.HANS_WAKE_DISPATCH));
+        assertEquals(Integer.valueOf(R.string.hans_wake_stats_title),
+                statTitles().get(FeatureIds.HANS_WAKE));
     }
 
     @Test
@@ -76,6 +85,25 @@ public final class DiagnosticsActivityMappingTest {
             idField.setAccessible(true);
             titleField.setAccessible(true);
             result.put((String) idField.get(support), titleField.getInt(support));
+        }
+        return result;
+    }
+
+    private static Map<String, Integer> statTitles() throws Exception {
+        Field groupsField = DiagnosticsActivity.class.getDeclaredField("STAT_GROUPS");
+        groupsField.setAccessible(true);
+        List<?> groups = (List<?>) groupsField.get(null);
+        Map<String, Integer> result = new HashMap<>();
+        for (Object group : groups) {
+            Field itemsField = group.getClass().getDeclaredField("items");
+            itemsField.setAccessible(true);
+            for (Object item : (List<?>) itemsField.get(group)) {
+                Field idField = item.getClass().getDeclaredField("featureId");
+                Field titleField = item.getClass().getDeclaredField("titleRes");
+                idField.setAccessible(true);
+                titleField.setAccessible(true);
+                result.put((String) idField.get(item), titleField.getInt(item));
+            }
         }
         return result;
     }

@@ -195,11 +195,14 @@ public final class DiagnosticsStore {
         String prefix = statsPrefix(event.feature);
         int observed = sp.getInt(prefix + "observed", 0) + 1;
         int blocked = sp.getInt(prefix + "blocked", 0);
-        if ("blocked".equals(result)) blocked++;
+        int failOpen = sp.getInt(prefix + "fail_open", 0);
+        if (DiagnosticsResult.countsAsBlocked(result)) blocked++;
+        if (DiagnosticsResult.countsAsFailOpen(result)) failOpen++;
         long now = System.currentTimeMillis();
         sp.edit()
                 .putInt(prefix + "observed", observed)
                 .putInt(prefix + "blocked", blocked)
+                .putInt(prefix + "fail_open", failOpen)
                 .putLong(prefix + "last_at", now)
                 .putString(prefix + "last_pkg", safe(event.packageName))
                 .putString(prefix + "last_process", safe(event.processName))
