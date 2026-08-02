@@ -22,23 +22,38 @@ import com.frostwork.bgenhance.residency.runtime.ResidencyTarget;
 import io.github.libxposed.api.XposedInterface;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.Objects;
+import java.util.Set;
 
 /** HANS freeze gate with an object-level terminal hook and old-ROM fallbacks. */
 public final class HansFreezeHook implements FeatureHook {
     private static final String CGROUP_CLASS = "com.android.server.hans.freeze.HansCGroup";
     private static final String MANAGER_CLASS = "com.android.server.am.OplusHansManager";
+    private static final Object INSTALLED_SOURCES_LOCK = new Object();
+    private static volatile InstalledFreezeSources sInstalledSources =
+            new InstalledFreezeSources(0L, Collections.emptySet());
+    private static long sInstallationGeneration;
     static final int UNKNOWN_SOURCE_CODE = -1;
 
     private final FreezeDecisionResolver decisionResolver;
+    private final HookInstaller hookInstaller;
     private final ThreadLocal<Boolean> managerFallbackActive = new ThreadLocal<>();
 
     public HansFreezeHook() {
-        this(HansFreezeHook::decide);
+        this(HansFreezeHook::decide, HansFreezeHook::installHook);
     }
 
     HansFreezeHook(FreezeDecisionResolver decisionResolver) {
+        this(decisionResolver, HansFreezeHook::installHook);
+    }
+
+    HansFreezeHook(
+            FreezeDecisionResolver decisionResolver,
+            HookInstaller hookInstaller) {
         this.decisionResolver = Objects.requireNonNull(decisionResolver, "decisionResolver");
+        this.hookInstaller = Objects.requireNonNull(hookInstaller, "hookInstaller");
     }
 
     @Override public String hookTargetId() { return HookTargetIds.HANS_FREEZE_DISPATCH; }
@@ -46,6 +61,7 @@ public final class HansFreezeHook implements FeatureHook {
 
     @Override
     public String install(ClassLoader loader) {
+        long installationGeneration = beginInstallation();
         HansRuntime.CapabilityMatrix matrix = HansRuntime.inspect(loader);
         HansRuntime.Status objectStatus = matrix.status(HansRuntime.Capability.FREEZE_GATE);
         Method objectMethod = matrix.methodOrNull(HansRuntime.Capability.FREEZE_GATE);
@@ -56,14 +72,21 @@ public final class HansFreezeHook implements FeatureHook {
         if (objectStatus == HansRuntime.Status.AVAILABLE
                 && objectMethod != null
                 && HansRuntime.matches(HansRuntime.Capability.FREEZE_GATE, objectMethod)) {
-            int objectCount = HookUtils.hookMatching(
+            int objectCount = hookInstaller.hookMatching(
                     CGROUP_CLASS,
                     loader,
                     method -> objectMethod.equals(method),
                     this::interceptObject);
             if (objectCount == 1) {
-                return installedStatus(1, 0, matrix.status(
+                String status = installedStatus(1, 0, matrix.status(
                         HansRuntime.Capability.FAST_FREEZE_V2_PATH));
+                publishInstalledSources(
+                        installationGeneration,
+                        EnumSet.of(
+                                FreezeSource.NORMAL,
+                                FreezeSource.SUPER,
+                                FreezeSource.PRELOAD));
+                return status;
             }
             objectFailure = objectCount < 0
                     ? "FAILED_FAIL_OPEN:OBJECT_CLASS_LOOKUP"
@@ -73,9 +96,9 @@ public final class HansFreezeHook implements FeatureHook {
         // Older firmware may not expose the package-object ABI. Keep its known
         // manager entry points as a compatibility fallback, but never layer them
         // over a successfully installed terminal object gate.
-        int hans = HookUtils.hookMatching(
+        int hans = hookInstaller.hookMatching(
                 MANAGER_CLASS, loader, HansFreezeHook::isHansFreeze, this::interceptHans);
-        int superFreeze = HookUtils.hookMatching(
+        int superFreeze = hookInstaller.hookMatching(
                 MANAGER_CLASS, loader, HansFreezeHook::isSuperFreeze,
                 this::interceptSuperFreeze);
         if (hans < 0 && superFreeze < 0) {
@@ -86,9 +109,56 @@ public final class HansFreezeHook implements FeatureHook {
                     ? objectFailure
                     : "UNSUPPORTED_SIGNATURE";
         }
-        return installedStatus(0,
+        String status = installedStatus(0,
                 Math.max(hans, 0) + Math.max(superFreeze, 0),
                 matrix.status(HansRuntime.Capability.FAST_FREEZE_V2_PATH));
+        EnumSet<FreezeSource> installedSources = EnumSet.noneOf(FreezeSource.class);
+        if (hans > 0) {
+            installedSources.add(FreezeSource.NORMAL);
+            installedSources.add(FreezeSource.PRELOAD);
+        }
+        if (superFreeze > 0) installedSources.add(FreezeSource.SUPER);
+        publishInstalledSources(installationGeneration, installedSources);
+        return status;
+    }
+
+    /** Returns the immutable, atomically published capabilities of the latest install. */
+    public static Set<FreezeSource> installedFreezeSources() {
+        return sInstalledSources.sources;
+    }
+
+    private static long beginInstallation() {
+        synchronized (INSTALLED_SOURCES_LOCK) {
+            long generation = ++sInstallationGeneration;
+            sInstalledSources = new InstalledFreezeSources(
+                    generation, Collections.emptySet());
+            return generation;
+        }
+    }
+
+    private static void publishInstalledSources(
+            long installationGeneration,
+            Set<FreezeSource> sources) {
+        Set<FreezeSource> snapshot = sources.isEmpty()
+                ? Collections.emptySet()
+                : Collections.unmodifiableSet(EnumSet.copyOf(sources));
+        synchronized (INSTALLED_SOURCES_LOCK) {
+            if (sInstalledSources.generation != installationGeneration) return;
+            sInstalledSources = new InstalledFreezeSources(
+                    installationGeneration, snapshot);
+        }
+    }
+
+    static void resetInstalledFreezeSourcesForTests() {
+        beginInstallation();
+    }
+
+    private static int installHook(
+            String className,
+            ClassLoader loader,
+            HookUtils.MethodMatcher matcher,
+            XposedInterface.Hooker hooker) {
+        return HookUtils.hookMatching(className, loader, matcher, hooker);
     }
 
     private static String installedStatus(
@@ -390,5 +460,23 @@ public final class HansFreezeHook implements FeatureHook {
 
     interface FreezeDecisionResolver {
         FreezeDecision decide(ResidencyTarget target, FreezeSource source);
+    }
+
+    interface HookInstaller {
+        int hookMatching(
+                String className,
+                ClassLoader loader,
+                HookUtils.MethodMatcher matcher,
+                XposedInterface.Hooker hooker);
+    }
+
+    private static final class InstalledFreezeSources {
+        private final long generation;
+        private final Set<FreezeSource> sources;
+
+        private InstalledFreezeSources(long generation, Set<FreezeSource> sources) {
+            this.generation = generation;
+            this.sources = sources;
+        }
     }
 }

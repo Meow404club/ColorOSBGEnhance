@@ -30,13 +30,28 @@ import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 public final class HansFreezeHookTest {
     private static final String PACKAGE = "com.example.hans.freeze";
     private static final int UID = 10_901;
+
+    @Before
+    public void clearInstalledSourcesBeforeTest() {
+        HansFreezeHook.resetInstalledFreezeSourcesForTests();
+    }
+
+    @After
+    public void clearInstalledSourcesAfterTest() {
+        HansFreezeHook.resetInstalledFreezeSourcesForTests();
+    }
 
     @Test
     public void explicitBlockSkipsOriginalAndReturnsFalse() throws Throwable {
@@ -335,6 +350,154 @@ public final class HansFreezeHookTest {
                 HansFreezeHook.capabilityStatus(com.frostwork.bgenhance.hooks.hans.HansRuntime.Status.LOOKUP_FAILED));
         assertEquals(HookTargetIds.HANS_FREEZE_DISPATCH,
                 new HansFreezeHook().hookTargetId());
+    }
+
+    @Test
+    public void objectGatePublishesOnlySourcesCoveredByTheTerminalGate() {
+        HansFreezeHook hook = new HansFreezeHook(
+                (target, source) -> null,
+                installerWithCounts(1, 0, 0));
+
+        String status = hook.install(OplusHansPackage.class.getClassLoader());
+
+        assertTrue(status, status.startsWith("INSTALLED:object=1,fallback=0"));
+        Set<FreezeSource> sources = HansFreezeHook.installedFreezeSources();
+        assertEquals(
+                Set.of(FreezeSource.NORMAL, FreezeSource.SUPER, FreezeSource.PRELOAD),
+                sources);
+        assertFalse(sources.contains(FreezeSource.FAST));
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> sources.add(FreezeSource.FAST));
+    }
+
+    @Test
+    public void fallbackPublishesOnlyIndependentlyInstalledSourceFamilies() {
+        assertFallbackSources(
+                2,
+                0,
+                Set.of(FreezeSource.NORMAL, FreezeSource.PRELOAD));
+        assertFallbackSources(
+                0,
+                1,
+                Set.of(FreezeSource.SUPER));
+        assertFallbackSources(
+                2,
+                1,
+                Set.of(FreezeSource.NORMAL, FreezeSource.SUPER, FreezeSource.PRELOAD));
+        assertFallbackSources(
+                -1,
+                1,
+                Set.of(FreezeSource.SUPER));
+        assertFallbackSources(
+                2,
+                -1,
+                Set.of(FreezeSource.NORMAL, FreezeSource.PRELOAD));
+    }
+
+    @Test
+    public void failedInstallationClearsPreviouslyPublishedSources() {
+        HansFreezeHook installed = new HansFreezeHook(
+                (target, source) -> null,
+                installerWithCounts(1, 0, 0));
+        assertTrue(installed.install(OplusHansPackage.class.getClassLoader())
+                .startsWith("INSTALLED"));
+        assertFalse(HansFreezeHook.installedFreezeSources().isEmpty());
+
+        IllegalStateException failure = new IllegalStateException("installer");
+        AtomicReference<Set<FreezeSource>> observedAtInstall = new AtomicReference<>();
+        HansFreezeHook failing = new HansFreezeHook(
+                (target, source) -> null,
+                (className, loader, matcher, hooker) -> {
+                    observedAtInstall.set(HansFreezeHook.installedFreezeSources());
+                    throw failure;
+                });
+
+        assertSame(failure, assertThrows(
+                IllegalStateException.class,
+                () -> failing.install(OplusHansPackage.class.getClassLoader())));
+        assertTrue(observedAtInstall.get().isEmpty());
+        assertTrue(HansFreezeHook.installedFreezeSources().isEmpty());
+
+        HansFreezeHook unsupported = new HansFreezeHook(
+                (target, source) -> null,
+                installerWithCounts(0, 0, 0));
+        assertTrue(unsupported.install(OplusHansPackage.class.getClassLoader())
+                .startsWith("FAILED_FAIL_OPEN"));
+        assertTrue(HansFreezeHook.installedFreezeSources().isEmpty());
+    }
+
+    @Test
+    public void olderConcurrentInstallCannotOverwriteLatestSnapshot() throws Exception {
+        CountDownLatch olderInstallStarted = new CountDownLatch(1);
+        CountDownLatch releaseOlderInstall = new CountDownLatch(1);
+        AtomicReference<Throwable> olderFailure = new AtomicReference<>();
+        AtomicInteger olderCalls = new AtomicInteger();
+        HansFreezeHook older = new HansFreezeHook(
+                (target, source) -> null,
+                (className, loader, matcher, hooker) -> {
+                    int call = olderCalls.getAndIncrement();
+                    if (call == 0) {
+                        olderInstallStarted.countDown();
+                        try {
+                            if (!releaseOlderInstall.await(5, TimeUnit.SECONDS)) {
+                                throw new AssertionError("older install was not released");
+                            }
+                        } catch (InterruptedException error) {
+                            Thread.currentThread().interrupt();
+                            throw new AssertionError(error);
+                        }
+                        return 0;
+                    }
+                    return call == 1 ? 0 : 1;
+                });
+        Thread olderThread = new Thread(() -> {
+            try {
+                older.install(OplusHansPackage.class.getClassLoader());
+            } catch (Throwable error) {
+                olderFailure.set(error);
+            }
+        }, "HansFreezeHookTest-older-install");
+
+        olderThread.start();
+        assertTrue(olderInstallStarted.await(5, TimeUnit.SECONDS));
+        HansFreezeHook latest = new HansFreezeHook(
+                (target, source) -> null,
+                installerWithCounts(1, 0, 0));
+        assertTrue(latest.install(OplusHansPackage.class.getClassLoader())
+                .startsWith("INSTALLED:object=1"));
+        releaseOlderInstall.countDown();
+        olderThread.join(TimeUnit.SECONDS.toMillis(5));
+
+        assertFalse("older install thread did not finish", olderThread.isAlive());
+        assertNull(olderFailure.get());
+        assertEquals(
+                Set.of(FreezeSource.NORMAL, FreezeSource.SUPER, FreezeSource.PRELOAD),
+                HansFreezeHook.installedFreezeSources());
+    }
+
+    private static void assertFallbackSources(
+            int hansCount,
+            int superCount,
+            Set<FreezeSource> expected) {
+        HansFreezeHook hook = new HansFreezeHook(
+                (target, source) -> null,
+                installerWithCounts(0, hansCount, superCount));
+
+        String status = hook.install(OplusHansPackage.class.getClassLoader());
+
+        assertTrue(status, status.startsWith("INSTALLED:object=0"));
+        assertEquals(expected, HansFreezeHook.installedFreezeSources());
+        assertFalse(HansFreezeHook.installedFreezeSources().contains(FreezeSource.FAST));
+    }
+
+    private static HansFreezeHook.HookInstaller installerWithCounts(
+            int objectCount,
+            int hansCount,
+            int superCount) {
+        int[] counts = {objectCount, hansCount, superCount};
+        AtomicInteger call = new AtomicInteger();
+        return (className, loader, matcher, hooker) -> counts[call.getAndIncrement()];
     }
 
     private static FreezeDecision decision(
