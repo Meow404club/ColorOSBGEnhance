@@ -3,7 +3,26 @@ package com.frostwork.bgenhance.diagnostics;
 import java.util.List;
 
 interface ResidencyDiagnosticsStorage extends AutoCloseable {
-    void writeBatch(DiagnosticsWriteBatch batch);
+    enum WriteResult {
+        NO_OP,
+        COMMITTED,
+        REPLAYED,
+        REJECTED_BOOT,
+        REJECTED_EPOCH,
+        REJECTED_COUNTING_MODE,
+        REJECTED_CAPACITY;
+
+        boolean isRejected() {
+            return this == NO_OP
+                    || this == REJECTED_BOOT
+                    || this == REJECTED_EPOCH
+                    || this == REJECTED_COUNTING_MODE
+                    || this == REJECTED_CAPACITY;
+        }
+    }
+
+    /** Returns whether the whole transactional batch committed, replayed, or was rejected. */
+    WriteResult writeBatch(DiagnosticsWriteBatch batch);
 
     /** Imports legacy feature totals and records its marker in one transaction. */
     boolean migrateLegacyOnce(DiagnosticsWriteBatch batch);
@@ -24,7 +43,7 @@ interface ResidencyDiagnosticsStorage extends AutoCloseable {
 
     DiagnosticsQuery.ClearResult clear(DiagnosticsQuery.ClearScope scope);
 
-    default long currentEpoch() { return 0L; }
+    long currentEpoch();
 
     int schemaVersion();
 

@@ -85,7 +85,9 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
             if (applicationContext == null) {
                 throw new IllegalStateException("diagnostics context unavailable");
             }
-            return new ResidencyDiagnosticsDb(applicationContext, policy);
+            return new ResidencyDiagnosticsDb(
+                    applicationContext, ResidencyDiagnosticsDb.DATABASE_NAME,
+                    policy, currentBootId);
         }, worker, currentBootId,
                 applicationContext == null
                         ? null : () -> LegacyDiagnosticsMigration.read(applicationContext));
@@ -210,7 +212,22 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
     }
 
     public CompletableFuture<Long> currentEpochAsync() {
-        return submitQuery(() -> storage().currentEpoch(), () -> 0L);
+        CompletableFuture<Long> result = new CompletableFuture<>();
+        submitCommand(() -> {
+            try {
+                drainUntil(appliedClearGeneration.get());
+                long epoch = storage().currentEpoch();
+                if (epoch < 0L) {
+                    throw new IllegalStateException("diagnostics epoch unavailable");
+                }
+                result.complete(epoch);
+            } catch (Throwable error) {
+                failedBatches.incrementAndGet();
+                result.completeExceptionally(error);
+            }
+        }, () -> result.completeExceptionally(
+                new IllegalStateException("diagnostics epoch unavailable")));
+        return result;
     }
 
     public CompletableFuture<DiagnosticsQuery.ExportSnapshot> exportAsync(
@@ -436,30 +453,32 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
         }
         int drained = pending.size;
         ResidencyDiagnosticsStorage current = storageOrNull();
-        if (current != null && writeWithRecovery(current, pending.batch)) {
+        ResidencyDiagnosticsStorage.WriteResult writeResult = current == null
+                ? null : writeWithRecovery(current, pending.batch);
+        if (writeResult == ResidencyDiagnosticsStorage.WriteResult.COMMITTED) {
             committedWrites.addAndGet(drained);
             performRegularMaintenanceSafely(current);
-        } else {
+        } else if (writeResult != null && writeResult.isRejected()) {
+            recordFailedWrite(drained);
+        } else if (writeResult == null) {
             recordFailedWrite(drained);
         }
         return drained;
     }
 
-    private boolean writeWithRecovery(
+    private ResidencyDiagnosticsStorage.WriteResult writeWithRecovery(
             ResidencyDiagnosticsStorage current, DiagnosticsWriteBatch batch) {
         try {
-            current.writeBatch(batch);
-            return true;
+            return current.writeBatch(batch);
         } catch (SQLiteFullException full) {
             try {
                 current.performMaintenance(System.currentTimeMillis(), true);
-                current.writeBatch(batch);
-                return true;
+                return current.writeBatch(batch);
             } catch (Throwable retryFailure) {
-                return false;
+                return null;
             }
         } catch (Throwable error) {
-            return false;
+            return null;
         }
     }
 

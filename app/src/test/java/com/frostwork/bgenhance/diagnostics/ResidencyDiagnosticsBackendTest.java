@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import android.database.sqlite.SQLiteFullException;
@@ -16,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import org.junit.After;
@@ -127,6 +129,37 @@ public final class ResidencyDiagnosticsBackendTest {
         assertEquals(0, storage.written);
         assertEquals(0L, backend.health().committedWrites);
         assertEquals(1L, backend.health().droppedWrites);
+        assertEquals(1L, backend.health().failedBatches);
+    }
+
+    @Test
+    public void storageAdmissionRejectionIsDroppedInsteadOfCountedAsCommitted()
+            throws Exception {
+        FakeStorage storage = new FakeStorage();
+        storage.writeResult = ResidencyDiagnosticsStorage.WriteResult.REJECTED_CAPACITY;
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 4, 60_000L));
+
+        assertTrue(backend.recordEvent(event("capacity", "pkg", 1)));
+        backend.flushAsync().get(5, TimeUnit.SECONDS);
+
+        assertEquals(1L, backend.health().acceptedWrites);
+        assertEquals(0L, backend.health().committedWrites);
+        assertEquals(1L, backend.health().droppedWrites);
+        assertEquals(1L, backend.health().failedBatches);
+        assertEquals(0, storage.written);
+    }
+
+    @Test
+    public void currentEpochInitializationFailureCompletesExceptionally() {
+        FakeStorage storage = new FakeStorage();
+        storage.failEpochReads = true;
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 4, 60_000L));
+
+        ExecutionException failure = assertThrows(ExecutionException.class,
+                () -> backend.currentEpochAsync().get(5, TimeUnit.SECONDS));
+
+        assertTrue(failure.getCause() instanceof IllegalStateException);
+        assertEquals("epoch read failed", failure.getCause().getMessage());
         assertEquals(1L, backend.health().failedBatches);
     }
 
@@ -497,6 +530,7 @@ public final class ResidencyDiagnosticsBackendTest {
         volatile String migrationWriteThread = "";
         volatile boolean failWrites;
         volatile boolean failQueries;
+        volatile boolean failEpochReads;
         volatile boolean alwaysFull;
         volatile boolean closed;
         volatile int fullWriteFailures;
@@ -505,12 +539,14 @@ public final class ResidencyDiagnosticsBackendTest {
         volatile CountDownLatch releaseQueries;
         volatile DiagnosticsWriteBatch.BatchIdentity lastBatchIdentity;
         volatile DiagnosticsWriteBatch migratedBatch;
+        volatile ResidencyDiagnosticsStorage.WriteResult writeResult =
+                ResidencyDiagnosticsStorage.WriteResult.COMMITTED;
         final List<String> operations = new ArrayList<>();
         volatile DiagnosticsQuery.HomeStatsSnapshot homeStats =
                 DiagnosticsQuery.HomeStatsSnapshot.empty("");
 
         @Override
-        public synchronized void writeBatch(DiagnosticsWriteBatch batch) {
+        public synchronized WriteResult writeBatch(DiagnosticsWriteBatch batch) {
             writeAttempts++;
             if (alwaysFull || fullWriteFailures > 0) {
                 if (fullWriteFailures > 0) fullWriteFailures--;
@@ -518,11 +554,13 @@ public final class ResidencyDiagnosticsBackendTest {
                 throw new SQLiteFullException("full");
             }
             if (failWrites) throw new IllegalStateException("write failed");
+            if (writeResult != WriteResult.COMMITTED) return writeResult;
             writeThread = Thread.currentThread().getName();
             lastBatchIdentity = batch.batchIdentity;
             written += batch.size();
             events.addAll(batch.events);
             operations.add("write");
+            return WriteResult.COMMITTED;
         }
 
         @Override
@@ -607,6 +645,12 @@ public final class ResidencyDiagnosticsBackendTest {
             int deleted = events.size();
             events.clear();
             return new DiagnosticsQuery.ClearResult(true, deleted, "");
+        }
+
+        @Override
+        public long currentEpoch() {
+            if (failEpochReads) throw new IllegalStateException("epoch read failed");
+            return 0L;
         }
 
         synchronized List<String> operationSnapshot() {

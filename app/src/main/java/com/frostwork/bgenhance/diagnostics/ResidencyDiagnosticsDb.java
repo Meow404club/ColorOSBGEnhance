@@ -31,15 +31,26 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
     private static final String METADATA_LEGACY_MIGRATION = "legacy_hook_diagnostics_v1";
 
     private final DiagnosticsRetentionPolicy policy;
+    private final String currentBootId;
 
     public ResidencyDiagnosticsDb(Context context, DiagnosticsRetentionPolicy policy) {
-        this(context, DATABASE_NAME, policy);
+        this(context, DATABASE_NAME, policy, DiagnosticsBootId.readCurrent());
     }
 
     ResidencyDiagnosticsDb(
             Context context, String databaseName, DiagnosticsRetentionPolicy policy) {
+        this(context, databaseName, policy, DiagnosticsBootId.readCurrent());
+    }
+
+    ResidencyDiagnosticsDb(
+            Context context,
+            String databaseName,
+            DiagnosticsRetentionPolicy policy,
+            String currentBootId) {
         super(context.getApplicationContext(), databaseName, null, SCHEMA_VERSION);
         this.policy = policy == null ? DiagnosticsRetentionPolicy.defaults() : policy;
+        this.currentBootId = DiagnosticsValues.isStrictId(currentBootId, false)
+                ? currentBootId : "";
         try {
             setWriteAheadLoggingEnabled(true);
         } catch (Throwable ignored) {
@@ -102,19 +113,22 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
     }
 
     @Override
-    public void writeBatch(DiagnosticsWriteBatch batch) {
-        if (batch == null || batch.isEmpty()) return;
+    public WriteResult writeBatch(DiagnosticsWriteBatch batch) {
+        if (batch == null || batch.isEmpty()) return WriteResult.NO_OP;
         if (batch.size() > DiagnosticsRetentionPolicy.MAX_ACCEPTED_BATCH_ITEMS) {
             throw new IllegalArgumentException("diagnostics batch exceeds configured limit");
         }
         SQLiteDatabase db = getWritableDatabase();
         db.beginTransactionNonExclusive();
         try {
-            if (batch.batchIdentity != null
-                    && !claimVersionedBatch(
-                    db, batch.batchIdentity, batch.countingMode, System.currentTimeMillis())) {
-                db.setTransactionSuccessful();
-                return;
+            if (batch.batchIdentity != null) {
+                WriteResult claim = claimVersionedBatch(
+                        db, batch.batchIdentity, batch.countingMode,
+                        System.currentTimeMillis());
+                if (claim != WriteResult.COMMITTED) {
+                    db.setTransactionSuccessful();
+                    return claim;
+                }
             }
             for (RawHookHit hit : batch.rawHits) {
                 if (hit != null && hit.isStorable()) writeRawHit(db, hit);
@@ -130,6 +144,7 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                 if (state != null && state.isStorable()) upsertHookState(db, state, true);
             }
             db.setTransactionSuccessful();
+            return WriteResult.COMMITTED;
         } finally {
             db.endTransaction();
         }
@@ -631,14 +646,18 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                 });
     }
 
-    private boolean claimVersionedBatch(
+    private WriteResult claimVersionedBatch(
             SQLiteDatabase db,
             DiagnosticsWriteBatch.BatchIdentity identity,
             DiagnosticsWriteBatch.CountingMode countingMode,
             long now) {
-        if (identity.epoch != currentEpoch(db)
-                || countingMode == null
-                || countingMode == DiagnosticsWriteBatch.CountingMode.NONE) return false;
+        if (!currentBootId.isEmpty() && !currentBootId.equals(identity.bootId)) {
+            return WriteResult.REJECTED_BOOT;
+        }
+        if (identity.epoch != currentEpoch(db)) return WriteResult.REJECTED_EPOCH;
+        if (countingMode == null || countingMode == DiagnosticsWriteBatch.CountingMode.NONE) {
+            return WriteResult.REJECTED_COUNTING_MODE;
+        }
         ContentValues update = new ContentValues();
         update.put("last_sequence", identity.batchSequence);
         update.put("updated_at", now);
@@ -660,13 +679,19 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                 TABLE_BATCH_CURSORS,
                 update,
                 cursorSelection + " AND counting_mode=? AND last_sequence<?",
-                advancingArguments) == 1) return true;
+                advancingArguments) == 1) return WriteResult.COMMITTED;
+        String existingMode = queryCursorCountingMode(db, cursorSelection, cursorArguments);
+        if (existingMode != null) {
+            return countingMode.wireValue.equals(existingMode)
+                    ? WriteResult.REPLAYED : WriteResult.REJECTED_COUNTING_MODE;
+        }
+        pruneObsoleteBatchCursors(db);
         if (DatabaseUtils.queryNumEntries(
-                db, TABLE_BATCH_CURSORS, cursorSelection, cursorArguments) > 0L) return false;
-        if (DatabaseUtils.queryNumEntries(
-                db, TABLE_BATCH_CURSORS, "epoch=?",
-                new String[] { String.valueOf(identity.epoch) }) >= policy.batchCursorLimit) {
-            return false;
+                db, TABLE_BATCH_CURSORS, "epoch=? AND boot_id=?",
+                new String[] {
+                        String.valueOf(identity.epoch), identity.bootId
+                }) >= policy.batchCursorLimit) {
+            return WriteResult.REJECTED_CAPACITY;
         }
         ContentValues values = new ContentValues();
         values.put("wire_version", identity.wireVersion);
@@ -677,8 +702,40 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         values.put("counting_mode", countingMode.wireValue);
         values.put("last_sequence", identity.batchSequence);
         values.put("updated_at", now);
-        return db.insertWithOnConflict(
-                TABLE_BATCH_CURSORS, null, values, SQLiteDatabase.CONFLICT_IGNORE) != -1L;
+        if (db.insertWithOnConflict(
+                TABLE_BATCH_CURSORS, null, values, SQLiteDatabase.CONFLICT_IGNORE) != -1L) {
+            return WriteResult.COMMITTED;
+        }
+        existingMode = queryCursorCountingMode(db, cursorSelection, cursorArguments);
+        if (existingMode == null) return WriteResult.REJECTED_CAPACITY;
+        return countingMode.wireValue.equals(existingMode)
+                ? WriteResult.REPLAYED : WriteResult.REJECTED_COUNTING_MODE;
+    }
+
+    private static String queryCursorCountingMode(
+            SQLiteDatabase db, String selection, String[] selectionArguments) {
+        try (Cursor cursor = db.query(
+                TABLE_BATCH_CURSORS,
+                new String[] { "counting_mode" },
+                selection,
+                selectionArguments,
+                null, null, null,
+                "1")) {
+            return cursor.moveToFirst() ? cursor.getString(0) : null;
+        }
+    }
+
+    private void pruneObsoleteBatchCursors(SQLiteDatabase db) {
+        long epoch = currentEpoch(db);
+        if (currentBootId.isEmpty()) {
+            db.delete(TABLE_BATCH_CURSORS, "epoch<>?", new String[] {
+                    String.valueOf(epoch)
+            });
+            return;
+        }
+        db.delete(TABLE_BATCH_CURSORS, "epoch<>? OR boot_id<>?", new String[] {
+                String.valueOf(epoch), currentBootId
+        });
     }
 
     private void prune(SQLiteDatabase db, long now) {
@@ -695,9 +752,7 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         trimRows(db, TABLE_RAW, "last_hit_at DESC,rowid DESC", policy.rawAggregateRowLimit);
         trimRows(db, TABLE_HOOK_STATES, "updated_at DESC,rowid DESC", policy.hookStateLimit);
         trimRows(db, TABLE_FEATURE_TOTALS, "last_at DESC,rowid DESC", policy.featureTotalLimit);
-        db.delete(TABLE_BATCH_CURSORS, "epoch<>?", new String[] {
-                String.valueOf(currentEpoch(db))
-        });
+        pruneObsoleteBatchCursors(db);
     }
 
     private void pruneForStoragePressure(SQLiteDatabase db, long now) {
@@ -725,8 +780,12 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                 "updated_at ASC,rowid ASC", remaining);
         remaining -= deleteLimited(db, TABLE_FEATURE_TOTALS, null, null,
                 "last_at ASC,rowid ASC", remaining);
-        deleteLimited(db, TABLE_BATCH_CURSORS, "epoch<>?",
-                new String[] { String.valueOf(currentEpoch(db)) },
+        String cursorWhere = currentBootId.isEmpty()
+                ? "epoch<>?" : "epoch<>? OR boot_id<>?";
+        String[] cursorArguments = currentBootId.isEmpty()
+                ? new String[] { String.valueOf(currentEpoch(db)) }
+                : new String[] { String.valueOf(currentEpoch(db)), currentBootId };
+        deleteLimited(db, TABLE_BATCH_CURSORS, cursorWhere, cursorArguments,
                 "updated_at ASC,rowid ASC", remaining);
     }
 

@@ -10,6 +10,7 @@ import static org.junit.Assert.assertTrue;
 import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
+import android.database.DatabaseUtils;
 import android.database.sqlite.SQLiteDatabase;
 import java.util.Arrays;
 import java.util.Collections;
@@ -334,9 +335,11 @@ public final class ResidencyDiagnosticsDbTest {
                 0L, 0L, "sender-a",
                 event(now, "retained-cursor", "pkg.first", 1, "FREEZE", "blocked"));
 
-        database.writeBatch(batch);
+        assertEquals(ResidencyDiagnosticsStorage.WriteResult.COMMITTED,
+                database.writeBatch(batch));
         database.performMaintenance(now + 10_000L, false);
-        database.writeBatch(batch);
+        assertEquals(ResidencyDiagnosticsStorage.WriteResult.REPLAYED,
+                database.writeBatch(batch));
 
         assertEquals(1L, database.queryHomeStats(
                 Collections.singletonList("freeze")).observed);
@@ -382,26 +385,58 @@ public final class ResidencyDiagnosticsDbTest {
     public void cursorCapacityRejectsNewIdentityUntilClearAdvancesEpoch() {
         database = open(policy(20, 20, 20, 60_000L, 1));
         long now = System.currentTimeMillis();
-        database.writeBatch(versionedBatch(
-                0L, 0L, "sender-a",
-                event(now, "sender-a", "pkg.first", 1, "FREEZE", "blocked")));
-        database.writeBatch(versionedBatch(
-                0L, 0L, "sender-b",
-                event(now + 1L, "sender-b-rejected", "pkg.second", 2,
-                        "FREEZE", "blocked")));
+        assertEquals(ResidencyDiagnosticsStorage.WriteResult.COMMITTED,
+                database.writeBatch(versionedBatch(
+                        0L, 0L, "sender-a",
+                        event(now, "sender-a", "pkg.first", 1,
+                                "FREEZE", "blocked"))));
+        assertEquals(ResidencyDiagnosticsStorage.WriteResult.REJECTED_CAPACITY,
+                database.writeBatch(versionedBatch(
+                        0L, 0L, "sender-b",
+                        event(now + 1L, "sender-b-rejected", "pkg.second", 2,
+                                "FREEZE", "blocked"))));
         assertEquals(1, database.queryEvents(
                 DiagnosticsQuery.EventFilter.builder().build()).items.size());
 
         DiagnosticsQuery.ClearResult clear = database.clear(DiagnosticsQuery.ClearScope.ALL);
-        database.writeBatch(versionedBatch(
-                clear.epoch, 0L, "sender-b",
-                event(now + 2L, "sender-b-current", "pkg.second", 2,
-                        "FREEZE", "blocked")));
+        assertEquals(ResidencyDiagnosticsStorage.WriteResult.COMMITTED,
+                database.writeBatch(versionedBatch(
+                        clear.epoch, 0L, "sender-b",
+                        event(now + 2L, "sender-b-current", "pkg.second", 2,
+                                "FREEZE", "blocked"))));
 
         DiagnosticsQuery.EventPage events = database.queryEvents(
                 DiagnosticsQuery.EventFilter.builder().build());
         assertEquals(1, events.items.size());
         assertEquals("pkg.second", events.items.get(0).packageName);
+    }
+
+    @Test
+    public void oldBootCursorIsReclaimedWithoutWeakeningCurrentBootReplayDeduplication() {
+        DiagnosticsRetentionPolicy value = policy(20, 20, 20, 60_000L, 1);
+        long now = System.currentTimeMillis();
+        database = open(value, "boot-old");
+        assertEquals(ResidencyDiagnosticsStorage.WriteResult.COMMITTED,
+                database.writeBatch(versionedBatch(
+                        0L, 0L, "sender-old",
+                        event(now, "old", "pkg.old", 1, "FREEZE", "blocked")
+                                .copyBuilder().bootId("boot-old").build())));
+        database.close();
+
+        database = open(value, "boot-new");
+        DiagnosticsWriteBatch current = versionedBatch(
+                0L, 0L, "sender-new",
+                event(now + 1L, "new", "pkg.new", 2, "FREEZE", "blocked")
+                        .copyBuilder().bootId("boot-new").build());
+        assertEquals(ResidencyDiagnosticsStorage.WriteResult.COMMITTED,
+                database.writeBatch(current));
+        assertEquals(1L, DatabaseUtils.queryNumEntries(
+                database.getReadableDatabase(), ResidencyDiagnosticsDb.TABLE_BATCH_CURSORS));
+        assertEquals(ResidencyDiagnosticsStorage.WriteResult.REPLAYED,
+                database.writeBatch(current));
+
+        assertEquals(2L, database.queryHomeStats(
+                Collections.singletonList("freeze")).observed);
     }
 
     @Test
@@ -500,7 +535,12 @@ public final class ResidencyDiagnosticsDbTest {
     }
 
     private ResidencyDiagnosticsDb open(DiagnosticsRetentionPolicy policy) {
-        return new ResidencyDiagnosticsDb(context, databaseName, policy);
+        return open(policy, "42");
+    }
+
+    private ResidencyDiagnosticsDb open(
+            DiagnosticsRetentionPolicy policy, String currentBootId) {
+        return new ResidencyDiagnosticsDb(context, databaseName, policy, currentBootId);
     }
 
     private static DiagnosticsRetentionPolicy policy(
@@ -594,7 +634,7 @@ public final class ResidencyDiagnosticsDbTest {
             NormalizedDiagnosticsEvent event) {
         return DiagnosticsWriteBatch.builder()
                 .wireIdentity(
-                        2, "42", "system_server", senderInstanceId, epoch, sequence)
+                        2, event.bootId, "system_server", senderInstanceId, epoch, sequence)
                 .addEvent(event)
                 .build();
     }
