@@ -15,22 +15,10 @@ import com.frostwork.bgenhance.residency.runtime.ResidencyIdentityIndex;
 import com.frostwork.bgenhance.residency.runtime.ResidencyIdentityResolution;
 import com.frostwork.bgenhance.residency.runtime.RuntimeConfigSnapshot;
 import com.frostwork.bgenhance.residency.runtime.UidPolicyScope;
-import java.util.Collections;
-import java.util.EnumSet;
 import java.util.Objects;
-import java.util.Set;
 
 /** Deterministic, platform-independent policy engine for all residency behaviors. */
 public final class ResidencyDecisionEngine {
-    private static final Set<WakeSource> ALWAYS_SAFE_WAKE_SOURCES =
-            Collections.unmodifiableSet(EnumSet.of(
-                    WakeSource.INTERNAL_OPERATION,
-                    WakeSource.ACTIVITY_INPUT,
-                    WakeSource.SYNC_BINDER,
-                    WakeSource.PROVIDER,
-                    WakeSource.SYSTEM_SCENE,
-                    WakeSource.OTHER));
-
     private final RuntimeConfigSnapshot snapshot;
     private final ResidencyIdentityIndex identityIndex;
 
@@ -185,7 +173,8 @@ public final class ResidencyDecisionEngine {
 
     public WakeDecision decideWake(WakeContext context) {
         Objects.requireNonNull(context, "context");
-        Evaluation evaluation = evaluate(context);
+        Evaluation evaluation = evaluate(
+                context, "", true, UidPolicyScope.forWakeSource(context.source()));
         if (!evaluation.active()) {
             return new WakeDecision(
                     WakeDecision.Action.ALLOW_SYSTEM,
@@ -203,7 +192,7 @@ public final class ResidencyDecisionEngine {
                     0L,
                     DecisionReason.FULL_EXEMPTION);
         }
-        if (ALWAYS_SAFE_WAKE_SOURCES.contains(context.source())) {
+        if (context.source().isAlwaysAllowed()) {
             return finishWake(
                     context,
                     evaluation,

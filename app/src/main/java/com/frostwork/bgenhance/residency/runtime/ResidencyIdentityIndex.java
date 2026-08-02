@@ -4,6 +4,8 @@ import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
 import com.frostwork.bgenhance.residency.model.FreezePolicy;
 import com.frostwork.bgenhance.residency.model.FreezeSource;
 import com.frostwork.bgenhance.residency.model.ResidencyMode;
+import com.frostwork.bgenhance.residency.model.WakeMode;
+import com.frostwork.bgenhance.residency.model.WakeSource;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -396,6 +398,26 @@ public final class ResidencyIdentityIndex {
             case LCD_ON_EXEMPTION:
                 return isLcdOnExempt(first.freezePolicy())
                         == isLcdOnExempt(second.freezePolicy());
+            case WAKE_PACKET:
+            case WAKE_ALARM:
+            case WAKE_ASYNC_BINDER:
+            case WAKE_SYNC_BINDER:
+            case WAKE_TRANSACTION_BINDER:
+            case WAKE_SIGNAL:
+            case WAKE_ACTIVITY_INPUT:
+            case WAKE_SERVICE:
+            case WAKE_BROADCAST:
+            case WAKE_PROVIDER:
+            case WAKE_JOB_SYNC:
+            case WAKE_LOCK:
+            case WAKE_AUDIO_MEDIA:
+            case WAKE_CONNECTIVITY:
+            case WAKE_SYSTEM_SCENE:
+            case WAKE_INTERNAL_OPERATION:
+            case WAKE_OTHER:
+                return sameWakeAction(
+                        first, second, Objects.requireNonNull(
+                                policyScope.wakeSourceOrNull(), "wakeSource"));
             case FULL:
             default:
                 return first.killPolicy().equals(second.killPolicy())
@@ -431,6 +453,35 @@ public final class ResidencyIdentityIndex {
 
     private static boolean isLcdOnExempt(FreezePolicy policy) {
         return policy.fullExemption() || policy.lcdOnExemption();
+    }
+
+    private static boolean sameWakeAction(
+            AppResidencyPolicy first,
+            AppResidencyPolicy second,
+            WakeSource source) {
+        WakeMode firstMode = effectiveWakeMode(first, source);
+        WakeMode secondMode = effectiveWakeMode(second, source);
+        if (firstMode != secondMode) return false;
+        if (firstMode != WakeMode.THROTTLE) return true;
+        return first.wakePolicy().modeFor(source) == WakeMode.THROTTLE
+                && second.wakePolicy().modeFor(source) == WakeMode.THROTTLE
+                && wakeCooldown(first, source) == wakeCooldown(second, source);
+    }
+
+    private static WakeMode effectiveWakeMode(
+            AppResidencyPolicy policy, WakeSource source) {
+        if (policy.freezePolicy().fullExemption() || source.isAlwaysAllowed()) {
+            return WakeMode.ALLOW;
+        }
+        return policy.wakePolicy().modeFor(source);
+    }
+
+    private static long wakeCooldown(AppResidencyPolicy policy, WakeSource source) {
+        switch (source) {
+            case PACKET: return policy.wakePolicy().packet().cooldownMs();
+            case ALARM: return policy.wakePolicy().alarm().cooldownMs();
+            default: return 0L;
+        }
     }
 
     public static boolean isSystemUid(int uid) {
