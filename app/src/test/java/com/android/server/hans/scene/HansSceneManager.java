@@ -24,6 +24,11 @@ public class HansSceneManager {
         return manager.enterFastFreezer(uid, packageName, reasonCode, reason);
     }
 
+    static Bridge enterFastFreezer() {
+        return (manager, uid, packageName, reasonCode, reason) ->
+                manager.enterFastFreezer(uid, packageName, reasonCode, reason);
+    }
+
     private static String enterFastFreezer(
             Integer uid, String packageName, int reasonCode, String reason) {
         return packageName;
@@ -58,5 +63,14 @@ public class HansSceneManager {
 
     public ArrayList<Object> fastFreezeAppList(long candidateCount) {
         return new ArrayList<>();
+    }
+
+    interface Bridge {
+        String call(
+                HansSceneManager manager,
+                int uid,
+                String packageName,
+                int reasonCode,
+                String reason);
     }
 }

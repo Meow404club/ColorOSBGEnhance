@@ -71,10 +71,7 @@ public final class HansFastFreezeRuntimeTest {
                 Capability.ENTER_FAST_FREEZER,
                 HansSceneManager.class,
                 "enterFastFreezer");
-        assertSingleMatchingOverload(
-                Capability.ENTER_FAST_FREEZER_BRIDGE,
-                HansSceneManager.class,
-                "access$enterFastFreezer");
+        assertSingleMatchingBridge();
         assertSingleMatchingOverload(
                 Capability.FILTER_FAST_FREEZER_CANDIDATES,
                 HansSceneManager.class,
@@ -101,6 +98,10 @@ public final class HansFastFreezeRuntimeTest {
                 "access$enterFastFreezer",
                 Object.class,
                 int.class, String.class, int.class, String.class);
+        Method nonSyntheticBridge = HansSceneManager.class.getDeclaredMethod(
+                "access$enterFastFreezer",
+                HansSceneManager.class,
+                int.class, String.class, int.class, String.class);
         Method staticCandidates = HansSceneManager.class.getDeclaredMethod(
                 "fastFreezeAppList", Object.class);
         Method wrongReturnCandidates = HansSceneManager.class.getDeclaredMethod(
@@ -122,6 +123,9 @@ public final class HansFastFreezeRuntimeTest {
                 Capability.ENTER_FAST_FREEZER, wrongParameterEntry));
         assertFalse(HansFastFreezeRuntime.matches(
                 Capability.ENTER_FAST_FREEZER_BRIDGE, wrongOwnerBridge));
+        assertFalse(nonSyntheticBridge.isSynthetic());
+        assertFalse(HansFastFreezeRuntime.matches(
+                Capability.ENTER_FAST_FREEZER_BRIDGE, nonSyntheticBridge));
         assertTrue(Modifier.isStatic(staticCandidates.getModifiers()));
         assertFalse(HansFastFreezeRuntime.matches(
                 Capability.FILTER_FAST_FREEZER_CANDIDATES, staticCandidates));
@@ -203,7 +207,8 @@ public final class HansFastFreezeRuntimeTest {
         Method method = matrix.methodOrNull(Capability.ENTER_FAST_FREEZER_BRIDGE);
         assertNotNull(method);
         assertEquals(HansSceneManager.class, method.getDeclaringClass());
-        assertEquals("access$enterFastFreezer", method.getName());
+        assertTrue(method.getName().contains("enterFastFreezer"));
+        assertTrue(method.isSynthetic());
         assertEquals(String.class, method.getReturnType());
         assertArrayEquals(
                 new Class<?>[] {
@@ -217,6 +222,21 @@ public final class HansFastFreezeRuntimeTest {
         assertTrue(Modifier.isStatic(method.getModifiers()));
         assertTrue(HansFastFreezeRuntime.matches(
                 Capability.ENTER_FAST_FREEZER_BRIDGE, method));
+    }
+
+    private static void assertSingleMatchingBridge() {
+        int candidates = 0;
+        int matches = 0;
+        for (Method method : HansSceneManager.class.getDeclaredMethods()) {
+            if (!method.getName().contains("enterFastFreezer")) continue;
+            candidates++;
+            if (HansFastFreezeRuntime.matches(
+                    Capability.ENTER_FAST_FREEZER_BRIDGE, method)) {
+                matches++;
+            }
+        }
+        assertTrue("fixture must contain bridge decoys", candidates > 1);
+        assertEquals(1, matches);
     }
 
     private static void assertSingleMatchingOverload(

@@ -74,7 +74,8 @@ public final class HansFastFreezeRuntime {
             case ENTER_FAST_FREEZER_BRIDGE:
                 return SCENE_CLASS.equals(owner)
                         && Modifier.isStatic(method.getModifiers())
-                        && method.getName().endsWith("enterFastFreezer")
+                        && method.isSynthetic()
+                        && method.getName().contains("enterFastFreezer")
                         && method.getReturnType() == String.class
                         && types(parameters,
                                 method.getDeclaringClass(),
