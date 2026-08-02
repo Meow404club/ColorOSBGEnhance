@@ -47,6 +47,7 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicLong writeGeneration = new AtomicLong();
     private final AtomicLong appliedClearGeneration = new AtomicLong();
+    private final AtomicLong admissionEpoch = new AtomicLong(-1L);
     private final AtomicLong acceptedWrites = new AtomicLong();
     private final AtomicLong droppedWrites = new AtomicLong();
     private final AtomicLong committedWrites = new AtomicLong();
@@ -157,7 +158,13 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
         boolean accepted;
         int queuedAfter;
         synchronized (stateLock) {
-            accepted = !closed.get() && total <= policy.queueCapacity - queuedWrites;
+            DiagnosticsWriteBatch.BatchIdentity identity = batch.batchIdentity;
+            long currentAdmissionEpoch = admissionEpoch.get();
+            boolean epochAccepted = identity == null
+                    || (currentAdmissionEpoch >= 0L
+                    && identity.epoch == currentAdmissionEpoch);
+            accepted = epochAccepted && !closed.get()
+                    && total <= policy.queueCapacity - queuedWrites;
             if (accepted) {
                 queue.addLast(new PendingBatch(batch, writeGeneration.get()));
                 queuedWrites += total;
@@ -213,21 +220,42 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
 
     public CompletableFuture<Long> currentEpochAsync() {
         CompletableFuture<Long> result = new CompletableFuture<>();
-        submitCommand(() -> {
-            try {
-                drainUntil(appliedClearGeneration.get());
-                long epoch = storage().currentEpoch();
-                if (epoch < 0L) {
-                    throw new IllegalStateException("diagnostics epoch unavailable");
+        long requestedGeneration;
+        boolean submitted;
+        synchronized (stateLock) {
+            requestedGeneration = writeGeneration.get();
+            submitted = submitCommandLocked(() -> {
+                try {
+                    drainUntil(appliedClearGeneration.get());
+                    long epoch = storage().currentEpoch();
+                    if (epoch < 0L) {
+                        throw new IllegalStateException("diagnostics epoch unavailable");
+                    }
+                    synchronized (stateLock) {
+                        if (!closed.get()
+                                && writeGeneration.get() == requestedGeneration
+                                && appliedClearGeneration.get() >= requestedGeneration) {
+                            admissionEpoch.set(epoch);
+                        }
+                    }
+                    result.complete(epoch);
+                } catch (Throwable error) {
+                    failedBatches.incrementAndGet();
+                    result.completeExceptionally(error);
                 }
-                result.complete(epoch);
-            } catch (Throwable error) {
-                failedBatches.incrementAndGet();
-                result.completeExceptionally(error);
-            }
-        }, () -> result.completeExceptionally(
-                new IllegalStateException("diagnostics epoch unavailable")));
+            }, () -> result.completeExceptionally(
+                    new IllegalStateException("diagnostics epoch unavailable")));
+        }
+        if (!submitted) {
+            result.completeExceptionally(
+                    new IllegalStateException("diagnostics epoch unavailable"));
+        }
         return result;
+    }
+
+    /** Current wire epoch accepted by the non-blocking Provider boundary. */
+    public long admissionEpoch() {
+        return admissionEpoch.get();
     }
 
     public CompletableFuture<DiagnosticsQuery.ExportSnapshot> exportAsync(
@@ -244,33 +272,48 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
             DiagnosticsQuery.ClearScope scope) {
         CompletableFuture<DiagnosticsQuery.ClearResult> result = new CompletableFuture<>();
         long clearGeneration;
+        long previousGeneration;
+        long previousAdmissionEpoch;
         boolean submitted;
         synchronized (stateLock) {
             if (closed.get() || pendingCommands >= commandCapacity) {
                 submitted = false;
                 clearGeneration = -1L;
+                previousGeneration = writeGeneration.get();
+                previousAdmissionEpoch = admissionEpoch.get();
             } else {
-                clearGeneration = writeGeneration.incrementAndGet();
+                previousGeneration = writeGeneration.get();
+                previousAdmissionEpoch = admissionEpoch.getAndSet(-1L);
+                clearGeneration = previousGeneration + 1L;
+                writeGeneration.set(clearGeneration);
                 submitted = submitCommandLocked(() -> {
                     try {
                         drainUntil(clearGeneration - 1L);
                         DiagnosticsQuery.ClearResult clearResult = clearWithRecovery(scope);
-                        appliedClearGeneration.set(clearGeneration);
-                        result.complete(clearResult == null
+                        appliedClearGeneration.accumulateAndGet(clearGeneration, Math::max);
+                        DiagnosticsQuery.ClearResult completed = clearResult == null
                                 ? DiagnosticsQuery.ClearResult.failed("database_unavailable")
-                                : clearResult);
+                                : clearResult;
+                        publishAdmissionAfterClear(clearGeneration, completed);
+                        result.complete(completed);
                     } catch (Throwable error) {
                         failedBatches.incrementAndGet();
-                        appliedClearGeneration.set(clearGeneration);
+                        appliedClearGeneration.accumulateAndGet(clearGeneration, Math::max);
+                        restoreAdmissionAfterFailedClear(clearGeneration);
                         result.complete(DiagnosticsQuery.ClearResult.failed(
                                 DiagnosticsValues.throwableCode(error)));
                     } finally {
                         requestDrain(0L);
                     }
                 }, () -> {
-                    appliedClearGeneration.set(clearGeneration);
+                    appliedClearGeneration.accumulateAndGet(clearGeneration, Math::max);
+                    restoreAdmissionAfterFailedClear(clearGeneration);
                     result.complete(DiagnosticsQuery.ClearResult.failed("backend_closed"));
                 });
+                if (!submitted) {
+                    writeGeneration.set(previousGeneration);
+                    admissionEpoch.set(previousAdmissionEpoch);
+                }
             }
         }
         if (!submitted) {
@@ -278,6 +321,34 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                     closed.get() ? "backend_closed" : "backend_busy"));
         }
         return result;
+    }
+
+    private void publishAdmissionAfterClear(
+            long clearGeneration, DiagnosticsQuery.ClearResult result) {
+        if (result != null && result.success && result.epoch >= 0L) {
+            synchronized (stateLock) {
+                if (!closed.get() && writeGeneration.get() == clearGeneration) {
+                    admissionEpoch.set(result.epoch);
+                }
+            }
+            return;
+        }
+        restoreAdmissionAfterFailedClear(clearGeneration);
+    }
+
+    private void restoreAdmissionAfterFailedClear(long clearGeneration) {
+        long restored = -1L;
+        try {
+            long storedEpoch = storage().currentEpoch();
+            if (storedEpoch >= 0L) restored = storedEpoch;
+        } catch (Throwable ignored) {
+            // An uncertain clear must keep wire admission closed.
+        }
+        synchronized (stateLock) {
+            if (!closed.get() && writeGeneration.get() == clearGeneration) {
+                admissionEpoch.set(restored);
+            }
+        }
     }
 
     private DiagnosticsQuery.ClearResult clearWithRecovery(
@@ -304,6 +375,7 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
     public CompletableFuture<Void> closeAsync() {
         synchronized (stateLock) {
             if (!closed.compareAndSet(false, true)) return closeCompletion;
+            admissionEpoch.set(-1L);
             ScheduledFuture<?> periodic = maintenanceFuture;
             if (periodic != null) periodic.cancel(false);
             try {

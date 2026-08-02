@@ -18,8 +18,10 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.After;
 import org.junit.Test;
 
@@ -204,7 +206,9 @@ public final class ResidencyDiagnosticsBackendTest {
     @Test
     public void workerPreservesVersionedIdentityThroughPersistence() throws Exception {
         FakeStorage storage = new FakeStorage();
+        storage.epoch = 3L;
         ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 4, 60_000L));
+        assertEquals(3L, backend.currentEpochAsync().get(5, TimeUnit.SECONDS).longValue());
         DiagnosticsWriteBatch batch = DiagnosticsWriteBatch.builder()
                 .wireIdentity(2, "boot", "system_server", "sender-a", 3L, 9L)
                 .addEvent(event("wire", "pkg", 1))
@@ -214,6 +218,146 @@ public final class ResidencyDiagnosticsBackendTest {
         backend.flushAsync().get(5, TimeUnit.SECONDS);
 
         assertEquals(batch.batchIdentity, storage.lastBatchIdentity);
+    }
+
+    @Test
+    public void clearClosesWireAdmissionBeforeWorkerBarrierAndPublishesNewEpoch()
+            throws Exception {
+        FakeStorage storage = new FakeStorage();
+        storage.epoch = 7L;
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 4, 60_000L));
+        assertEquals(7L, backend.currentEpochAsync().get(5, TimeUnit.SECONDS).longValue());
+        assertEquals(7L, backend.admissionEpoch());
+
+        storage.blockQueries();
+        CompletableFuture<DiagnosticsQuery.EventPage> blocker =
+                backend.queryEventsAsync(null);
+        assertTrue(storage.queryStarted.await(5, TimeUnit.SECONDS));
+        CompletableFuture<DiagnosticsQuery.ClearResult> clearing = backend.clearAsync(
+                DiagnosticsQuery.ClearScope.USER_ACTIVITY);
+
+        assertEquals(-1L, backend.admissionEpoch());
+        ResidencyDiagnosticsBackend.EnqueueResult stale = backend.enqueue(
+                versionedEventBatch(7L, 0L, "stale"));
+        assertEquals(0, stale.accepted);
+        assertEquals(1, stale.dropped);
+
+        storage.releaseQueries.countDown();
+        blocker.get(5, TimeUnit.SECONDS);
+        DiagnosticsQuery.ClearResult clear = clearing.get(5, TimeUnit.SECONDS);
+        assertTrue(clear.success);
+        assertEquals(8L, clear.epoch);
+        assertEquals(8L, backend.admissionEpoch());
+
+        ResidencyDiagnosticsBackend.EnqueueResult current = backend.enqueue(
+                versionedEventBatch(8L, 0L, "current"));
+        assertEquals(1, current.accepted);
+        backend.flushAsync().get(5, TimeUnit.SECONDS);
+        assertEquals(1, storage.events.size());
+        assertEquals("current", storage.events.get(0).eventToken);
+    }
+
+    @Test
+    public void epochReadQueuedBeforeClearCannotReopenOldWireAdmission()
+            throws Exception {
+        FakeStorage storage = new FakeStorage();
+        storage.epoch = 4L;
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 4, 60_000L));
+        assertEquals(4L, backend.currentEpochAsync().get(5, TimeUnit.SECONDS).longValue());
+
+        storage.blockQueries();
+        storage.blockClears();
+        CompletableFuture<DiagnosticsQuery.EventPage> blocker =
+                backend.queryEventsAsync(null);
+        assertTrue(storage.queryStarted.await(5, TimeUnit.SECONDS));
+        CompletableFuture<Long> staleRead = backend.currentEpochAsync();
+        CompletableFuture<DiagnosticsQuery.ClearResult> clearing = backend.clearAsync(
+                DiagnosticsQuery.ClearScope.USER_ACTIVITY);
+
+        storage.releaseQueries.countDown();
+        blocker.get(5, TimeUnit.SECONDS);
+        assertEquals(4L, staleRead.get(5, TimeUnit.SECONDS).longValue());
+        assertTrue(storage.clearStarted.await(5, TimeUnit.SECONDS));
+        assertEquals(-1L, backend.admissionEpoch());
+
+        storage.releaseClears.countDown();
+        assertEquals(5L, clearing.get(5, TimeUnit.SECONDS).epoch);
+        assertEquals(5L, backend.admissionEpoch());
+    }
+
+    @Test
+    public void failedClearRestoresLastPersistedWireEpoch() throws Exception {
+        FakeStorage storage = new FakeStorage();
+        storage.epoch = 9L;
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 4, 60_000L));
+        assertEquals(9L, backend.currentEpochAsync().get(5, TimeUnit.SECONDS).longValue());
+        storage.failClears = true;
+
+        DiagnosticsQuery.ClearResult failed = backend.clearAsync(
+                DiagnosticsQuery.ClearScope.USER_ACTIVITY).get(5, TimeUnit.SECONDS);
+
+        assertFalse(failed.success);
+        assertEquals(9L, backend.admissionEpoch());
+        assertEquals(1, backend.enqueue(versionedEventBatch(9L, 0L, "retained")).accepted);
+        backend.flushAsync().get(5, TimeUnit.SECONDS);
+        assertEquals(1, storage.events.size());
+    }
+
+    @Test
+    public void uncertainCommittedClearKeepsAdmissionClosedUntilEpochCanBeRead()
+            throws Exception {
+        FakeStorage storage = new FakeStorage();
+        storage.epoch = 11L;
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 4, 60_000L));
+        assertEquals(11L, backend.currentEpochAsync().get(5, TimeUnit.SECONDS).longValue());
+        storage.clearCommitsThenFails = true;
+        storage.failEpochReadsAfterClear = true;
+
+        DiagnosticsQuery.ClearResult failed = backend.clearAsync(
+                DiagnosticsQuery.ClearScope.USER_ACTIVITY).get(5, TimeUnit.SECONDS);
+
+        assertFalse(failed.success);
+        assertEquals(12L, storage.epoch);
+        assertEquals(-1L, backend.admissionEpoch());
+        assertEquals(0, backend.enqueue(versionedEventBatch(11L, 0L, "old")).accepted);
+        assertEquals(0, backend.enqueue(versionedEventBatch(12L, 0L, "new")).accepted);
+
+        storage.failEpochReads = false;
+        assertEquals(12L, backend.currentEpochAsync().get(5, TimeUnit.SECONDS).longValue());
+        assertEquals(12L, backend.admissionEpoch());
+        assertEquals(1, backend.enqueue(versionedEventBatch(12L, 0L, "recovered")).accepted);
+    }
+
+    @Test
+    public void rejectedSecondClearRollsBackGenerationAndLetsFirstPublish()
+            throws Exception {
+        FakeStorage storage = new FakeStorage();
+        storage.epoch = 2L;
+        RejectOnceExecutor executor = new RejectOnceExecutor();
+        ResidencyDiagnosticsBackend backend = new ResidencyDiagnosticsBackend(
+                policy(8, 4, 60_000L), storage, executor, "boot");
+        backends.add(backend);
+        assertEquals(2L, backend.currentEpochAsync().get(5, TimeUnit.SECONDS).longValue());
+
+        storage.blockQueries();
+        CompletableFuture<DiagnosticsQuery.EventPage> blocker =
+                backend.queryEventsAsync(null);
+        assertTrue(storage.queryStarted.await(5, TimeUnit.SECONDS));
+        CompletableFuture<DiagnosticsQuery.ClearResult> first = backend.clearAsync(
+                DiagnosticsQuery.ClearScope.USER_ACTIVITY);
+        executor.rejectNextExecute();
+        DiagnosticsQuery.ClearResult rejected = backend.clearAsync(
+                DiagnosticsQuery.ClearScope.USER_ACTIVITY).get(5, TimeUnit.SECONDS);
+
+        assertFalse(rejected.success);
+        assertEquals(-1L, backend.admissionEpoch());
+        storage.releaseQueries.countDown();
+        blocker.get(5, TimeUnit.SECONDS);
+        DiagnosticsQuery.ClearResult completed = first.get(5, TimeUnit.SECONDS);
+        assertTrue(completed.success);
+        assertEquals(3L, completed.epoch);
+        assertEquals(3L, backend.admissionEpoch());
+        assertEquals(1, backend.enqueue(versionedEventBatch(3L, 0L, "after")).accepted);
     }
 
     @Test
@@ -449,7 +593,9 @@ public final class ResidencyDiagnosticsBackendTest {
     @Test
     public void closeIsBarrierForAcceptedQueriesAndIsIdempotent() throws Exception {
         FakeStorage storage = new FakeStorage();
+        storage.epoch = 5L;
         ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 2, 60_000L));
+        assertEquals(5L, backend.currentEpochAsync().get(5, TimeUnit.SECONDS).longValue());
         backend.flushAsync().get(5, TimeUnit.SECONDS);
         storage.blockQueries();
         CompletableFuture<DiagnosticsQuery.EventPage> accepted =
@@ -457,6 +603,7 @@ public final class ResidencyDiagnosticsBackendTest {
         assertTrue(storage.queryStarted.await(5, TimeUnit.SECONDS));
 
         CompletableFuture<Void> close = backend.closeAsync();
+        assertEquals(-1L, backend.admissionEpoch());
         DiagnosticsQuery.EventPage afterBarrier = backend.queryEventsAsync(null)
                 .get(5, TimeUnit.SECONDS);
 
@@ -513,6 +660,15 @@ public final class ResidencyDiagnosticsBackendTest {
                 .build();
     }
 
+    private static DiagnosticsWriteBatch versionedEventBatch(
+            long epoch, long sequence, String token) {
+        return DiagnosticsWriteBatch.builder()
+                .wireIdentity(2, "boot", "system_server", "sender-a", epoch, sequence)
+                .countingMode(DiagnosticsWriteBatch.CountingMode.TYPED)
+                .addEvent(event(token, "pkg", 1))
+                .build();
+    }
+
     private static final class FakeStorage implements ResidencyDiagnosticsStorage {
         final List<NormalizedDiagnosticsEvent> events = new ArrayList<>();
         final List<DiagnosticsQuery.RawHookSummary> rawHooks = new ArrayList<>();
@@ -531,12 +687,18 @@ public final class ResidencyDiagnosticsBackendTest {
         volatile boolean failWrites;
         volatile boolean failQueries;
         volatile boolean failEpochReads;
+        volatile boolean failClears;
+        volatile boolean clearCommitsThenFails;
+        volatile boolean failEpochReadsAfterClear;
+        volatile long epoch;
         volatile boolean alwaysFull;
         volatile boolean closed;
         volatile int fullWriteFailures;
         volatile CountDownLatch maintenanceLatch;
         volatile CountDownLatch queryStarted;
         volatile CountDownLatch releaseQueries;
+        volatile CountDownLatch clearStarted;
+        volatile CountDownLatch releaseClears;
         volatile DiagnosticsWriteBatch.BatchIdentity lastBatchIdentity;
         volatile DiagnosticsWriteBatch migratedBatch;
         volatile ResidencyDiagnosticsStorage.WriteResult writeResult =
@@ -642,15 +804,35 @@ public final class ResidencyDiagnosticsBackendTest {
         public synchronized DiagnosticsQuery.ClearResult clear(
                 DiagnosticsQuery.ClearScope scope) {
             clearCalls++;
+            if (failClears) throw new IllegalStateException("clear failed");
+            CountDownLatch started = clearStarted;
+            CountDownLatch release = releaseClears;
+            if (started != null && release != null) {
+                started.countDown();
+                try {
+                    if (!release.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("clear release timed out");
+                    }
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("clear interrupted", interrupted);
+                }
+            }
+            if (clearCommitsThenFails) {
+                epoch++;
+                if (failEpochReadsAfterClear) failEpochReads = true;
+                throw new IllegalStateException("clear result unavailable");
+            }
             int deleted = events.size();
             events.clear();
-            return new DiagnosticsQuery.ClearResult(true, deleted, "");
+            epoch++;
+            return new DiagnosticsQuery.ClearResult(true, deleted, epoch, "");
         }
 
         @Override
         public long currentEpoch() {
             if (failEpochReads) throw new IllegalStateException("epoch read failed");
-            return 0L;
+            return epoch;
         }
 
         synchronized List<String> operationSnapshot() {
@@ -662,7 +844,33 @@ public final class ResidencyDiagnosticsBackendTest {
             releaseQueries = new CountDownLatch(1);
         }
 
+        void blockClears() {
+            clearStarted = new CountDownLatch(1);
+            releaseClears = new CountDownLatch(1);
+        }
+
         @Override public int schemaVersion() { return ResidencyDiagnosticsDb.SCHEMA_VERSION; }
         @Override public void close() { closed = true; }
+    }
+
+    private static final class RejectOnceExecutor extends ScheduledThreadPoolExecutor {
+        private final AtomicBoolean rejectNext = new AtomicBoolean();
+
+        RejectOnceExecutor() {
+            super(1);
+            setRemoveOnCancelPolicy(true);
+        }
+
+        void rejectNextExecute() {
+            rejectNext.set(true);
+        }
+
+        @Override
+        public void execute(Runnable command) {
+            if (rejectNext.compareAndSet(true, false)) {
+                throw new RejectedExecutionException("rejected for test");
+            }
+            super.execute(command);
+        }
     }
 }

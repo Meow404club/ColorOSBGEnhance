@@ -352,6 +352,11 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                 deleted += db.delete(TABLE_RAW, null, null);
                 deleted += db.delete(TABLE_FEATURE_TOTALS, null, null);
             }
+            if (scope == DiagnosticsQuery.ClearScope.STATISTICS) {
+                resetHookActivity(db, false);
+            } else if (scope == DiagnosticsQuery.ClearScope.USER_ACTIVITY) {
+                resetHookActivity(db, true);
+            }
             if (scope == DiagnosticsQuery.ClearScope.HOOK_STATES
                     || scope == DiagnosticsQuery.ClearScope.ALL) {
                 deleted += db.delete(TABLE_HOOK_STATES, null, null);
@@ -361,6 +366,16 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
             db.endTransaction();
         }
         return new DiagnosticsQuery.ClearResult(true, deleted, epoch, "");
+    }
+
+    private static void resetHookActivity(SQLiteDatabase db, boolean clearEventTime) {
+        ContentValues values = new ContentValues();
+        values.put("last_hook_at", 0L);
+        if (clearEventTime) values.put("last_event_at", 0L);
+        values.put("raw_hit_count", 0L);
+        values.put("parsed_count", 0L);
+        values.put("identity_resolved_count", 0L);
+        db.update(TABLE_HOOK_STATES, values, null, null);
     }
 
     @Override

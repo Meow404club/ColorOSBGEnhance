@@ -301,7 +301,16 @@ public final class ResidencyDiagnosticsDbTest {
                 DiagnosticsQuery.EventFilter.builder().build()).items.isEmpty());
         assertEquals(0L, database.queryHomeStats(
                 Collections.singletonList("freeze")).observed);
-        assertEquals(1, database.queryHookStates(10).size());
+        List<DiagnosticsHookState> retained = database.queryHookStates(10);
+        assertEquals(1, retained.size());
+        assertEquals("INSTALLED", retained.get(0).installStatus);
+        assertEquals(0L, retained.get(0).rawHitCount);
+        assertEquals(0L, retained.get(0).parsedCount);
+        assertEquals(0L, retained.get(0).identityResolvedCount);
+        assertEquals(0L, retained.get(0).lastHookAt);
+        assertEquals(0L, retained.get(0).lastEventAt);
+        assertEquals(7, retained.get(0).configRevision);
+        assertEquals(9, retained.get(0).policyRevision);
         database.clear(DiagnosticsQuery.ClearScope.ALL);
         assertTrue(database.queryHookStates(10).isEmpty());
     }

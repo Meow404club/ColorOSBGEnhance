@@ -33,7 +33,7 @@ public final class ModuleBridgeProvider extends ContentProvider {
                 Process.SYSTEM_UID,
                 athenaUid,
                 ModuleApplication.diagnosticsBootId(),
-                ModuleApplication::diagnosticsEpoch,
+                backend::admissionEpoch,
                 batch -> {
                     ResidencyDiagnosticsBackend.EnqueueResult result = backend.enqueue(batch);
                     return new DiagnosticsProviderController.BatchResult(
