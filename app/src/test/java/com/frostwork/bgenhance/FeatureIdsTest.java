@@ -35,7 +35,10 @@ public final class FeatureIdsTest {
                 "android_freeze",
                 "hans_resource",
                 "hans_refreeze",
-                "hans_recovery"
+                "hans_recovery",
+                "fast_clear_other",
+                "memory_guard_other",
+                "athena_other"
         ), FeatureIds.all());
     }
 

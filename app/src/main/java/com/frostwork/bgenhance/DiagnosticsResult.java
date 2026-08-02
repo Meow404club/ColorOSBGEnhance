@@ -7,6 +7,7 @@ public final class DiagnosticsResult {
     public static final String PASSED = "passed";
     public static final String BLOCKED = "blocked";
     public static final String OBSERVED = "observed";
+    public static final String CANDIDATE_FILTERED = "candidate_filtered";
     public static final String FAIL_OPEN = "fail_open";
     public static final String CONFIG_UNAVAILABLE = "config_unavailable";
     public static final String THROTTLE_ALLOWED = "throttle_allowed";

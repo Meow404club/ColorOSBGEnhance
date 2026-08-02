@@ -2,8 +2,6 @@ package com.frostwork.bgenhance;
 
 import androidx.annotation.NonNull;
 import com.frostwork.bgenhance.hooks.AlarmWakeHook;
-import com.frostwork.bgenhance.hooks.AthenaPeriodicHook;
-import com.frostwork.bgenhance.hooks.FastClearHook;
 import com.frostwork.bgenhance.hooks.HansExemptionHook;
 import com.frostwork.bgenhance.hooks.HansActiveRecoveryHook;
 import com.frostwork.bgenhance.hooks.HansFastFreezeHook;
@@ -12,12 +10,11 @@ import com.frostwork.bgenhance.hooks.HansResourceHook;
 import com.frostwork.bgenhance.hooks.HansRefreezeHook;
 import com.frostwork.bgenhance.hooks.HansTimingHook;
 import com.frostwork.bgenhance.hooks.HansWakeHook;
-import com.frostwork.bgenhance.hooks.MemoryGuardHook;
 import com.frostwork.bgenhance.hooks.NirvanaHook;
 import com.frostwork.bgenhance.hooks.OguardForceStopHook;
 import com.frostwork.bgenhance.hooks.OguardKillHook;
 import com.frostwork.bgenhance.hooks.OsenseProcessKillHook;
-import com.frostwork.bgenhance.hooks.TournamentHook;
+import com.frostwork.bgenhance.hooks.athena.AthenaTerminalGate;
 import io.github.libxposed.api.XposedModule;
 import io.github.libxposed.api.XposedModuleInterface;
 import java.util.Arrays;
@@ -105,10 +102,6 @@ public final class MainHook extends XposedModule {
     }
 
     static List<FeatureHook> athenaHooks() {
-        return Collections.unmodifiableList(Arrays.asList(
-                new AthenaPeriodicHook(),
-                new FastClearHook(),
-                new MemoryGuardHook(),
-                new TournamentHook()));
+        return AthenaTerminalGate.featureHooks();
     }
 }

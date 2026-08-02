@@ -14,9 +14,12 @@ public final class FeatureIds {
     public static final String FAST_CAMERA_OPERATION = "fast_clear_camera_operation";
     public static final String FAST_GAME_START = "fast_clear_game_start";
     public static final String FAST_AI = "fast_clear_ai";
+    public static final String FAST_CLEAR_OTHER = "fast_clear_other";
     public static final String TOURNAMENT = "tournament";
     public static final String MEMORY_FORCE = "memory_guard_force";
     public static final String MEMORY_OVER = "memory_guard_over";
+    public static final String MEMORY_GUARD_OTHER = "memory_guard_other";
+    public static final String ATHENA_OTHER = "athena_other";
     public static final String NIRVANA = "nirvana";
     public static final String CAMERA_LOW_FREE = "camera_low_free";
     public static final String GAME_LOW_FREE = "game_low_free";
@@ -35,7 +38,7 @@ public final class FeatureIds {
             TOURNAMENT, MEMORY_FORCE, MEMORY_OVER,
             NIRVANA, CAMERA_LOW_FREE, GAME_LOW_FREE, OSENSE_PER_PROCESS,
             HANS, HANS_WAKE, SUPER_FREEZE, ANDROID_FREEZE, HANS_RESOURCE, HANS_REFREEZE,
-            HANS_RECOVERY
+            HANS_RECOVERY, FAST_CLEAR_OTHER, MEMORY_GUARD_OTHER, ATHENA_OTHER
     ));
 
     public static List<String> all() {

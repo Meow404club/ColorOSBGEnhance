@@ -48,6 +48,7 @@
     <string name="fast_clear_page_title">场景后台保护</string>
     <string name="fast_clear_page_subtitle">减少相机、游戏和 AI 功能启动时对其他后台应用的影响</string>
     <string name="fast_camera_start_title">相机启动保护</string>
+    <string name="fast_other_title">其他快速清理</string>
     <string name="fast_camera_start_summary">打开相机时，减少系统提前关闭其他后台应用</string>
     <string name="fast_camera_start_detail">适用场景：打开相机</string>
     <string name="fast_camera_operation_title">相机模式与录像保护</string>
@@ -66,6 +67,8 @@
     <string name="memory_page_title">低内存清理保护</string>
     <string name="memory_page_subtitle">控制内存紧张时对后台应用的集中清理</string>
     <string name="memory_force_title">快速清理保护</string>
+    <string name="memory_other_title">其他内存清理</string>
+    <string name="athena_other_title">其他 Athena 清理</string>
     <string name="memory_force_summary">内存不足时，减少系统一次性关闭多个后台应用</string>
     <string name="memory_force_detail">适用场景：系统尝试快速释放内存</string>
     <string name="memory_over_title">过载清理保护</string>
@@ -173,6 +176,7 @@
     <string name="support_last_updated">最近更新：%1$s</string>
     <string name="result_blocked">已阻止</string>
     <string name="result_observed">观察记录</string>
+    <string name="result_candidate_filtered">已从清理候选中排除</string>
     <string name="result_passed">未阻止</string>
     <string name="back">返回</string>
 

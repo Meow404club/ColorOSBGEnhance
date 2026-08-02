@@ -185,10 +185,10 @@ public final class HookDiagnostics {
     }
 
     private static String featureProcessId(String feature) {
-        if (FeatureIds.ATHENA_PERIODIC.equals(feature)
-                || "fast_clear_dispatch".equals(feature)
-                || "memory_guard_dispatch".equals(feature)
-                || FeatureIds.TOURNAMENT.equals(feature)) {
+        if (HookTargetIds.ATHENA_PERIODIC.equals(feature)
+                || HookTargetIds.FAST_CLEAR_DISPATCH.equals(feature)
+                || HookTargetIds.MEMORY_GUARD_DISPATCH.equals(feature)
+                || HookTargetIds.TOURNAMENT.equals(feature)) {
             return BridgeContract.PROCESS_ATHENA;
         }
         return BridgeContract.PROCESS_SYSTEM_SERVER;

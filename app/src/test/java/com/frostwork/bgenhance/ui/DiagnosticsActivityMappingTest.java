@@ -82,6 +82,16 @@ public final class DiagnosticsActivityMappingTest {
     }
 
     @Test
+    public void genericAthenaActionsHaveVisibleRuntimeRows() throws Exception {
+        assertEquals(Integer.valueOf(R.string.fast_other_title),
+                statTitles().get(FeatureIds.FAST_CLEAR_OTHER));
+        assertEquals(Integer.valueOf(R.string.memory_other_title),
+                statTitles().get(FeatureIds.MEMORY_GUARD_OTHER));
+        assertEquals(Integer.valueOf(R.string.athena_other_title),
+                statTitles().get(FeatureIds.ATHENA_OTHER));
+    }
+
+    @Test
     public void everyStableIdentifierHasExactlyOneDiagnosticsRow() throws Exception {
         assertEquals(new HashSet<>(HookTargetIds.all()), supportTitles().keySet());
         assertEquals(new HashSet<>(FeatureIds.all()), statTitles().keySet());

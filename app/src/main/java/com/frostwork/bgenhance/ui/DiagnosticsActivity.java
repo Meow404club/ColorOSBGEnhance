@@ -106,16 +106,19 @@ public final class DiagnosticsActivity extends AppCompatActivity {
             new StatGroup(R.string.stats_group_basic,
                     new StatItem(R.string.periodic_title, FeatureIds.ATHENA_PERIODIC),
                     new StatItem(R.string.oguard_kill_title, FeatureIds.OGUARD_KILL),
-                    new StatItem(R.string.oguard_stop_title, FeatureIds.OGUARD_FORCE_STOP)),
+                    new StatItem(R.string.oguard_stop_title, FeatureIds.OGUARD_FORCE_STOP),
+                    new StatItem(R.string.athena_other_title, FeatureIds.ATHENA_OTHER)),
             new StatGroup(R.string.stats_group_scene,
                     new StatItem(R.string.fast_camera_start_title, FeatureIds.FAST_CAMERA_START),
                     new StatItem(R.string.fast_camera_operation_title, FeatureIds.FAST_CAMERA_OPERATION),
                     new StatItem(R.string.fast_game_start_title, FeatureIds.FAST_GAME_START),
                     new StatItem(R.string.fast_ai_title, FeatureIds.FAST_AI),
+                    new StatItem(R.string.fast_other_title, FeatureIds.FAST_CLEAR_OTHER),
                     new StatItem(R.string.tournament_title, FeatureIds.TOURNAMENT)),
             new StatGroup(R.string.stats_group_memory,
                     new StatItem(R.string.memory_force_title, FeatureIds.MEMORY_FORCE),
-                    new StatItem(R.string.memory_over_title, FeatureIds.MEMORY_OVER)),
+                    new StatItem(R.string.memory_over_title, FeatureIds.MEMORY_OVER),
+                    new StatItem(R.string.memory_other_title, FeatureIds.MEMORY_GUARD_OTHER)),
             new StatGroup(R.string.stats_group_nirvana,
                     new StatItem(R.string.nirvana_title, FeatureIds.NIRVANA),
                     new StatItem(R.string.camera_low_free_title, FeatureIds.CAMERA_LOW_FREE),
@@ -415,6 +418,9 @@ public final class DiagnosticsActivity extends AppCompatActivity {
     private String friendlyResult(String result) {
         if (DiagnosticsResult.BLOCKED.equals(result)) return getString(R.string.result_blocked);
         if (DiagnosticsResult.OBSERVED.equals(result)) return getString(R.string.result_observed);
+        if (DiagnosticsResult.CANDIDATE_FILTERED.equals(result)) {
+            return getString(R.string.result_candidate_filtered);
+        }
         if (DiagnosticsResult.PASSED.equals(result)) return getString(R.string.result_passed);
         if (DiagnosticsResult.FAIL_OPEN.equals(result)) return getString(R.string.result_fail_open);
         if (DiagnosticsResult.CONFIG_UNAVAILABLE.equals(result)) {
