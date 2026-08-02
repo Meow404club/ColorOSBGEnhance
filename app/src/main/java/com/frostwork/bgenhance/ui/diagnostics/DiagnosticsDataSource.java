@@ -19,7 +19,7 @@ public interface DiagnosticsDataSource {
         return new BackendDiagnosticsDataSource(backend);
     }
 
-    /** Hook query result with an explicit error channel absent from the current backend DTO. */
+    /** UI-facing Hook query result with an explicit error channel. */
     final class HookStatePage {
         public final List<DiagnosticsHookState> items;
         public final String errorCode;

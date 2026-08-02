@@ -232,10 +232,14 @@ public final class ResidencyDiagnosticsBackendTest {
         backend.flushAsync().get(5, TimeUnit.SECONDS);
         DiagnosticsQuery.EventPage page = backend.queryEventsAsync(
                 DiagnosticsQuery.EventFilter.builder().build()).get(5, TimeUnit.SECONDS);
+        DiagnosticsQuery.HookStatePage hookStates = backend.queryHookStatesAsync(10)
+                .get(5, TimeUnit.SECONDS);
 
         assertTrue(page.items.isEmpty());
         assertEquals("database_unavailable", page.errorCode);
-        assertTrue(backend.health().failedBatches >= 2L);
+        assertTrue(hookStates.items.isEmpty());
+        assertEquals("database_unavailable", hookStates.errorCode);
+        assertTrue(backend.health().failedBatches >= 3L);
         assertTrue(backend.health().droppedWrites >= 1L);
     }
 

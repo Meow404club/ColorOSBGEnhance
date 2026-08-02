@@ -313,6 +313,20 @@ public final class DiagnosticsQuery {
         }
     }
 
+    public static final class HookStatePage {
+        public final List<DiagnosticsHookState> items;
+        public final String errorCode;
+
+        public HookStatePage(List<DiagnosticsHookState> items, String errorCode) {
+            this.items = immutable(items);
+            this.errorCode = DiagnosticsValues.id(errorCode);
+        }
+
+        public static HookStatePage empty(String errorCode) {
+            return new HookStatePage(Collections.emptyList(), errorCode);
+        }
+    }
+
     public static final class FeatureStats {
         public final String featureId;
         public final long observed;

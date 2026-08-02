@@ -202,10 +202,11 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 () -> DiagnosticsQuery.HomeStatsSnapshot.empty("database_unavailable"));
     }
 
-    public CompletableFuture<List<DiagnosticsHookState>> queryHookStatesAsync(int limit) {
+    public CompletableFuture<DiagnosticsQuery.HookStatePage> queryHookStatesAsync(int limit) {
         return submitQuery(
-                () -> storage().queryHookStates(limit),
-                Collections::emptyList);
+                () -> new DiagnosticsQuery.HookStatePage(
+                        storage().queryHookStates(limit), ""),
+                () -> DiagnosticsQuery.HookStatePage.empty("database_unavailable"));
     }
 
     public CompletableFuture<Long> currentEpochAsync() {
