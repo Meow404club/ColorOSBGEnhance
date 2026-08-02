@@ -3,6 +3,8 @@ package com.frostwork.bgenhance.residency.runtime;
 import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
 import com.frostwork.bgenhance.residency.model.FreezePolicy;
 import com.frostwork.bgenhance.residency.model.FreezeSource;
+import com.frostwork.bgenhance.residency.model.RefreezeMode;
+import com.frostwork.bgenhance.residency.model.ResourceType;
 import com.frostwork.bgenhance.residency.model.ResidencyMode;
 import com.frostwork.bgenhance.residency.model.WakeMode;
 import com.frostwork.bgenhance.residency.model.WakeSource;
@@ -398,6 +400,23 @@ public final class ResidencyIdentityIndex {
             case LCD_ON_EXEMPTION:
                 return isLcdOnExempt(first.freezePolicy())
                         == isLcdOnExempt(second.freezePolicy());
+            case RESOURCE_NETWORK:
+                return first.resourcePolicy().keepNetwork()
+                        == second.resourcePolicy().keepNetwork();
+            case RESOURCE_SERVICE:
+            case RESOURCE_BROADCAST:
+            case RESOURCE_JOB:
+            case RESOURCE_SENSOR:
+            case RESOURCE_BINDER:
+            case RESOURCE_ALARM:
+            case RESOURCE_WAKE_LOCK:
+            case RESOURCE_GPS:
+            case RESOURCE_AUDIO:
+            case RESOURCE_BLUETOOTH_SCAN:
+                ResourceType resource = Objects.requireNonNull(
+                        policyScope.resourceTypeOrNull(), "resourceType");
+                return first.resourcePolicy().keeps(resource)
+                        == second.resourcePolicy().keeps(resource);
             case WAKE_PACKET:
             case WAKE_ALARM:
             case WAKE_ASYNC_BINDER:
@@ -418,6 +437,28 @@ public final class ResidencyIdentityIndex {
                 return sameWakeAction(
                         first, second, Objects.requireNonNull(
                                 policyScope.wakeSourceOrNull(), "wakeSource"));
+            case REFREEZE_PACKET:
+            case REFREEZE_ALARM:
+            case REFREEZE_ASYNC_BINDER:
+            case REFREEZE_SYNC_BINDER:
+            case REFREEZE_TRANSACTION_BINDER:
+            case REFREEZE_SIGNAL:
+            case REFREEZE_ACTIVITY_INPUT:
+            case REFREEZE_SERVICE:
+            case REFREEZE_BROADCAST:
+            case REFREEZE_PROVIDER:
+            case REFREEZE_JOB_SYNC:
+            case REFREEZE_WAKE_LOCK:
+            case REFREEZE_AUDIO_MEDIA:
+            case REFREEZE_CONNECTIVITY:
+            case REFREEZE_SYSTEM_SCENE:
+            case REFREEZE_INTERNAL_OPERATION:
+            case REFREEZE_OTHER:
+                return sameRefreezeAction(
+                        first,
+                        second,
+                        Objects.requireNonNull(
+                                policyScope.refreezeSourceOrNull(), "refreezeSource"));
             case FULL:
             default:
                 return first.killPolicy().equals(second.killPolicy())
@@ -485,6 +526,24 @@ public final class ResidencyIdentityIndex {
             case ALARM: return policy.wakePolicy().alarm().cooldownMs();
             default: return 0L;
         }
+    }
+
+    private static boolean sameRefreezeAction(
+            AppResidencyPolicy first,
+            AppResidencyPolicy second,
+            WakeSource source) {
+        boolean firstDisabled = first.freezePolicy().fullExemption()
+                || first.refreezePolicy().mode() == RefreezeMode.DISABLED;
+        boolean secondDisabled = second.freezePolicy().fullExemption()
+                || second.refreezePolicy().mode() == RefreezeMode.DISABLED;
+        if (firstDisabled || secondDisabled) return firstDisabled == secondDisabled;
+
+        boolean firstScheduled = first.refreezePolicy().mode() == RefreezeMode.AFTER_WAKE;
+        boolean secondScheduled = second.refreezePolicy().mode() == RefreezeMode.AFTER_WAKE;
+        if (firstScheduled != secondScheduled) return false;
+        return !firstScheduled
+                || first.refreezePolicy().delayFor(source)
+                == second.refreezePolicy().delayFor(source);
     }
 
     public static boolean isSystemUid(int uid) {

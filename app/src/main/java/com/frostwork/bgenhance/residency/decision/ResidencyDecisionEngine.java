@@ -244,7 +244,10 @@ public final class ResidencyDecisionEngine {
 
     public ResourceDecision decideResource(ResourceContext context) {
         Objects.requireNonNull(context, "context");
-        Evaluation evaluation = evaluate(context);
+        UidPolicyScope policyScope = context.kind() == ResourceContext.Kind.NETWORK
+                ? UidPolicyScope.RESOURCE_NETWORK
+                : UidPolicyScope.forResource(context.resourceType());
+        Evaluation evaluation = evaluate(context, "", true, policyScope);
         if (!evaluation.active()) {
             return new ResourceDecision(
                     ResourceDecision.Action.ALLOW_SYSTEM,
@@ -268,7 +271,11 @@ public final class ResidencyDecisionEngine {
 
     public RefreezeDecision decideRefreeze(RefreezeContext context) {
         Objects.requireNonNull(context, "context");
-        Evaluation evaluation = evaluate(context);
+        Evaluation evaluation = evaluate(
+                context,
+                "",
+                true,
+                UidPolicyScope.forRefreezeSource(context.wakeSource()));
         if (!evaluation.active()) {
             return new RefreezeDecision(
                     RefreezeDecision.Action.ALLOW_SYSTEM,
