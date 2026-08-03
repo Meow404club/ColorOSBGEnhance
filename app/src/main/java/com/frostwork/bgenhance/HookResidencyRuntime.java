@@ -34,17 +34,36 @@ import java.util.Collections;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 /** Process-local facade used by hooks; all platform identity work stays on a background thread. */
 public final class HookResidencyRuntime {
     private HookResidencyRuntime() {}
 
-    private static final ResidencyRuntimeController CONTROLLER =
-            new ResidencyRuntimeController(Executors.newSingleThreadExecutor(runnable -> {
+    private static final ScheduledExecutorService IDENTITY_EXECUTOR =
+            Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "BgEnhanceIdentity");
         thread.setDaemon(true);
         return thread;
-    }));
+    });
+    private static final ResidencyRuntimeController CONTROLLER =
+            new ResidencyRuntimeController(IDENTITY_EXECUTOR);
+    private static final RetryingRegistration PACKAGE_RECEIVER_REGISTRATION =
+            new RetryingRegistration(
+                    IDENTITY_EXECUTOR::schedule,
+                    new RetryingRegistration.Observer() {
+                        @Override
+                        public void onFirstFailure(Throwable error) {
+                            ModuleLog.w("package change receiver registration deferred: " + error);
+                        }
+
+                        @Override
+                        public void onRecovery() {
+                            ModuleLog.i("package change receiver registration recovered");
+                        }
+                    },
+                    2_000L,
+                    60_000L);
     private static final ResidencyDecisionEngine FAIL_OPEN_ENGINE =
             new ResidencyDecisionEngine(
                     RuntimeConfigSnapshot.unavailable(0L),
@@ -62,14 +81,17 @@ public final class HookResidencyRuntime {
     };
     private static PackageManager sPackageManager;
     private static volatile PackageUidSource sPackageUidSource;
-    private static boolean sPackageReceiverRegistered;
 
     public static synchronized void attach(Context context) {
         if (context == null) return;
         Context application = context.getApplicationContext();
         Context host = application != null ? application : context;
+        attachPackageUidSource(host);
+        PACKAGE_RECEIVER_REGISTRATION.ensure(() -> registerPackageReceiver(host));
+    }
+
+    private static void attachPackageUidSource(Context host) {
         try {
-            ensurePackageReceiver(host);
             PackageManager packageManager = host.getPackageManager();
             if (packageManager == sPackageManager) return;
             PackageUidSource source = new AndroidPackageUidSource(packageManager);
@@ -81,8 +103,7 @@ public final class HookResidencyRuntime {
         }
     }
 
-    private static void ensurePackageReceiver(Context context) {
-        if (sPackageReceiverRegistered) return;
+    private static void registerPackageReceiver(Context context) {
         IntentFilter filter = new IntentFilter();
         filter.addAction(Intent.ACTION_PACKAGE_ADDED);
         filter.addAction(Intent.ACTION_PACKAGE_REMOVED);
@@ -96,7 +117,6 @@ public final class HookResidencyRuntime {
         } else {
             context.registerReceiver(PACKAGE_CHANGE_RECEIVER, filter);
         }
-        sPackageReceiverRegistered = true;
     }
 
     public static void updateConfig(HookRuntimeConfigState state) {
