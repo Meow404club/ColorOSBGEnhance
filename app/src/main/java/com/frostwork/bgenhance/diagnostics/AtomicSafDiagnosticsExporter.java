@@ -11,7 +11,7 @@ import java.io.SyncFailedException;
 import java.security.MessageDigest;
 import java.util.Locale;
 
-/** Writes, verifies and renames a clearly marked SAF partial document. */
+/** Writes and verifies a SAF document, with optional staged-name commit support. */
 public final class AtomicSafDiagnosticsExporter {
     public static final String MIME_TYPE = "application/json";
     static final int MAX_REPORT_BYTES = 32 * 1_024 * 1_024;
@@ -25,20 +25,18 @@ public final class AtomicSafDiagnosticsExporter {
         return payload != null && payload.length > 0 && payload.length <= MAX_REPORT_BYTES;
     }
 
-    /**
-     * Consumes a .partial URI returned by CreateDocument. The final name appears only on success.
-     */
+    /** Writes a CreateDocument URI and verifies its complete payload before success. */
     public static Result export(
             ContentResolver resolver,
             Uri destinationUri,
-            String expectedPartialDisplayName,
+            String expectedDisplayName,
             byte[] payload) {
         if (resolver == null || destinationUri == null) {
             return Result.failed("invalid_destination", false);
         }
         return export(
                 new AndroidDocumentStore(resolver), destinationUri,
-                expectedPartialDisplayName, payload);
+                expectedDisplayName, payload);
     }
 
     /** Deletes an empty CreateDocument result when the in-memory payload is no longer available. */
@@ -50,12 +48,12 @@ public final class AtomicSafDiagnosticsExporter {
     static Result export(
             DocumentStore store,
             Uri destinationUri,
-            String expectedPartialDisplayName,
+            String expectedDisplayName,
             byte[] payload) {
         if (store == null || destinationUri == null) {
             return Result.failed("invalid_destination", false);
         }
-        String finalDisplayName = finalName(expectedPartialDisplayName);
+        String finalDisplayName = finalName(expectedDisplayName);
         if (finalDisplayName == null) {
             return Result.failed(
                     "invalid_filename", deleteQuietly(store, destinationUri));
@@ -71,13 +69,9 @@ public final class AtomicSafDiagnosticsExporter {
             checkInterrupted();
             failure = "destination_name_unavailable";
             String actualDisplayName = store.displayName(destinationUri);
-            if (!expectedPartialDisplayName.equals(actualDisplayName)) {
+            if (!expectedDisplayName.equals(actualDisplayName)) {
                 failure = "destination_name_changed";
                 throw new IllegalStateException("destination name changed");
-            }
-            failure = "atomic_commit_unsupported";
-            if (!store.supportsRename(destinationUri)) {
-                throw new IllegalStateException("atomic rename unavailable");
             }
             failure = "open_failed";
             try (WriteSession session = store.openForRewrite(destinationUri)) {
@@ -107,6 +101,9 @@ public final class AtomicSafDiagnosticsExporter {
                 throw new IllegalStateException("written report did not verify");
             }
             checkInterrupted();
+            if (expectedDisplayName.equals(finalDisplayName)) {
+                return Result.succeeded(destinationUri, fsyncApplied);
+            }
             failure = "commit_failed";
             Uri committed = store.rename(destinationUri, finalDisplayName);
             if (committed == null) {
@@ -145,12 +142,14 @@ public final class AtomicSafDiagnosticsExporter {
             int marker = partialName.length() - PICKER_PARTIAL_SUFFIX.length();
             if (marker <= 0) return null;
             value = partialName.substring(0, marker) + ".json";
-        } else {
+        } else if (lower.endsWith(PARTIAL_SUFFIX)) {
             int marker = lower.lastIndexOf(PARTIAL_SUFFIX);
             if (marker <= 0 || marker + PARTIAL_SUFFIX.length() != partialName.length()) {
                 return null;
             }
             value = partialName.substring(0, marker);
+        } else {
+            value = partialName;
         }
         if (!value.toLowerCase(Locale.ROOT).endsWith(".json")) return null;
         for (int index = 0; index < value.length(); index++) {
@@ -166,7 +165,6 @@ public final class AtomicSafDiagnosticsExporter {
 
     interface DocumentStore {
         String displayName(Uri document) throws Exception;
-        boolean supportsRename(Uri document) throws Exception;
         WriteSession openForRewrite(Uri document) throws Exception;
         Digest readDigest(Uri document) throws Exception;
         Uri rename(Uri document, String displayName) throws Exception;
@@ -222,20 +220,6 @@ public final class AtomicSafDiagnosticsExporter {
                     null)) {
                 if (cursor == null || !cursor.moveToFirst()) return null;
                 return cursor.getString(0);
-            }
-        }
-
-        @Override
-        public boolean supportsRename(Uri document) throws Exception {
-            try (Cursor cursor = resolver.query(
-                    document,
-                    new String[] { DocumentsContract.Document.COLUMN_FLAGS },
-                    null,
-                    null,
-                    null)) {
-                if (cursor == null || !cursor.moveToFirst()) return false;
-                return (cursor.getLong(0)
-                        & DocumentsContract.Document.FLAG_SUPPORTS_RENAME) != 0L;
             }
         }
 

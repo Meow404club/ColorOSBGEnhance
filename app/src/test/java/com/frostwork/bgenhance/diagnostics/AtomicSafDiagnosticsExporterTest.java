@@ -38,7 +38,7 @@ public final class AtomicSafDiagnosticsExporterTest {
         assertEquals(COMMITTED, result.documentUri);
         assertTrue(result.fsyncApplied);
         assertArrayEquals(REPORT, store.payload);
-        assertEquals("name,flags,open:rwt,write,flush,sync,close,verify,rename",
+        assertEquals("name,open:rwt,write,flush,sync,close,verify,rename",
                 store.operations.toString());
         assertEquals(FINAL_NAME, store.renamedTo);
         assertFalse(store.deleted);
@@ -59,6 +59,22 @@ public final class AtomicSafDiagnosticsExporterTest {
     }
 
     @Test
+    public void finalNameWritesAndVerifiesWithoutRename() {
+        FakeStore store = new FakeStore();
+        store.displayName = FINAL_NAME;
+
+        AtomicSafDiagnosticsExporter.Result result =
+                AtomicSafDiagnosticsExporter.export(
+                        store, DESTINATION, FINAL_NAME, REPORT);
+
+        assertTrue(result.successful());
+        assertEquals(DESTINATION, result.documentUri);
+        assertNull(store.renamedTo);
+        assertEquals("name,open:rwt,write,flush,sync,close,verify",
+                store.operations.toString());
+    }
+
+    @Test
     public void unavailableFsyncUsesVerifiedFallback() {
         FakeStore store = new FakeStore();
         store.syncAvailable = false;
@@ -69,7 +85,7 @@ public final class AtomicSafDiagnosticsExporterTest {
 
         assertTrue(result.successful());
         assertFalse(result.fsyncApplied);
-        assertEquals("name,flags,open:rwt,write,flush,sync,close,verify,rename",
+        assertEquals("name,open:rwt,write,flush,sync,close,verify,rename",
                 store.operations.toString());
     }
 
@@ -101,7 +117,7 @@ public final class AtomicSafDiagnosticsExporterTest {
         assertFalse(result.successful());
         assertEquals("write_failed", result.errorCode);
         assertTrue(result.incompleteDocumentDeleted);
-        assertEquals("name,flags,open:rwt,write,close,delete", store.operations.toString());
+        assertEquals("name,open:rwt,write,close,delete", store.operations.toString());
     }
 
     @Test
@@ -122,7 +138,7 @@ public final class AtomicSafDiagnosticsExporterTest {
 
         assertEquals("verification_failed", result.errorCode);
         assertTrue(result.incompleteDocumentDeleted);
-        assertEquals("name,flags,open:rwt,write,flush,sync,close,verify,delete",
+        assertEquals("name,open:rwt,write,flush,sync,close,verify,delete",
                 store.operations.toString());
     }
 
@@ -228,17 +244,19 @@ public final class AtomicSafDiagnosticsExporterTest {
     }
 
     @Test
-    public void unsupportedRenameIsDeletedBeforeWrite() {
+    public void unsupportedRenameIsDeletedAfterVerifiedWrite() {
         FakeStore store = new FakeStore();
-        store.renameSupported = false;
+        store.renameFails = true;
 
         AtomicSafDiagnosticsExporter.Result result =
                 AtomicSafDiagnosticsExporter.export(
                         store, DESTINATION, PARTIAL_NAME, REPORT);
 
-        assertEquals("atomic_commit_unsupported", result.errorCode);
-        assertEquals("name,flags,delete", store.operations.toString());
-        assertFalse(store.opened);
+        assertEquals("commit_failed", result.errorCode);
+        assertTrue(result.incompleteDocumentDeleted);
+        assertEquals("name,open:rwt,write,flush,sync,close,verify,rename,delete",
+                store.operations.toString());
+        assertTrue(store.opened);
     }
 
     @Test
@@ -255,7 +273,7 @@ public final class AtomicSafDiagnosticsExporterTest {
         assertFalse(result.incompleteDocumentDeleted);
         assertTrue(store.displayName.endsWith(
                 AtomicSafDiagnosticsExporter.PICKER_PARTIAL_SUFFIX));
-        assertEquals("name,flags,open:rwt,write,flush,sync,close,verify,rename,delete",
+        assertEquals("name,open:rwt,write,flush,sync,close,verify,rename,delete",
                 store.operations.toString());
         assertNull(store.renamedTo);
     }
@@ -272,7 +290,7 @@ public final class AtomicSafDiagnosticsExporterTest {
         assertTrue(result.successful());
         assertEquals(COMMITTED, result.documentUri);
         assertFalse(store.deleted);
-        assertEquals("name,flags,open:rwt,write,flush,sync,close,verify,rename",
+        assertEquals("name,open:rwt,write,flush,sync,close,verify,rename",
                 store.operations.toString());
     }
 
@@ -300,7 +318,6 @@ public final class AtomicSafDiagnosticsExporterTest {
         boolean deleteSucceeds = true;
         boolean deleted;
         boolean opened;
-        boolean renameSupported = true;
         boolean renameFails;
         FailureStage failureStage = FailureStage.NONE;
         String displayName = PARTIAL_NAME;
@@ -313,12 +330,6 @@ public final class AtomicSafDiagnosticsExporterTest {
         public String displayName(Uri document) {
             append("name");
             return displayName;
-        }
-
-        @Override
-        public boolean supportsRename(Uri document) {
-            append("flags");
-            return renameSupported;
         }
 
         @Override

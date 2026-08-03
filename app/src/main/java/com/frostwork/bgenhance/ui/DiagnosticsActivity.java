@@ -370,10 +370,6 @@ public final class DiagnosticsActivity extends AppCompatActivity {
                 && !completion.incompleteDocumentDeleted) {
             Toast.makeText(this, R.string.diagnostics_full_export_partial_remains,
                     Toast.LENGTH_LONG).show();
-        } else if ("atomic_commit_unsupported".equals(completion.errorCode)) {
-            Toast.makeText(this,
-                    R.string.diagnostics_full_export_location_unsupported,
-                    Toast.LENGTH_LONG).show();
         } else if ("destination_name_changed".equals(completion.errorCode)) {
             Toast.makeText(this, R.string.diagnostics_full_export_name_changed,
                     Toast.LENGTH_LONG).show();
