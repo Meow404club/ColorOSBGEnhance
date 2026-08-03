@@ -430,6 +430,11 @@ public final class DiagnosticsActivityLayoutTest {
         for (int index = 0; index < group.getChildCount(); index++) {
             TextView button = (TextView) group.getChildAt(index);
             assertEquals(segmentHeight, button.getMeasuredHeight());
+            assertEquals(TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM,
+                    button.getAutoSizeTextType());
+            assertTrue(button.getAutoSizeMinTextSize() > 0);
+            assertTrue(button.getAutoSizeMaxTextSize()
+                    > button.getAutoSizeMinTextSize());
             assertNotNull(button.getLayout());
             assertTrue(button.getLayout().getLineCount() <= 2);
             for (int line = 0; line < button.getLayout().getLineCount(); line++) {
