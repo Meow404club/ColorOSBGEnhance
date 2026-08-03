@@ -7,13 +7,13 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="18dp">
+        android:padding="@dimen/card_padding">
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="@string/residency_refreeze_title"
-            android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" />
+            android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.CardTitle" />
 
         <TextView
             android:layout_width="match_parent"
@@ -31,24 +31,24 @@
             android:orientation="vertical">
 
             <com.google.android.material.radiobutton.MaterialRadioButton
+                style="@style/Widget.ColorOSBgEnhance.RadioOption"
                 android:id="@+id/residency_refreeze_system"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:minHeight="52dp"
                 android:text="@string/residency_refreeze_system" />
 
             <com.google.android.material.radiobutton.MaterialRadioButton
+                style="@style/Widget.ColorOSBgEnhance.RadioOption"
                 android:id="@+id/residency_refreeze_after_wake"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:minHeight="52dp"
                 android:text="@string/residency_refreeze_after_wake" />
 
             <com.google.android.material.radiobutton.MaterialRadioButton
+                style="@style/Widget.ColorOSBgEnhance.RadioOption"
                 android:id="@+id/residency_refreeze_disabled"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:minHeight="52dp"
                 android:text="@string/residency_refreeze_disabled" />
         </RadioGroup>
 
@@ -61,7 +61,7 @@
             android:visibility="gone">
 
             <com.google.android.material.textfield.TextInputLayout
-                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                style="@style/Widget.ColorOSBgEnhance.InputField"
                 android:id="@+id/residency_refreeze_default_layout"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -75,7 +75,7 @@
             </com.google.android.material.textfield.TextInputLayout>
 
             <com.google.android.material.textfield.TextInputLayout
-                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                style="@style/Widget.ColorOSBgEnhance.InputField"
                 android:id="@+id/residency_refreeze_packet_layout"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -90,7 +90,7 @@
             </com.google.android.material.textfield.TextInputLayout>
 
             <com.google.android.material.textfield.TextInputLayout
-                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                style="@style/Widget.ColorOSBgEnhance.InputField"
                 android:id="@+id/residency_refreeze_alarm_layout"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -105,7 +105,7 @@
             </com.google.android.material.textfield.TextInputLayout>
 
             <com.google.android.material.textfield.TextInputLayout
-                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                style="@style/Widget.ColorOSBgEnhance.InputField"
                 android:id="@+id/residency_refreeze_binder_layout"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -120,7 +120,7 @@
             </com.google.android.material.textfield.TextInputLayout>
 
             <com.google.android.material.textfield.TextInputLayout
-                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                style="@style/Widget.ColorOSBgEnhance.InputField"
                 android:id="@+id/residency_refreeze_service_layout"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -135,7 +135,7 @@
             </com.google.android.material.textfield.TextInputLayout>
 
             <com.google.android.material.textfield.TextInputLayout
-                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                style="@style/Widget.ColorOSBgEnhance.InputField"
                 android:id="@+id/residency_refreeze_broadcast_layout"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -150,7 +150,7 @@
             </com.google.android.material.textfield.TextInputLayout>
 
             <com.google.android.material.textfield.TextInputLayout
-                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                style="@style/Widget.ColorOSBgEnhance.InputField"
                 android:id="@+id/residency_refreeze_job_layout"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

@@ -25,12 +25,10 @@ public final class ResidencyAppsAdapter
 
     private final ResidencyAppIconLoader iconLoader;
     private final Listener listener;
-    private final boolean picker;
     private List<ResidencyAppItem> items = new ArrayList<>();
 
-    public ResidencyAppsAdapter(Context context, boolean picker, Listener listener) {
+    public ResidencyAppsAdapter(Context context, Listener listener) {
         this.iconLoader = new ResidencyAppIconLoader(context);
-        this.picker = picker;
         this.listener = Objects.requireNonNull(listener, "listener");
     }
 
@@ -51,7 +49,7 @@ public final class ResidencyAppsAdapter
 
     @Override
     public void onBindViewHolder(@NonNull AppViewHolder holder, int position) {
-        holder.bind(items.get(position));
+        holder.bind(items.get(position), position == items.size() - 1);
     }
 
     @Override
@@ -75,6 +73,7 @@ public final class ResidencyAppsAdapter
         private final TextView name;
         private final TextView packageName;
         private final TextView status;
+        private final View divider;
 
         AppViewHolder(View itemView) {
             super(itemView);
@@ -82,19 +81,21 @@ public final class ResidencyAppsAdapter
             name = itemView.findViewById(R.id.residency_app_name);
             packageName = itemView.findViewById(R.id.residency_app_package);
             status = itemView.findViewById(R.id.residency_app_status);
+            divider = itemView.findViewById(R.id.residency_app_divider);
         }
 
-        void bind(ResidencyAppItem item) {
+        void bind(ResidencyAppItem item, boolean last) {
             Context context = itemView.getContext();
             name.setText(item.label());
             packageName.setText(item.packageName());
             iconLoader.bind(icon, item.packageName());
             String statusText = statusText(context, item);
             status.setText(statusText);
-            boolean visuallyRestricted = picker && item.safety().isRestricted();
-            itemView.setAlpha(visuallyRestricted ? 0.58f : 1f);
+            itemView.setAlpha(1f);
+            divider.setVisibility(last ? View.GONE : View.VISIBLE);
             itemView.setContentDescription(context.getString(
-                    R.string.residency_app_content_description, item.label(), statusText));
+                    R.string.residency_app_content_description,
+                    item.label(), item.packageName(), statusText));
             itemView.setOnClickListener(view -> listener.onAppSelected(item));
         }
     }
@@ -134,7 +135,9 @@ public final class ResidencyAppsAdapter
         public boolean areContentsTheSame(int oldPosition, int newPosition) {
             ResidencyAppItem oldItem = oldItems.get(oldPosition);
             ResidencyAppItem newItem = newItems.get(newPosition);
-            return oldItem.label().equals(newItem.label())
+            return (oldPosition == oldItems.size() - 1)
+                            == (newPosition == newItems.size() - 1)
+                    && oldItem.label().equals(newItem.label())
                     && oldItem.installed() == newItem.installed()
                     && oldItem.systemApp() == newItem.systemApp()
                     && oldItem.launchable() == newItem.launchable()

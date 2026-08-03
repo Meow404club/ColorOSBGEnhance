@@ -2,14 +2,15 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="@color/page_bg">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="horizontal"
-        android:paddingStart="16dp"
-        android:paddingEnd="16dp">
+        android:paddingStart="@dimen/screen_horizontal"
+        android:paddingEnd="@dimen/screen_horizontal">
 
         <ScrollView
             android:layout_width="0dp"
@@ -54,19 +55,21 @@
                     android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
 
                 <com.google.android.material.textfield.TextInputLayout
-                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    style="@style/Widget.ColorOSBgEnhance.SearchField"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:hint="@string/residency_search_hint"
                     app:startIconDrawable="@drawable/ic_residency_search">
 
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/residency_search"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        android:hint="@string/residency_search_hint"
                         android:imeOptions="actionDone"
                         android:inputType="text"
-                        android:maxLines="1" />
+                        android:maxLines="1"
+                        android:minHeight="@dimen/field_min_height"
+                        android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Option" />
                 </com.google.android.material.textfield.TextInputLayout>
 
                 <com.google.android.material.card.MaterialCardView
@@ -75,9 +78,14 @@
                     android:layout_marginTop="8dp">
 
                     <LinearLayout
+                        android:id="@+id/residency_show_system_row"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:foreground="?attr/selectableItemBackground"
                         android:gravity="center_vertical"
+                        android:importantForAccessibility="no"
                         android:orientation="horizontal"
                         android:paddingStart="14dp"
                         android:paddingTop="10dp"
@@ -93,6 +101,7 @@
                             android:paddingEnd="8dp">
 
                             <TextView
+                                android:id="@+id/residency_show_system_title"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:text="@string/residency_show_system_apps"
@@ -114,18 +123,25 @@
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
-                <com.google.android.material.textfield.TextInputLayout
-                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                <TextView
+                    android:id="@+id/residency_availability_filter_label"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:hint="@string/residency_filter_availability_hint">
+                    android:layout_marginTop="12dp"
+                    android:text="@string/residency_filter_availability_hint"
+                    android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" />
 
-                    <com.google.android.material.textfield.MaterialAutoCompleteTextView
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Widget.ColorOSBgEnhance.Dropdown"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp">
+
+                <com.frostwork.bgenhance.ui.residency.CenteredDropdownTextView
+                        style="@style/Widget.ColorOSBgEnhance.DropdownValue"
                         android:id="@+id/residency_availability_filter"
                         android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:inputType="none" />
+                        android:layout_height="wrap_content" />
                 </com.google.android.material.textfield.TextInputLayout>
             </LinearLayout>
         </ScrollView>
@@ -145,16 +161,23 @@
 
             <TextView
                 android:id="@+id/residency_result_count"
+                android:accessibilityLiveRegion="polite"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:layout_marginBottom="6dp"
-                android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
+                android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SectionLabel" />
 
-            <FrameLayout
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/residency_list_surface"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
+                android:layout_marginBottom="16dp"
                 android:layout_weight="1">
+
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent">
 
                 <androidx.recyclerview.widget.RecyclerView
                     android:id="@+id/residency_app_list"
@@ -265,7 +288,8 @@
                             android:text="@string/residency_retry" />
                     </LinearLayout>
                 </ScrollView>
-            </FrameLayout>
+                </FrameLayout>
+            </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
     </LinearLayout>
 </FrameLayout>

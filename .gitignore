@@ -19,6 +19,7 @@ keystore.properties
 # Generated packages and reports
 /dist/
 /out/
+/.test-output/
 *.apk
 *.aab
 *.apks

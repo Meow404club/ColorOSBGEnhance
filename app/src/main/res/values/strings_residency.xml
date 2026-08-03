@@ -13,7 +13,7 @@
     <string name="residency_search_hint">搜索应用名称或包名</string>
     <string name="residency_filter_mode_hint">模式</string>
     <string name="residency_filter_status_hint">状态</string>
-    <string name="residency_filter_availability_hint">可配置状态</string>
+    <string name="residency_filter_availability_hint">可配置</string>
     <string name="residency_show_system_apps">显示系统应用</string>
     <string name="residency_show_system_apps_summary">系统应用中包含重要组件，不能更改的项目会明确标出</string>
     <string name="residency_add_app">添加应用</string>
@@ -200,7 +200,7 @@
     <string name="residency_error_save">设置未能保存，请稍后重试</string>
     <string name="residency_error_verify">设置已写入但未能确认，请重新打开此页面检查</string>
 
-    <string name="residency_app_content_description">%1$s，%2$s</string>
+    <string name="residency_app_content_description">%1$s，%2$s，%3$s</string>
     <string name="residency_mode_accessibility">%1$s。%2$s。%3$s</string>
     <string name="residency_mode_selected">已选择</string>
     <string name="residency_mode_not_selected">未选择</string>

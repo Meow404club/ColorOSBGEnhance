@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.textview.MaterialTextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/text1"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_residency_dropdown_item"
+    android:gravity="center"
+    android:includeFontPadding="false"
+    android:minHeight="@dimen/field_min_height"
+    android:paddingStart="18dp"
+    android:paddingEnd="18dp"
+    android:textAlignment="center"
+    android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.DropdownOption" />

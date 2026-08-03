@@ -28,8 +28,8 @@ import com.google.android.material.button.MaterialButton;
 import com.google.android.material.button.MaterialButtonToggleGroup;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.materialswitch.MaterialSwitch;
-import com.google.android.material.radiobutton.MaterialRadioButton;
 import com.google.android.material.snackbar.Snackbar;
+import com.google.android.material.textfield.MaterialAutoCompleteTextView;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
 import java.util.EnumSet;
@@ -62,6 +62,8 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
     private TextView highRiskSummary;
     private TextView experimentalRiskSummary;
     private TextView applyNotice;
+    private TextView modeSummary;
+    private MaterialAutoCompleteTextView modeSelector;
     private MaterialSwitch enabledSwitch;
     private MaterialButton saveButton;
     private MaterialButton deleteButton;
@@ -139,6 +141,8 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
         experimentalRiskSummary = findViewById(
                 R.id.residency_risk_experimental_summary);
         applyNotice = findViewById(R.id.residency_policy_apply_notice);
+        modeSummary = findViewById(R.id.residency_mode_selected_summary);
+        modeSelector = findViewById(R.id.residency_mode_selector);
         enabledSwitch = findViewById(R.id.residency_policy_enabled);
         saveButton = findViewById(R.id.residency_policy_save);
         deleteButton = findViewById(R.id.residency_policy_delete);
@@ -150,27 +154,14 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
         findViewById(R.id.residency_policy_retry).setOnClickListener(view -> viewModel.load());
         saveButton.setOnClickListener(view -> save());
         deleteButton.setOnClickListener(view -> confirmDelete());
+        findViewById(R.id.residency_policy_enabled_row).setOnClickListener(view -> {
+            if (enabledSwitch.isEnabled()) enabledSwitch.toggle();
+        });
 
-        bindModeRow(
-                R.id.residency_mode_system_row,
-                R.id.residency_mode_system,
-                ResidencyMode.SYSTEM);
-        bindModeRow(
-                R.id.residency_mode_balanced_row,
-                R.id.residency_mode_balanced,
-                ResidencyMode.BALANCED);
-        bindModeRow(
-                R.id.residency_mode_low_power_row,
-                R.id.residency_mode_low_power,
-                ResidencyMode.LOW_POWER);
-        bindModeRow(
-                R.id.residency_mode_active_row,
-                R.id.residency_mode_active,
-                ResidencyMode.ACTIVE);
-        bindModeRow(
-                R.id.residency_mode_custom_row,
-                R.id.residency_mode_custom,
-                ResidencyMode.CUSTOM);
+        String[] modes = getResources().getStringArray(R.array.residency_policy_modes);
+        ResidencyDropdowns.setItems(modeSelector, modes);
+        modeSelector.setOnItemClickListener((parent, view, position, id) ->
+                selectMode(ResidencyMode.values()[position]));
 
         ((MaterialSwitch) findViewById(R.id.residency_freeze_custom_timing))
                 .setOnCheckedChangeListener((button, checked) ->
@@ -190,19 +181,6 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
                         findViewById(R.id.residency_refreeze_fields).setVisibility(
                                 checkedId == R.id.residency_refreeze_after_wake
                                         ? View.VISIBLE : View.GONE));
-    }
-
-    private void bindModeRow(
-            int rowId,
-            int buttonId,
-            ResidencyMode mode) {
-        View row = findViewById(rowId);
-        MaterialRadioButton button = findViewById(buttonId);
-        View.OnClickListener listener = view -> selectMode(mode);
-        row.setOnClickListener(listener);
-        button.setOnClickListener(listener);
-        button.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        button.setFocusable(false);
     }
 
     private void render(ResidencyPolicyViewModel.State state) {
@@ -360,56 +338,28 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
 
     private void selectMode(ResidencyMode mode) {
         selectedMode = mode;
-        setRadioChecked(R.id.residency_mode_system, mode == ResidencyMode.SYSTEM);
-        setRadioChecked(R.id.residency_mode_balanced, mode == ResidencyMode.BALANCED);
-        setRadioChecked(R.id.residency_mode_low_power, mode == ResidencyMode.LOW_POWER);
-        setRadioChecked(R.id.residency_mode_active, mode == ResidencyMode.ACTIVE);
-        setRadioChecked(R.id.residency_mode_custom, mode == ResidencyMode.CUSTOM);
+        String[] labels = getResources().getStringArray(R.array.residency_policy_modes);
+        modeSelector.setText(labels[mode.ordinal()], false);
+        int summary = modeSummaryResource(mode);
+        modeSummary.setText(summary);
+        modeSelector.setContentDescription(getString(
+                R.string.residency_mode_accessibility,
+                labels[mode.ordinal()],
+                getString(summary),
+                getString(R.string.residency_mode_selected)));
         customSection.setVisibility(mode == ResidencyMode.CUSTOM ? View.VISIBLE : View.GONE);
-        updateModeAccessibility();
         updateRiskNotices(mode);
     }
 
-    private void updateModeAccessibility() {
-        updateModeAccessibility(
-                R.id.residency_mode_system_row,
-                ResidencyMode.SYSTEM,
-                R.string.residency_mode_system,
-                R.string.residency_mode_system_summary);
-        updateModeAccessibility(
-                R.id.residency_mode_balanced_row,
-                ResidencyMode.BALANCED,
-                R.string.residency_mode_balanced,
-                R.string.residency_mode_balanced_summary);
-        updateModeAccessibility(
-                R.id.residency_mode_low_power_row,
-                ResidencyMode.LOW_POWER,
-                R.string.residency_mode_low_power,
-                R.string.residency_mode_low_power_summary);
-        updateModeAccessibility(
-                R.id.residency_mode_active_row,
-                ResidencyMode.ACTIVE,
-                R.string.residency_mode_active,
-                R.string.residency_mode_active_summary);
-        updateModeAccessibility(
-                R.id.residency_mode_custom_row,
-                ResidencyMode.CUSTOM,
-                R.string.residency_mode_custom,
-                R.string.residency_mode_custom_summary);
-    }
-
-    private void updateModeAccessibility(
-            int rowId, ResidencyMode mode, int titleResource, int summaryResource) {
-        boolean selected = selectedMode == mode;
-        View row = findViewById(rowId);
-        row.setSelected(selected);
-        row.setContentDescription(getString(
-                R.string.residency_mode_accessibility,
-                getString(titleResource),
-                getString(summaryResource),
-                getString(selected
-                        ? R.string.residency_mode_selected
-                        : R.string.residency_mode_not_selected)));
+    private static int modeSummaryResource(ResidencyMode mode) {
+        switch (mode) {
+            case SYSTEM: return R.string.residency_mode_system_summary;
+            case BALANCED: return R.string.residency_mode_balanced_summary;
+            case LOW_POWER: return R.string.residency_mode_low_power_summary;
+            case ACTIVE: return R.string.residency_mode_active_summary;
+            case CUSTOM: return R.string.residency_mode_custom_summary;
+            default: throw new AssertionError(mode);
+        }
     }
 
     private void updateRiskNotices(ResidencyMode mode) {
@@ -641,19 +591,7 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
     }
 
     private void setModeControlsEnabled(boolean enabled) {
-        int[] rows = {
-                R.id.residency_mode_system_row,
-                R.id.residency_mode_balanced_row,
-                R.id.residency_mode_low_power_row,
-                R.id.residency_mode_active_row,
-                R.id.residency_mode_custom_row,
-                R.id.residency_mode_system,
-                R.id.residency_mode_balanced,
-                R.id.residency_mode_low_power,
-                R.id.residency_mode_active,
-                R.id.residency_mode_custom
-        };
-        for (int id : rows) findViewById(id).setEnabled(enabled);
+        modeSelector.setEnabled(enabled);
     }
 
     private static void setEnabledRecursively(View view, boolean enabled) {
@@ -719,10 +657,6 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
 
     private boolean isChecked(int id) {
         return ((MaterialSwitch) findViewById(id)).isChecked();
-    }
-
-    private void setRadioChecked(int id, boolean checked) {
-        ((MaterialRadioButton) findViewById(id)).setChecked(checked);
     }
 
     private void setDelay(int id, long milliseconds) {

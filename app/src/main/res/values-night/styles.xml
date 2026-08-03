@@ -8,10 +8,26 @@
         <item name="android:windowLightStatusBar">false</item>
         <item name="colorPrimary">@color/brand</item>
         <item name="colorOnPrimary">#FF102A52</item>
+        <item name="colorPrimaryContainer">@color/brand_soft</item>
+        <item name="colorOnPrimaryContainer">@color/item_title</item>
         <item name="colorSecondary">@color/brand</item>
+        <item name="colorSecondaryContainer">@color/brand_soft</item>
+        <item name="colorOnSecondaryContainer">@color/item_title</item>
         <item name="colorSurface">@color/card_bg</item>
+        <item name="colorSurfaceContainerLowest">@color/page_bg</item>
+        <item name="colorSurfaceContainerLow">@color/card_bg</item>
+        <item name="colorSurfaceContainer">@color/card_bg</item>
+        <item name="colorSurfaceContainerHigh">@color/field_bg</item>
+        <item name="colorSurfaceContainerHighest">@color/chip_neutral</item>
         <item name="colorOnSurface">@color/item_title</item>
+        <item name="colorSurfaceVariant">@color/field_bg</item>
+        <item name="colorOnSurfaceVariant">@color/item_summary</item>
+        <item name="colorOutline">@color/item_summary</item>
+        <item name="colorOutlineVariant">@color/divider</item>
+        <item name="colorError">@color/error</item>
+        <item name="colorOnError">#FF4F0008</item>
         <item name="android:textColorPrimary">@color/title_text</item>
         <item name="materialCardViewStyle">@style/Widget.ColorOSBgEnhance.Card</item>
+        <item name="materialSwitchStyle">@style/Widget.ColorOSBgEnhance.MaterialSwitch</item>
     </style>
 </resources>

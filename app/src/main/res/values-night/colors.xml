@@ -8,6 +8,8 @@
     <color name="divider">#FF303139</color>
     <color name="brand">#FF9EC1FF</color>
     <color name="brand_soft">#FF243956</color>
+    <color name="field_bg">#FF292A31</color>
+    <color name="dropdown_ripple">#339EC1FF</color>
     <color name="success">#FF72D69C</color>
     <color name="warning">#FFFFC267</color>
     <color name="error">#FFFF8A8A</color>
