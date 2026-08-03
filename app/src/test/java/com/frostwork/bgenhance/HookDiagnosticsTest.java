@@ -72,6 +72,7 @@ public final class HookDiagnosticsTest {
     public void tearDown() throws Exception {
         resetHookDiagnostics();
         setStaticField(HookConfig.class, "sResolver", null);
+        setStaticField(HookConfig.class, "sContext", null);
     }
 
     @Test
@@ -182,6 +183,43 @@ public final class HookDiagnosticsTest {
         assertEquals(0, outboxSize());
         assertEquals(1L, nextBatchSequence());
         assertNull(staticValue(HookDiagnostics.class, "sInFlight"));
+    }
+
+    @Test
+    public void lockedUserDefersProviderResolutionWithoutLosingPendingState()
+            throws Exception {
+        setUserUnlocked(false);
+        HookDiagnostics.recordEventFromLockedPath(event(1), DiagnosticsResult.PASSED);
+
+        flushSnapshot();
+
+        assertTrue(provider.methods.isEmpty());
+        assertEquals("user_locked", transportError());
+        assertEquals(2, pendingItemCount());
+        assertEquals(-1L, epoch());
+
+        setUserUnlocked(true);
+        flushSnapshot();
+
+        assertEquals(List.of(BridgeContract.METHOD_PING), provider.methods);
+        assertEquals(2, pendingItemCount());
+    }
+
+    @Test
+    public void unlockProbeFailureAlsoAvoidsProviderResolution() throws Exception {
+        setStaticField(
+                HookDiagnostics.class,
+                "sUserUnlockProbe",
+                (HookDiagnostics.UserUnlockProbe) () -> {
+                    throw new IllegalStateException("user service unavailable");
+                });
+        HookDiagnostics.recordEventFromLockedPath(event(1), DiagnosticsResult.PASSED);
+
+        flushSnapshot();
+
+        assertTrue(provider.methods.isEmpty());
+        assertEquals("user_unlock_state_unavailable", transportError());
+        assertEquals(2, pendingItemCount());
     }
 
     @Test
@@ -528,6 +566,17 @@ public final class HookDiagnosticsTest {
         return (long) staticValue(HookDiagnostics.class, "sEpoch");
     }
 
+    private static String transportError() throws Exception {
+        return (String) staticValue(HookDiagnostics.class, "sTransportError");
+    }
+
+    private static void setUserUnlocked(boolean unlocked) throws Exception {
+        setStaticField(
+                HookDiagnostics.class,
+                "sUserUnlockProbe",
+                (HookDiagnostics.UserUnlockProbe) () -> unlocked);
+    }
+
     private static long nextBatchSequence() throws Exception {
         return (long) staticValue(HookDiagnostics.class, "sNextBatchSequence");
     }
@@ -629,6 +678,7 @@ public final class HookDiagnosticsTest {
         setStaticField(HookDiagnostics.class, "sInFlight", null);
         setStaticField(HookDiagnostics.class, "sTransportError", "");
         setStaticField(HookDiagnostics.class, "sLastTransportLogAt", 0L);
+        setUserUnlocked(true);
     }
 
     private static void clearMap(String fieldName) throws Exception {
@@ -667,6 +717,7 @@ public final class HookDiagnosticsTest {
 
     private static final class RecordingProvider extends ContentProvider {
         final List<Bundle> requests = new ArrayList<>();
+        final List<String> methods = new ArrayList<>();
         final ArrayDeque<Function<Bundle, Bundle>> responses = new ArrayDeque<>();
 
         void enqueue(Function<Bundle, Bundle> response) {
@@ -680,6 +731,7 @@ public final class HookDiagnosticsTest {
 
         @Override
         public Bundle call(String method, String arg, Bundle extras) {
+            methods.add(method);
             if (!BridgeContract.METHOD_REPORT_BATCH.equals(method)) return null;
             requests.add(extras);
             Function<Bundle, Bundle> response = responses.pollFirst();

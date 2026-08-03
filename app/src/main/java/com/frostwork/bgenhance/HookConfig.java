@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.os.UserManager;
 import android.util.Log;
 import com.frostwork.bgenhance.residency.config.GlobalFeatureConfig;
 import com.frostwork.bgenhance.residency.config.RuntimeConfigCodec;
@@ -46,6 +47,7 @@ public final class HookConfig {
     private static volatile XposedModule sModule;
     private static volatile RemotePreferencesConnection sRemoteConnection;
     private static volatile ContentResolver sResolver;
+    private static volatile Context sContext;
     private static volatile String sPackageName = "";
     private static volatile String sProcessName = "";
     private static volatile String sProcessId = "unknown";
@@ -85,6 +87,7 @@ public final class HookConfig {
         if (context == null) return;
         Context app = context.getApplicationContext();
         Context resolverContext = app != null ? app : context;
+        sContext = resolverContext;
         try {
             sResolver = resolverContext.getContentResolver();
         } catch (Throwable t) {
@@ -101,6 +104,18 @@ public final class HookConfig {
     public static ContentResolver resolver() {
         ensureContext();
         return sResolver;
+    }
+
+    public static boolean isUserUnlocked() {
+        ensureContext();
+        Context context = sContext;
+        if (context == null) return false;
+        try {
+            UserManager userManager = context.getSystemService(UserManager.class);
+            return userManager != null && userManager.isUserUnlocked();
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     public static boolean isReady() {

@@ -44,6 +44,10 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class HookDiagnostics {
     private HookDiagnostics() {}
 
+    interface UserUnlockProbe {
+        boolean isUserUnlocked();
+    }
+
     private static final long FLUSH_INTERVAL_MS = 5_000L;
     private static final int MAX_PENDING_RAW_HITS = 512;
     private static final int MAX_PENDING_NORMALIZED_EVENTS = 512;
@@ -83,6 +87,7 @@ public final class HookDiagnostics {
     private static long sScheduledFlushDeadlineNanos = Long.MAX_VALUE;
     private static volatile String sTransportError = "";
     private static volatile long sLastTransportLogAt;
+    private static volatile UserUnlockProbe sUserUnlockProbe = HookConfig::isUserUnlocked;
 
     static {
         EXECUTOR.setRemoveOnCancelPolicy(true);
@@ -416,6 +421,7 @@ public final class HookDiagnostics {
     }
 
     private static Bundle callProvider(String method, Bundle extras) {
+        if (!isUserUnlockedForDiagnostics()) return null;
         ContentResolver resolver = HookConfig.resolver();
         if (resolver == null) {
             sTransportError = "diagnostics_context_unavailable";
@@ -428,6 +434,16 @@ public final class HookDiagnostics {
             logTransportFailure(method, error);
             return null;
         }
+    }
+
+    private static boolean isUserUnlockedForDiagnostics() {
+        try {
+            if (sUserUnlockProbe.isUserUnlocked()) return true;
+            sTransportError = "user_locked";
+        } catch (Throwable ignored) {
+            sTransportError = "user_unlock_state_unavailable";
+        }
+        return false;
     }
 
     private static List<DiagnosticsHookState> stickyStates(String processId) {
