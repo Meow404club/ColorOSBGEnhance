@@ -435,7 +435,34 @@ public final class DiagnosticsProviderControllerTest {
     }
 
     @Test
-    public void ambiguousHookUidFailsClosed() {
+    public void sharedSystemUidAcceptsBothHookProcessIdentities() {
+        AtomicInteger calls = new AtomicInteger();
+        DiagnosticsProviderController controller = new DiagnosticsProviderController(
+                MODULE_UID, SYSTEM_UID, SYSTEM_UID, "boot", () -> EPOCH,
+                batch -> {
+                    calls.incrementAndGet();
+                    return CompletableFuture.completedFuture(accepted(batch.size()));
+                },
+                new DiagnosticsWireParser());
+
+        Bundle system = controller.handle(
+                SYSTEM_UID,
+                BridgeContract.METHOD_REPORT_BATCH,
+                DiagnosticsWireEncoder.encodeTyped(batch(
+                        BridgeContract.PROCESS_SYSTEM_SERVER, "boot", EPOCH, 10L)));
+        Bundle athena = controller.handle(
+                SYSTEM_UID,
+                BridgeContract.METHOD_REPORT_BATCH,
+                DiagnosticsWireEncoder.encodeTyped(batch(
+                        BridgeContract.PROCESS_ATHENA, "boot", EPOCH, 11L)));
+
+        assertEquals(2, calls.get());
+        assertTrue(system.getBoolean(BridgeContract.EXTRA_OK));
+        assertTrue(athena.getBoolean(BridgeContract.EXTRA_OK));
+    }
+
+    @Test
+    public void sharedSystemUidStillRejectsUnknownProcessIdentity() {
         AtomicInteger calls = new AtomicInteger();
         DiagnosticsProviderController controller = new DiagnosticsProviderController(
                 MODULE_UID, SYSTEM_UID, SYSTEM_UID, "boot", () -> EPOCH,
@@ -449,7 +476,7 @@ public final class DiagnosticsProviderControllerTest {
                 SYSTEM_UID,
                 BridgeContract.METHOD_REPORT_BATCH,
                 DiagnosticsWireEncoder.encodeTyped(batch(
-                        BridgeContract.PROCESS_SYSTEM_SERVER, "boot", EPOCH, 10L)));
+                        "unknown_process", "boot", EPOCH, 12L)));
 
         assertEquals(0, calls.get());
         assertRejectedIdentity(response, 1);

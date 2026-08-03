@@ -90,8 +90,7 @@ final class DiagnosticsProviderController {
             out.putString(BridgeContract.EXTRA_ERROR, "unsupported_bridge_method");
             return out;
         }
-        String expectedProcessId = reportProcessIdForCaller(callerUid);
-        if (expectedProcessId == null) {
+        if (!canReportHookBatch(callerUid)) {
             return rejectedBatch(epoch, "sender_identity_mismatch", 1);
         }
         if (!ready(epoch) || extras == null) {
@@ -104,7 +103,7 @@ final class DiagnosticsProviderController {
             return rejectedBatch(epoch, parsed.errorCode, parsed.droppedItems);
         }
         DiagnosticsWriteBatch.BatchIdentity identity = parsed.batch.batchIdentity;
-        if (identity == null || !expectedProcessId.equals(identity.processId)) {
+        if (identity == null || !processIdMatchesCaller(callerUid, identity.processId)) {
             return rejectedBatch(epoch, "sender_identity_mismatch", parsed.acceptedItems);
         }
         if (!currentBootId.equals(identity.bootId)) {
@@ -163,14 +162,23 @@ final class DiagnosticsProviderController {
                 || (athenaUid >= 0 && uid == athenaUid));
     }
 
-    private String reportProcessIdForCaller(int uid) {
-        if (uid < 0 || uid == moduleUid) return null;
+    private boolean canReportHookBatch(int uid) {
+        return uid >= 0 && uid != moduleUid
+                && (uid == systemUid || (athenaUid >= 0 && uid == athenaUid));
+    }
+
+    private boolean processIdMatchesCaller(int uid, String processId) {
+        if (!canReportHookBatch(uid)) return false;
         boolean isSystem = systemUid >= 0 && uid == systemUid;
         boolean isAthena = athenaUid >= 0 && uid == athenaUid;
-        if (isSystem == isAthena) return null;
+        // Athena can run under the system UID, which Binder cannot disambiguate further.
+        if (isSystem && isAthena) {
+            return BridgeContract.PROCESS_SYSTEM_SERVER.equals(processId)
+                    || BridgeContract.PROCESS_ATHENA.equals(processId);
+        }
         return isSystem
-                ? BridgeContract.PROCESS_SYSTEM_SERVER
-                : BridgeContract.PROCESS_ATHENA;
+                ? BridgeContract.PROCESS_SYSTEM_SERVER.equals(processId)
+                : BridgeContract.PROCESS_ATHENA.equals(processId);
     }
 
     private void enforceAllowedCaller(int uid) {
