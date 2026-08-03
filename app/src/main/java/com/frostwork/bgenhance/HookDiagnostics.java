@@ -49,9 +49,18 @@ public final class HookDiagnostics {
         boolean isUserUnlocked();
     }
 
-    private static final long FLUSH_INTERVAL_MS = 5_000L;
-    private static final int MAX_PENDING_RAW_HITS = 512;
-    private static final int MAX_PENDING_NORMALIZED_EVENTS = 512;
+    private static final long PERIODIC_FLUSH_INTERVAL_MS = TimeUnit.MINUTES.toMillis(5L);
+    private static final long FLUSH_PROBE_INTERVAL_MS = TimeUnit.SECONDS.toMillis(5L);
+    private static final long INITIAL_TRANSPORT_RETRY_INTERVAL_MS =
+            TimeUnit.SECONDS.toMillis(15L);
+    private static final long MAX_TRANSPORT_RETRY_INTERVAL_MS =
+            PERIODIC_FLUSH_INTERVAL_MS;
+    private static final long DRAIN_CONTINUATION_DELAY_MS = 1_000L;
+    private static final long MAX_DRAIN_START_WINDOW_MS = 2_000L;
+    private static final int MAX_BATCHES_PER_DRAIN = 8;
+    private static final int PENDING_QUEUE_HIGH_WATERMARK = 256;
+    private static final int MAX_PENDING_RAW_HITS = 2_048;
+    private static final int MAX_PENDING_NORMALIZED_EVENTS = 2_048;
     private static final int MAX_OUTBOX_CAS_ATTEMPTS = 32;
     private static final int MAX_STICKY_STATES = 64;
     private static final Object FLUSH_SCHEDULE_LOCK = new Object();
@@ -88,17 +97,17 @@ public final class HookDiagnostics {
     private static ScheduledFuture<?> sScheduledFlush;
     private static long sScheduledFlushDeadlineNanos = Long.MAX_VALUE;
     private static volatile String sTransportError = "";
+    private static volatile long sTransportRetryDelayMs = INITIAL_TRANSPORT_RETRY_INTERVAL_MS;
+    private static volatile long sTransportRetryNotBeforeNanos;
+    private static volatile long sLastEventBatchAt = SystemClock.elapsedRealtime();
+    private static volatile boolean sDrainContinuationPending;
     private static volatile long sLastTransportLogAt;
     private static volatile UserUnlockProbe sUserUnlockProbe = HookConfig::isUserUnlocked;
 
     static {
         EXECUTOR.setRemoveOnCancelPolicy(true);
         EXECUTOR.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
-        EXECUTOR.scheduleWithFixedDelay(
-                HookDiagnostics::flushPendingFromPeriodicTask,
-                FLUSH_INTERVAL_MS,
-                FLUSH_INTERVAL_MS,
-                TimeUnit.MILLISECONDS);
+        scheduleFlush(FLUSH_PROBE_INTERVAL_MS);
     }
 
     public static void reportProcess(String stage, Throwable error) {
@@ -285,14 +294,6 @@ public final class HookDiagnostics {
                 && uid == MODULE_UID.get();
     }
 
-    private static void flushPendingFromPeriodicTask() {
-        try {
-            if (hasPendingData()) flushSnapshot();
-        } catch (Throwable error) {
-            logTransportFailure("periodic_flush", error);
-        }
-    }
-
     private static boolean hasPendingData() {
         OutboxState outbox = OUTBOX.get();
         return sInFlight != null
@@ -302,12 +303,16 @@ public final class HookDiagnostics {
 
     private static void scheduleFlush(long delayMs) {
         long boundedDelayMs = Math.max(0L, delayMs);
-        long deadlineNanos = System.nanoTime()
-                + TimeUnit.MILLISECONDS.toNanos(boundedDelayMs);
         synchronized (FLUSH_SCHEDULE_LOCK) {
+            long nowNanos = System.nanoTime();
+            long deadlineNanos = nowNanos + TimeUnit.MILLISECONDS.toNanos(boundedDelayMs);
+            long retryNotBefore = sTransportRetryNotBeforeNanos;
+            if (retryNotBefore > deadlineNanos) deadlineNanos = retryNotBefore;
             ScheduledFuture<?> scheduled = sScheduledFlush;
             if (scheduled != null && !scheduled.isDone()) {
-                if (sScheduledFlushDeadlineNanos <= deadlineNanos) return;
+                boolean violatesBackoff = retryNotBefore > nowNanos
+                        && sScheduledFlushDeadlineNanos < retryNotBefore;
+                if (!violatesBackoff && sScheduledFlushDeadlineNanos <= deadlineNanos) return;
                 if (!scheduled.cancel(false)) return;
             }
             try {
@@ -315,8 +320,8 @@ public final class HookDiagnostics {
                 sScheduledFlushDeadlineNanos = deadlineNanos;
                 sScheduledFlush = EXECUTOR.schedule(
                         HookDiagnostics::runScheduledFlush,
-                        boundedDelayMs,
-                        TimeUnit.MILLISECONDS);
+                        Math.max(0L, deadlineNanos - System.nanoTime()),
+                        TimeUnit.NANOSECONDS);
             } catch (Throwable error) {
                 sScheduledFlush = null;
                 sScheduledFlushDeadlineNanos = Long.MAX_VALUE;
@@ -332,23 +337,122 @@ public final class HookDiagnostics {
             sScheduledFlushDeadlineNanos = Long.MAX_VALUE;
             FLUSH_SCHEDULED.set(false);
         }
-        flushSnapshot();
-        if (hasPendingData()) scheduleFlush(FLUSH_INTERVAL_MS);
+        try {
+            long retryDelayMs = transportRetryDelayRemainingMs();
+            if (retryDelayMs > 0L) {
+                scheduleFlush(retryDelayMs);
+                return;
+            }
+            if (!shouldAttemptProvider()) {
+                scheduleFlush(FLUSH_PROBE_INTERVAL_MS);
+                return;
+            }
+            sDrainContinuationPending = false;
+            drainPendingBatchesAndReschedule();
+        } catch (Throwable error) {
+            logTransportFailure("scheduled_flush", error);
+            scheduleTransportRetry();
+        }
     }
 
-    private static void flushSnapshot() {
+    private static void drainPendingBatchesAndReschedule() {
+        DrainResult result = new DrainResult();
+        long startedAt = SystemClock.elapsedRealtime();
+        // This bounds when another batch may start; each Provider call keeps its own timeout.
+        for (int batch = 0; batch < MAX_BATCHES_PER_DRAIN && hasPendingData(); batch++) {
+            if (batch > 0
+                    && SystemClock.elapsedRealtime() - startedAt
+                    >= MAX_DRAIN_START_WINDOW_MS) break;
+            FlushOutcome outcome = flushSnapshot();
+            if (outcome == FlushOutcome.PROGRESSED) {
+                result.progressed = true;
+                continue;
+            }
+            result.transportDeferred = outcome == FlushOutcome.TRANSPORT_DEFERRED;
+            break;
+        }
+        if (result.transportDeferred && isUserUnlockDeferred()) {
+            sDrainContinuationPending = false;
+            resetTransportRetryDelay();
+            scheduleFlush(FLUSH_PROBE_INTERVAL_MS);
+        } else if (result.transportDeferred) {
+            sDrainContinuationPending = false;
+            if (result.progressed) resetTransportRetryDelay();
+            scheduleTransportRetry();
+        } else if (!hasPendingData()) {
+            sDrainContinuationPending = false;
+            resetTransportRetryDelay();
+            scheduleFlush(FLUSH_PROBE_INTERVAL_MS);
+        } else if (result.progressed) {
+            sDrainContinuationPending = true;
+            resetTransportRetryDelay();
+            scheduleFlush(DRAIN_CONTINUATION_DELAY_MS);
+        } else {
+            scheduleFlush(FLUSH_PROBE_INTERVAL_MS);
+        }
+    }
+
+    private static boolean shouldAttemptProvider() {
+        if (!hasPendingData()) return false;
+        if (sDrainContinuationPending
+                || sInFlight != null
+                || STICKY_GENERATION.get() > REPORTED_STICKY_GENERATION.get()) return true;
+        OutboxState outbox = OUTBOX.get();
+        if (outbox.rawHitCount.get() >= PENDING_QUEUE_HIGH_WATERMARK
+                || outbox.eventCount.get() >= PENDING_QUEUE_HIGH_WATERMARK) return true;
+        return SystemClock.elapsedRealtime() - sLastEventBatchAt
+                >= PERIODIC_FLUSH_INTERVAL_MS;
+    }
+
+    private static boolean isUserUnlockDeferred() {
+        return "user_locked".equals(sTransportError)
+                || "user_unlock_state_unavailable".equals(sTransportError);
+    }
+
+    private static long nextTransportRetryDelay() {
+        long delay = sTransportRetryDelayMs;
+        sTransportRetryDelayMs = delay >= MAX_TRANSPORT_RETRY_INTERVAL_MS / 2L
+                ? MAX_TRANSPORT_RETRY_INTERVAL_MS
+                : delay * 2L;
+        return delay;
+    }
+
+    private static void resetTransportRetryDelay() {
+        sTransportRetryDelayMs = INITIAL_TRANSPORT_RETRY_INTERVAL_MS;
+        sTransportRetryNotBeforeNanos = 0L;
+    }
+
+    private static void scheduleTransportRetry() {
+        long delayMs = nextTransportRetryDelay();
+        sTransportRetryNotBeforeNanos = System.nanoTime()
+                + TimeUnit.MILLISECONDS.toNanos(delayMs);
+        scheduleFlush(delayMs);
+    }
+
+    private static long transportRetryDelayRemainingMs() {
+        long remainingNanos = sTransportRetryNotBeforeNanos - System.nanoTime();
+        if (remainingNanos <= 0L) return 0L;
+        return Math.max(1L, TimeUnit.NANOSECONDS.toMillis(remainingNanos));
+    }
+
+    private static FlushOutcome flushSnapshot() {
         if (BOOT_ID.isEmpty()) {
             sTransportError = "boot_id_unavailable";
-            return;
+            return FlushOutcome.TRANSPORT_DEFERRED;
         }
-        if (sEpoch < 0L && !refreshBridgeState()) return;
+        if (sEpoch < 0L && !refreshBridgeState()) return FlushOutcome.TRANSPORT_DEFERRED;
         InFlightBatch inFlight = sInFlight;
         if (inFlight == null) {
             inFlight = buildInFlight();
             sInFlight = inFlight;
         }
-        if (inFlight == null) return;
+        if (inFlight == null) return FlushOutcome.NO_BATCH;
         sendInFlight(inFlight);
+        if (sInFlight != null) return FlushOutcome.TRANSPORT_DEFERRED;
+        if (inFlight.rawHitCount > 0 || inFlight.normalizedEventCount > 0) {
+            sLastEventBatchAt = SystemClock.elapsedRealtime();
+        }
+        return FlushOutcome.PROGRESSED;
     }
 
     private static InFlightBatch buildInFlight() {
@@ -460,6 +564,7 @@ public final class HookDiagnostics {
         sEpoch = Math.max(0L, epoch);
         sNextBatchSequence = 0L;
         REPORTED_STICKY_GENERATION.set(-1L);
+        sDrainContinuationPending = false;
         sTransportError = "";
     }
 
@@ -906,6 +1011,17 @@ public final class HookDiagnostics {
         ACCEPTED,
         DUPLICATE,
         UNAVAILABLE
+    }
+
+    private enum FlushOutcome {
+        PROGRESSED,
+        TRANSPORT_DEFERRED,
+        NO_BATCH
+    }
+
+    private static final class DrainResult {
+        boolean progressed;
+        boolean transportDeferred;
     }
 
     private static final class Snapshot {

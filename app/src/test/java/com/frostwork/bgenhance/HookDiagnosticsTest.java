@@ -161,7 +161,7 @@ public final class HookDiagnosticsTest {
         assertEquals(0, pendingRawHitCount());
         assertEquals(0, pendingNormalizedEventCount());
         assertEquals(0, outboxSize());
-        flushPendingFromPeriodicTask();
+        runScheduledFlush();
         assertTrue(provider.methods.isEmpty());
 
         HookDiagnostics.recordEventFromLockedPath(new HookEvent(
@@ -223,7 +223,7 @@ public final class HookDiagnosticsTest {
         HookDiagnostics.recordEventFromLockedPath(event(1), DiagnosticsResult.PASSED);
 
         flushSnapshot();
-        flushPendingFromPeriodicTask();
+        runScheduledFlush();
 
         assertEquals(1, provider.requests.size());
         assertEquals(0, pendingItemCount());
@@ -232,22 +232,197 @@ public final class HookDiagnosticsTest {
 
     @Test
     public void rawAndNormalizedQueuesRemainIndependentlyBounded() throws Exception {
-        for (int index = 0; index < 512; index++) {
+        for (int index = 0; index < 2_048; index++) {
             HookDiagnostics.recordRawHookHit(
                     HookTargetIds.HANS_R_TO_M_TIMING, true, true, "");
         }
-        HookDiagnostics.recordEventFromLockedPath(event(1_000), DiagnosticsResult.PASSED);
+        HookDiagnostics.recordEventFromLockedPath(event(3_000), DiagnosticsResult.PASSED);
 
-        assertEquals(512, pendingRawHitCount());
+        assertEquals(2_048, pendingRawHitCount());
         assertEquals(1, pendingNormalizedEventCount());
 
-        for (int index = 1_001; index < 1_700; index++) {
+        for (int index = 3_001; index < 5_500; index++) {
             HookDiagnostics.recordEventFromLockedPath(event(index), DiagnosticsResult.PASSED);
         }
 
-        assertEquals(512, pendingRawHitCount());
-        assertEquals(512, pendingNormalizedEventCount());
+        assertEquals(2_048, pendingRawHitCount());
+        assertEquals(2_048, pendingNormalizedEventCount());
         assertFalse(flushScheduled().get());
+    }
+
+    @Test
+    public void scheduledDrainCommitsSeveralWireBatchesInOneWakeWindow()
+            throws Exception {
+        setEpoch(EPOCH);
+        for (int index = 0; index < 300; index++) {
+            HookDiagnostics.recordEventFromLockedPath(event(index), DiagnosticsResult.PASSED);
+        }
+        for (int index = 0; index < 3; index++) {
+            provider.enqueue(request -> acceptedAck(request, EPOCH));
+        }
+
+        runScheduledFlush();
+
+        assertEquals(3, provider.requests.size());
+        assertEquals(0, pendingItemCount());
+        assertEquals(3L, nextBatchSequence());
+        assertScheduledNear(TimeUnit.SECONDS.toMillis(5L));
+    }
+
+    @Test
+    public void scheduledDrainStopsOnTransportFailureAndStartsBoundedBackoff()
+            throws Exception {
+        setEpoch(EPOCH);
+        markEventBatchDue();
+        provider.enqueue(request -> null);
+        HookDiagnostics.recordEventFromLockedPath(event(1), DiagnosticsResult.PASSED);
+
+        runScheduledFlush();
+
+        assertEquals(1, provider.requests.size());
+        assertEquals(2, pendingItemCount());
+        assertNotNull(staticValue(HookDiagnostics.class, "sInFlight"));
+        assertScheduledNear(TimeUnit.SECONDS.toMillis(15L));
+    }
+
+    @Test
+    public void repeatedTransportFailuresBackOffAndSuccessResetsTheDelay()
+            throws Exception {
+        setEpoch(EPOCH);
+        markEventBatchDue();
+        HookDiagnostics.recordEventFromLockedPath(event(1), DiagnosticsResult.PASSED);
+        long[] expectedDelays = {
+                TimeUnit.SECONDS.toMillis(15L),
+                TimeUnit.SECONDS.toMillis(30L),
+                TimeUnit.MINUTES.toMillis(1L),
+                TimeUnit.MINUTES.toMillis(2L),
+                TimeUnit.MINUTES.toMillis(4L),
+                TimeUnit.MINUTES.toMillis(5L),
+                TimeUnit.MINUTES.toMillis(5L)
+        };
+        for (long expectedDelay : expectedDelays) {
+            provider.enqueue(request -> null);
+            runScheduledFlush();
+            assertScheduledNear(expectedDelay);
+            allowTransportRetryNow();
+        }
+
+        provider.enqueue(request -> acceptedAck(request, EPOCH));
+        runScheduledFlush();
+        assertEquals(0, pendingItemCount());
+        assertScheduledNear(TimeUnit.SECONDS.toMillis(5L));
+
+        HookDiagnostics.recordEventFromLockedPath(event(2), DiagnosticsResult.PASSED);
+        markEventBatchDue();
+        provider.enqueue(request -> null);
+        runScheduledFlush();
+        assertScheduledNear(TimeUnit.SECONDS.toMillis(15L));
+    }
+
+    @Test
+    public void lowVolumeWaitsForBatchWindow()
+            throws Exception {
+        setEpoch(EPOCH);
+        provider.enqueue(request -> acceptedAck(request, EPOCH));
+        HookDiagnostics.recordEventFromLockedPath(event(1), DiagnosticsResult.PASSED);
+
+        runScheduledFlush();
+
+        assertTrue(provider.requests.isEmpty());
+        assertEquals(2, pendingItemCount());
+        assertScheduledNear(TimeUnit.SECONDS.toMillis(5L));
+
+        markEventBatchDue();
+        runScheduledFlush();
+
+        assertEquals(1, provider.requests.size());
+        assertEquals(0, pendingItemCount());
+    }
+
+    @Test
+    public void queueHighWaterFlushesBeforeBatchWindow() throws Exception {
+        setEpoch(EPOCH);
+        for (int index = 0; index < 256; index++) {
+            HookDiagnostics.recordRawHookHit(
+                    HookTargetIds.HANS_R_TO_M_TIMING, true, true, "");
+        }
+        provider.enqueue(request -> acceptedAck(request, EPOCH));
+
+        runScheduledFlush();
+
+        assertEquals(1, provider.requests.size());
+        assertEquals(0, pendingItemCount());
+        assertScheduledNear(TimeUnit.SECONDS.toMillis(5L));
+    }
+
+    @Test
+    public void laterBatchFailureBacksOffAndStickyCannotBypassIt()
+            throws Exception {
+        setEpoch(EPOCH);
+        for (int index = 0; index < 300; index++) {
+            HookDiagnostics.recordEventFromLockedPath(event(index), DiagnosticsResult.PASSED);
+        }
+        provider.enqueue(request -> acceptedAck(request, EPOCH));
+        provider.enqueue(request -> null);
+
+        runScheduledFlush();
+
+        assertEquals(2, provider.requests.size());
+        assertEquals(344, pendingItemCount());
+        assertEquals(1L, nextBatchSequence());
+        assertNotNull(staticValue(HookDiagnostics.class, "sInFlight"));
+        assertScheduledNear(TimeUnit.SECONDS.toMillis(15L));
+
+        HookDiagnostics.reportFeature(HookTargetIds.OGUARD_KILL, "INSTALLED:1");
+
+        assertEquals(2, provider.requests.size());
+        assertScheduledNear(TimeUnit.SECONDS.toMillis(15L));
+    }
+
+    @Test
+    public void stickyReportedInsideFailedProviderCallIsMovedBehindBackoff()
+            throws Exception {
+        setEpoch(EPOCH);
+        markEventBatchDue();
+        HookDiagnostics.recordEventFromLockedPath(event(1), DiagnosticsResult.PASSED);
+        provider.enqueue(request -> {
+            HookDiagnostics.reportFeature(HookTargetIds.OGUARD_KILL, "INSTALLED:1");
+            return null;
+        });
+
+        runScheduledFlush();
+
+        assertEquals(1, provider.requests.size());
+        assertEquals(2, pendingItemCount());
+        assertNotNull(staticValue(HookDiagnostics.class, "sInFlight"));
+        assertScheduledNear(TimeUnit.SECONDS.toMillis(15L));
+    }
+
+    @Test
+    public void largeBacklogContinuesSoonWithoutUnboundedProviderBurst()
+            throws Exception {
+        setEpoch(EPOCH);
+        for (int index = 0; index < 1_100; index++) {
+            HookDiagnostics.recordEventFromLockedPath(event(index), DiagnosticsResult.PASSED);
+        }
+        for (int index = 0; index < 9; index++) {
+            provider.enqueue(request -> acceptedAck(request, EPOCH));
+        }
+
+        runScheduledFlush();
+
+        assertEquals(8, provider.requests.size());
+        assertEquals(152, pendingItemCount());
+        assertEquals(8L, nextBatchSequence());
+        assertTrue(scheduledDelayMillis() > 0L);
+        assertTrue(scheduledDelayMillis() <= TimeUnit.SECONDS.toMillis(2L));
+
+        runScheduledFlush();
+
+        assertEquals(9, provider.requests.size());
+        assertEquals(0, pendingItemCount());
+        assertEquals(9L, nextBatchSequence());
+        assertScheduledNear(TimeUnit.SECONDS.toMillis(5L));
     }
 
     @Test
@@ -285,17 +460,19 @@ public final class HookDiagnosticsTest {
     public void lockedUserDefersProviderResolutionWithoutLosingPendingState()
             throws Exception {
         setUserUnlocked(false);
+        markEventBatchDue();
         HookDiagnostics.recordEventFromLockedPath(event(1), DiagnosticsResult.PASSED);
 
-        flushSnapshot();
+        runScheduledFlush();
 
         assertTrue(provider.methods.isEmpty());
         assertEquals("user_locked", transportError());
         assertEquals(2, pendingItemCount());
         assertEquals(-1L, epoch());
+        assertScheduledNear(TimeUnit.SECONDS.toMillis(5L));
 
         setUserUnlocked(true);
-        flushSnapshot();
+        runScheduledFlush();
 
         assertEquals(List.of(BridgeContract.METHOD_PING), provider.methods);
         assertEquals(2, pendingItemCount());
@@ -601,11 +778,18 @@ public final class HookDiagnosticsTest {
         method.invoke(null);
     }
 
-    private static void flushPendingFromPeriodicTask() throws Exception {
-        Method method = HookDiagnostics.class.getDeclaredMethod(
-                "flushPendingFromPeriodicTask");
+    private static void runScheduledFlush() throws Exception {
+        ScheduledFuture<?> scheduled = scheduledFlush();
+        if (scheduled != null) scheduled.cancel(false);
+        Method method = HookDiagnostics.class.getDeclaredMethod("runScheduledFlush");
         method.setAccessible(true);
-        method.invoke(null);
+        executor().submit(() -> {
+            try {
+                method.invoke(null);
+            } catch (ReflectiveOperationException error) {
+                throw new AssertionError(error);
+            }
+        }).get(5L, TimeUnit.SECONDS);
     }
 
     private static DiagnosticsWriteBatch parse(Bundle request) {
@@ -655,6 +839,17 @@ public final class HookDiagnosticsTest {
 
     private static void setEpoch(long value) throws Exception {
         setStaticField(HookDiagnostics.class, "sEpoch", value);
+    }
+
+    private static void markEventBatchDue() throws Exception {
+        setStaticField(
+                HookDiagnostics.class,
+                "sLastEventBatchAt",
+                android.os.SystemClock.elapsedRealtime() - TimeUnit.MINUTES.toMillis(6L));
+    }
+
+    private static void allowTransportRetryNow() throws Exception {
+        setStaticField(HookDiagnostics.class, "sTransportRetryNotBeforeNanos", 0L);
     }
 
     private static void assertUncommitted(String error) throws Exception {
@@ -725,6 +920,20 @@ public final class HookDiagnosticsTest {
         return (ScheduledFuture<?>) staticValue(HookDiagnostics.class, "sScheduledFlush");
     }
 
+    private static long scheduledDelayMillis() throws Exception {
+        ScheduledFuture<?> scheduled = scheduledFlush();
+        assertNotNull(scheduled);
+        return scheduled.getDelay(TimeUnit.MILLISECONDS);
+    }
+
+    private static void assertScheduledNear(long expectedDelayMillis) throws Exception {
+        long actual = scheduledDelayMillis();
+        assertTrue("scheduled too early: " + actual,
+                actual >= expectedDelayMillis - TimeUnit.SECONDS.toMillis(2L));
+        assertTrue("scheduled too late: " + actual,
+                actual <= expectedDelayMillis + TimeUnit.SECONDS.toMillis(1L));
+    }
+
     private static int outboxSize() throws Exception {
         return ((java.util.Queue<?>) instanceValue(outboxState(), "rawHits")).size()
                 + ((java.util.Queue<?>) instanceValue(outboxState(), "events")).size();
@@ -781,6 +990,16 @@ public final class HookDiagnosticsTest {
         setStaticField(HookDiagnostics.class, "sNextBatchSequence", 0L);
         setStaticField(HookDiagnostics.class, "sInFlight", null);
         setStaticField(HookDiagnostics.class, "sTransportError", "");
+        setStaticField(
+                HookDiagnostics.class,
+                "sTransportRetryDelayMs",
+                TimeUnit.SECONDS.toMillis(15L));
+        setStaticField(HookDiagnostics.class, "sTransportRetryNotBeforeNanos", 0L);
+        setStaticField(
+                HookDiagnostics.class,
+                "sLastEventBatchAt",
+                android.os.SystemClock.elapsedRealtime());
+        setStaticField(HookDiagnostics.class, "sDrainContinuationPending", false);
         setStaticField(HookDiagnostics.class, "sLastTransportLogAt", 0L);
         setUserUnlocked(true);
     }
