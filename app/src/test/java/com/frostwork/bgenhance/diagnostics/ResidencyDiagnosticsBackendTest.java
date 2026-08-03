@@ -883,8 +883,10 @@ public final class ResidencyDiagnosticsBackendTest {
                 DiagnosticsQuery.ExportOptions.fullReport(),
                 FeatureIds.all()).get(5, TimeUnit.SECONDS);
 
-        assertEquals(22, snapshot.exportStatus.currentBoot.expectedCurrentBootStateCount);
-        assertEquals(22, snapshot.exportStatus.currentBoot.currentBootHookStateCount);
+        assertEquals(expectedCurrentBootRowCount(),
+                snapshot.exportStatus.currentBoot.expectedCurrentBootStateCount);
+        assertEquals(expectedCurrentBootRowCount(),
+                snapshot.exportStatus.currentBoot.currentBootHookStateCount);
         assertTrue(snapshot.exportStatus.currentBoot.systemServerReported);
         assertTrue(snapshot.exportStatus.currentBoot.athenaReported);
         assertTrue(snapshot.exportStatus.currentBoot.hookStateCoverageComplete);
@@ -910,7 +912,8 @@ public final class ResidencyDiagnosticsBackendTest {
                 DiagnosticsQuery.ExportOptions.fullReport(),
                 FeatureIds.all()).get(5, TimeUnit.SECONDS);
 
-        assertEquals(22, snapshot.exportStatus.currentBoot.currentBootHookStateCount);
+        assertEquals(expectedCurrentBootRowCount(),
+                snapshot.exportStatus.currentBoot.currentBootHookStateCount);
         assertTrue(snapshot.exportStatus.currentBoot.systemServerReported);
         assertTrue(snapshot.exportStatus.currentBoot.athenaReported);
         assertFalse(snapshot.exportStatus.currentBoot.hookStateCoverageComplete);
@@ -937,7 +940,8 @@ public final class ResidencyDiagnosticsBackendTest {
                 DiagnosticsQuery.ExportOptions.fullReport(),
                 FeatureIds.all()).get(5, TimeUnit.SECONDS);
 
-        assertEquals(22, snapshot.exportStatus.currentBoot.currentBootHookStateCount);
+        assertEquals(expectedCurrentBootRowCount(),
+                snapshot.exportStatus.currentBoot.currentBootHookStateCount);
         assertFalse(snapshot.exportStatus.currentBoot.hookStateCoverageComplete);
     }
 
@@ -1045,6 +1049,10 @@ public final class ResidencyDiagnosticsBackendTest {
                     .updatedAt(3L)
                     .build());
         }
+    }
+
+    private static int expectedCurrentBootRowCount() {
+        return HookTargetIds.all().size() + 4;
     }
 
     private static void removeExpectedTarget(FakeStorage storage, String target) {
