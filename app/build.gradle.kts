@@ -10,8 +10,8 @@ android {
         applicationId = "com.frostwork.bgenhance"
         minSdk = 29
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.0.0"
+        versionCode = 5
+        versionName = "1.1.0-rc1"
     }
 
     buildTypes {
