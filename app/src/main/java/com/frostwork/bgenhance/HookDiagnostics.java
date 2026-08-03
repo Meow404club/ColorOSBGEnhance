@@ -9,6 +9,7 @@ import android.util.Log;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsBootId;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsEventDeduplicator;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsEventNormalizer;
+import com.frostwork.bgenhance.diagnostics.DiagnosticsBehaviorClassifier;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsWireEncoder;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsWireParser;
@@ -793,14 +794,7 @@ public final class HookDiagnostics {
     }
 
     private static String behaviorFor(String feature) {
-        if (FeatureIds.HANS.equals(feature)
-                || FeatureIds.SUPER_FREEZE.equals(feature)
-                || FeatureIds.ANDROID_FREEZE.equals(feature)) return "FREEZE";
-        if (FeatureIds.HANS_WAKE.equals(feature)) return "WAKE";
-        if (FeatureIds.HANS_RESOURCE.equals(feature)) return "RESOURCE";
-        if (FeatureIds.HANS_REFREEZE.equals(feature)) return "REFREEZE";
-        if (FeatureIds.HANS_RECOVERY.equals(feature)) return "RECOVERY";
-        return "KILL";
+        return DiagnosticsBehaviorClassifier.forFeatureId(feature);
     }
 
     static String sourceFor(HookEvent event) {

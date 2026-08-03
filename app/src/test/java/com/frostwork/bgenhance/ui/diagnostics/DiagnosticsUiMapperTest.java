@@ -11,6 +11,7 @@ import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.ModuleRuntimeStatus;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
+import com.frostwork.bgenhance.diagnostics.RecentBehaviorStats;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -70,7 +71,7 @@ public final class DiagnosticsUiMapperTest {
     }
 
     @Test
-    public void behaviorRowsAlwaysContainTheSixStableFamilies() {
+    public void behaviorRowsContainKnownFamiliesAndPreserveUnknownCounts() {
         List<DiagnosticsUiMapper.BehaviorRow> rows = mapper.mapBehaviors(Arrays.asList(
                 row("com.example.one", 10_001, "KILL", DiagnosticsResult.BLOCKED,
                         4L, 4L, 0L, 4L, 1L),
@@ -86,6 +87,31 @@ public final class DiagnosticsUiMapperTest {
         assertEquals(4L, rows.get(DiagnosticsBehavior.KILL.ordinal()).metrics.observed);
         assertEquals(2L, rows.get(DiagnosticsBehavior.RECOVERY.ordinal()).metrics.observed);
         assertEquals(0L, rows.get(DiagnosticsBehavior.RESOURCE.ordinal()).metrics.observed);
+        assertEquals(100L,
+                rows.get(DiagnosticsBehavior.UNCLASSIFIED.ordinal()).metrics.observed);
+    }
+
+    @Test
+    public void sharedSnapshotTotalsEqualTheSumOfEveryBehaviorRow() {
+        RecentBehaviorStats snapshot = RecentBehaviorStats.fromAggregateRows(
+                        Arrays.asList(
+                                row("", -1, "KILL", DiagnosticsResult.BLOCKED,
+                                        5L, 5L, 0L, 5L, 1L),
+                                row("", -1, "FUTURE_BEHAVIOR", DiagnosticsResult.FAIL_OPEN,
+                                        3L, 0L, 3L, 3L, 2L)));
+
+        long observed = 0L;
+        long blocked = 0L;
+        long failOpen = 0L;
+        for (DiagnosticsUiMapper.BehaviorRow row : mapper.mapBehaviors(snapshot)) {
+            observed += row.metrics.observed;
+            blocked += row.metrics.blocked;
+            failOpen += row.metrics.failOpen;
+        }
+
+        assertEquals(snapshot.observed, observed);
+        assertEquals(snapshot.blocked, blocked);
+        assertEquals(snapshot.failOpen, failOpen);
     }
 
     @Test

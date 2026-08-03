@@ -1,8 +1,9 @@
 package com.frostwork.bgenhance.ui;
 
-import com.frostwork.bgenhance.FeatureIds;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
+import com.frostwork.bgenhance.diagnostics.RecentBehaviorStats;
 import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
+import com.frostwork.bgenhance.ui.diagnostics.DiagnosticsDataSource;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -12,7 +13,7 @@ public final class HomeDiagnosticsViewModel implements AutoCloseable {
     public enum Status { LOADING, CONTENT, ERROR }
 
     public interface Source {
-        CompletableFuture<DiagnosticsQuery.HomeStatsSnapshot> loadStats();
+        CompletableFuture<RecentBehaviorStats> loadStats();
         CompletableFuture<DiagnosticsQuery.HookStatePage> loadHookStates();
     }
 
@@ -22,13 +23,13 @@ public final class HomeDiagnosticsViewModel implements AutoCloseable {
 
     public static final class State {
         public final Status status;
-        public final DiagnosticsQuery.HomeStatsSnapshot stats;
+        public final RecentBehaviorStats stats;
         public final DiagnosticsQuery.HookStatePage hookStates;
         public final String errorCode;
 
         private State(
                 Status status,
-                DiagnosticsQuery.HomeStatsSnapshot stats,
+                RecentBehaviorStats stats,
                 DiagnosticsQuery.HookStatePage hookStates,
                 String errorCode) {
             this.status = status;
@@ -42,7 +43,7 @@ public final class HomeDiagnosticsViewModel implements AutoCloseable {
         }
 
         static State content(
-                DiagnosticsQuery.HomeStatsSnapshot stats,
+                RecentBehaviorStats stats,
                 DiagnosticsQuery.HookStatePage hookStates) {
             return new State(Status.CONTENT, stats, hookStates, "");
         }
@@ -67,10 +68,11 @@ public final class HomeDiagnosticsViewModel implements AutoCloseable {
 
     public static Source backendSource(ResidencyDiagnosticsBackend backend) {
         Objects.requireNonNull(backend, "backend");
+        DiagnosticsDataSource dataSource = DiagnosticsDataSource.fromBackend(backend);
         return new Source() {
             @Override
-            public CompletableFuture<DiagnosticsQuery.HomeStatsSnapshot> loadStats() {
-                return backend.queryHomeStatsAsync(FeatureIds.all());
+            public CompletableFuture<RecentBehaviorStats> loadStats() {
+                return dataSource.queryRecentBehaviorStatsAsync();
             }
 
             @Override
@@ -91,7 +93,7 @@ public final class HomeDiagnosticsViewModel implements AutoCloseable {
             requestGeneration = ++generation;
         }
         publish(requestGeneration, State.loading());
-        CompletableFuture<DiagnosticsQuery.HomeStatsSnapshot> stats;
+        CompletableFuture<RecentBehaviorStats> stats;
         CompletableFuture<DiagnosticsQuery.HookStatePage> hookStates;
         try {
             stats = source.loadStats();
@@ -143,11 +145,11 @@ public final class HomeDiagnosticsViewModel implements AutoCloseable {
     }
 
     private static final class Result {
-        final DiagnosticsQuery.HomeStatsSnapshot stats;
+        final RecentBehaviorStats stats;
         final DiagnosticsQuery.HookStatePage hookStates;
 
         Result(
-                DiagnosticsQuery.HomeStatsSnapshot stats,
+                RecentBehaviorStats stats,
                 DiagnosticsQuery.HookStatePage hookStates) {
             this.stats = stats;
             this.hookStates = hookStates;

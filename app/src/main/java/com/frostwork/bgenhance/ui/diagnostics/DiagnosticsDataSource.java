@@ -3,6 +3,8 @@ package com.frostwork.bgenhance.ui.diagnostics;
 import android.content.Context;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
+import com.frostwork.bgenhance.diagnostics.RecentBehaviorStats;
+import com.frostwork.bgenhance.diagnostics.RecentBehaviorStatsLoader;
 import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -13,6 +15,10 @@ import java.util.concurrent.CompletableFuture;
 public interface DiagnosticsDataSource extends AutoCloseable {
     CompletableFuture<DiagnosticsQuery.AggregatePage> queryAggregatesAsync(
             DiagnosticsQuery.AggregateQuery query);
+
+    default CompletableFuture<RecentBehaviorStats> queryRecentBehaviorStatsAsync() {
+        return RecentBehaviorStatsLoader.load(this::queryAggregatesAsync);
+    }
 
     CompletableFuture<HookStatePage> queryHookStatesAsync(int limit);
 

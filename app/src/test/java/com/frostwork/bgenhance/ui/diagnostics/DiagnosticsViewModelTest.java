@@ -134,7 +134,7 @@ public final class DiagnosticsViewModelTest {
     }
 
     @Test
-    public void behaviorViewPublishesAllSixFamilies() {
+    public void behaviorViewKeepsUnclassifiedHiddenWhenThereAreNoUnknownEvents() {
         FakeDataSource source = new FakeDataSource();
         DiagnosticsViewModel viewModel = viewModel(source, 10, 10);
 

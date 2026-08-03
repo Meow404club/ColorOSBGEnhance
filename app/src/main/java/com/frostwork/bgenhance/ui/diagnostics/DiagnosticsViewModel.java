@@ -2,6 +2,7 @@ package com.frostwork.bgenhance.ui.diagnostics;
 
 import android.content.Context;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
+import com.frostwork.bgenhance.diagnostics.RecentBehaviorStats;
 import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -181,10 +182,10 @@ public final class DiagnosticsViewModel implements AutoCloseable {
         emit(loading);
         if (view == View.HOOK_TARGET) {
             requestHookStates(requestGeneration);
+        } else if (view == View.BEHAVIOR) {
+            requestBehaviorStats(requestGeneration);
         } else {
-            if (view == View.APPLICATION) {
-                requestManagedApplications(requestGeneration);
-            }
+            requestManagedApplications(requestGeneration);
             requestAggregatePage(requestGeneration, view, 0);
         }
     }
@@ -242,7 +243,7 @@ public final class DiagnosticsViewModel implements AutoCloseable {
         synchronized (lock) {
             if (!isCurrentLocked(requestGeneration, view)) return;
         }
-        DiagnosticsQuery.AggregateQuery query = aggregateQuery(view, offset);
+        DiagnosticsQuery.AggregateQuery query = applicationAggregateQuery(offset);
         CompletableFuture<DiagnosticsQuery.AggregatePage> future;
         try {
             future = dataSource.queryAggregatesAsync(query);
@@ -298,30 +299,48 @@ public final class DiagnosticsViewModel implements AutoCloseable {
         } else if (nextOffset >= 0) {
             requestAggregatePage(requestGeneration, view, nextOffset);
         } else if (rowsToMap != null) {
-            finishAggregateMapping(requestGeneration, view, rowsToMap);
+            finishApplicationAggregateMapping(requestGeneration);
         }
     }
 
-    private void finishAggregateMapping(
-            long requestGeneration,
-            View view,
-            List<DiagnosticsQuery.AggregateRow> rows) {
-        if (view == View.APPLICATION) {
-            synchronized (lock) {
-                if (!isCurrentLocked(requestGeneration, view)) return;
-                aggregateComplete = true;
-            }
-            tryStartApplicationMapping(requestGeneration);
-            return;
+    private void finishApplicationAggregateMapping(long requestGeneration) {
+        synchronized (lock) {
+            if (!isCurrentLocked(requestGeneration, View.APPLICATION)) return;
+            aggregateComplete = true;
         }
-        List<? extends DiagnosticsUiMapper.UiRow> mapped;
+        tryStartApplicationMapping(requestGeneration);
+    }
+
+    private void requestBehaviorStats(long requestGeneration) {
+        CompletableFuture<RecentBehaviorStats> future;
         try {
-            mapped = mapper.mapBehaviors(rows);
+            future = dataSource.queryRecentBehaviorStatsAsync();
         } catch (RuntimeException error) {
-            finishError(requestGeneration, view, "mapping_failed");
+            finishError(requestGeneration, View.BEHAVIOR, "query_failed");
             return;
         }
-        finishContent(requestGeneration, view, mapped);
+        if (future == null) {
+            finishError(requestGeneration, View.BEHAVIOR, "query_failed");
+            return;
+        }
+        future.whenComplete((snapshot, failure) -> {
+            if (failure != null || snapshot == null) {
+                finishError(requestGeneration, View.BEHAVIOR, "query_failed");
+                return;
+            }
+            if (!snapshot.isSuccessful()) {
+                finishError(requestGeneration, View.BEHAVIOR, snapshot.errorCode);
+                return;
+            }
+            List<DiagnosticsUiMapper.BehaviorRow> mapped;
+            try {
+                mapped = mapper.mapBehaviors(snapshot);
+            } catch (RuntimeException error) {
+                finishError(requestGeneration, View.BEHAVIOR, "mapping_failed");
+                return;
+            }
+            finishContent(requestGeneration, View.BEHAVIOR, mapped);
+        });
     }
 
     private void requestManagedApplications(long requestGeneration) {
@@ -455,17 +474,14 @@ public final class DiagnosticsViewModel implements AutoCloseable {
         emit(error);
     }
 
-    private DiagnosticsQuery.AggregateQuery aggregateQuery(View view, int offset) {
-        DiagnosticsQuery.AggregateQuery.Builder builder =
-                DiagnosticsQuery.AggregateQuery.builder()
-                        .limit(queryPageSize)
-                        .offset(offset)
-                        .dimension(DiagnosticsQuery.AggregateDimension.BEHAVIOR)
-                        .dimension(DiagnosticsQuery.AggregateDimension.RESULT);
-        if (view == View.APPLICATION) {
-            builder.dimension(DiagnosticsQuery.AggregateDimension.APPLICATION);
-        }
-        return builder.build();
+    private DiagnosticsQuery.AggregateQuery applicationAggregateQuery(int offset) {
+        return DiagnosticsQuery.AggregateQuery.builder()
+                .limit(queryPageSize)
+                .offset(offset)
+                .dimension(DiagnosticsQuery.AggregateDimension.APPLICATION)
+                .dimension(DiagnosticsQuery.AggregateDimension.BEHAVIOR)
+                .dimension(DiagnosticsQuery.AggregateDimension.RESULT)
+                .build();
     }
 
     private State contentStateLocked() {

@@ -266,6 +266,7 @@ final class DiagnosticsRowsAdapter
                 case RESOURCE: return R.string.diagnostics_behavior_resource;
                 case REFREEZE: return R.string.diagnostics_behavior_refreeze;
                 case RECOVERY: return R.string.diagnostics_behavior_recovery;
+                case UNCLASSIFIED: return R.string.diagnostics_behavior_unclassified;
                 default: throw new IllegalArgumentException("unknown behavior");
             }
         }
@@ -353,6 +354,7 @@ final class DiagnosticsRowsAdapter
             case RESOURCE: return R.string.diagnostics_behavior_resource;
             case REFREEZE: return R.string.diagnostics_behavior_refreeze;
             case RECOVERY: return R.string.diagnostics_behavior_recovery;
+            case UNCLASSIFIED: return R.string.diagnostics_behavior_unclassified;
             default: throw new IllegalArgumentException("unknown behavior");
         }
     }

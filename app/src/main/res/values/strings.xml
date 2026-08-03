@@ -47,7 +47,7 @@
     <string name="hans_fast_freeze_support_title">快速冻结保护</string>
     <string name="freeze_nav_summary">控制后台应用冻结，并检测当前系统是否支持相关功能</string>
     <string name="diagnostics_title">运行诊断</string>
-    <string name="diagnostics_summary">查看应用保护记录、后台行为以及各项功能是否正常加载</string>
+    <string name="diagnostics_summary">查看近期应用保护记录、后台行为以及各项功能是否正常加载</string>
     <string name="diagnostics_tab_applications">按应用</string>
     <string name="diagnostics_tab_behaviors">按行为</string>
     <string name="diagnostics_tab_hooks">功能状态</string>
@@ -83,6 +83,7 @@
     <string name="diagnostics_behavior_resource">后台资源</string>
     <string name="diagnostics_behavior_refreeze">再次冻结</string>
     <string name="diagnostics_behavior_recovery">状态恢复</string>
+    <string name="diagnostics_behavior_unclassified">未分类</string>
     <string name="diagnostics_runtime_system_process">系统框架进程</string>
     <string name="diagnostics_runtime_system_config">系统框架设置</string>
     <string name="diagnostics_runtime_athena_process">Athena 进程</string>
@@ -202,8 +203,8 @@
     <string name="settings_saved">设置已保存</string>
 
     <string name="stats_title">运行记录</string>
-    <string name="home_stats_action">查看全部保护项目的运行记录和功能加载状态</string>
-    <string name="home_stats_loading">正在读取本次开机的运行记录</string>
+    <string name="home_stats_action">查看近期全部保护行为和功能加载状态</string>
+    <string name="home_stats_loading">正在读取近期运行记录</string>
     <string name="home_stats_unavailable">暂时无法读取运行记录，点按查看详情</string>
     <string name="stats_metric_observed">已检测</string>
     <string name="stats_metric_blocked">已阻止</string>

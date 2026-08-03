@@ -3,10 +3,11 @@ package com.frostwork.bgenhance.ui;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 
+import com.frostwork.bgenhance.DiagnosticsResult;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
+import com.frostwork.bgenhance.diagnostics.RecentBehaviorStats;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import org.junit.Test;
@@ -59,7 +60,7 @@ public final class HomeDiagnosticsViewModelTest {
         HomeDiagnosticsViewModel viewModel = viewModel(source, states);
         viewModel.load();
 
-        source.stats.complete(DiagnosticsQuery.HomeStatsSnapshot.empty(
+        source.stats.complete(RecentBehaviorStats.empty(
                 "database_unavailable"));
         source.hooks.complete(new DiagnosticsQuery.HookStatePage(
                 Collections.emptyList(), ""));
@@ -93,22 +94,36 @@ public final class HomeDiagnosticsViewModelTest {
         return viewModel;
     }
 
-    private static DiagnosticsQuery.HomeStatsSnapshot stats(
+    private static RecentBehaviorStats stats(
             long observed, long blocked, long failOpen) {
-        LinkedHashMap<String, DiagnosticsQuery.FeatureStats> values = new LinkedHashMap<>();
-        values.put("feature", new DiagnosticsQuery.FeatureStats(
-                "feature", observed, blocked, failOpen,
-                0L, "", "", "", "", ""));
-        return new DiagnosticsQuery.HomeStatsSnapshot(values, "");
+        DiagnosticsQuery.AggregateRow row = new DiagnosticsQuery.AggregateRow(
+                "",
+                -1,
+                "",
+                "",
+                "KILL",
+                "",
+                "",
+                DiagnosticsResult.BLOCKED,
+                observed,
+                observed,
+                blocked,
+                failOpen,
+                observed,
+                0L,
+                0L,
+                1L,
+                1L);
+        return RecentBehaviorStats.fromAggregateRows(Collections.singletonList(row));
     }
 
     private static class Source implements HomeDiagnosticsViewModel.Source {
-        final CompletableFuture<DiagnosticsQuery.HomeStatsSnapshot> stats =
+        final CompletableFuture<RecentBehaviorStats> stats =
                 new CompletableFuture<>();
         final CompletableFuture<DiagnosticsQuery.HookStatePage> hooks =
                 new CompletableFuture<>();
 
-        @Override public CompletableFuture<DiagnosticsQuery.HomeStatsSnapshot> loadStats() {
+        @Override public CompletableFuture<RecentBehaviorStats> loadStats() {
             return stats;
         }
 
@@ -120,7 +135,7 @@ public final class HomeDiagnosticsViewModelTest {
     private static final class SwitchingSource implements HomeDiagnosticsViewModel.Source {
         volatile Source current;
         SwitchingSource(Source current) { this.current = current; }
-        @Override public CompletableFuture<DiagnosticsQuery.HomeStatsSnapshot> loadStats() {
+        @Override public CompletableFuture<RecentBehaviorStats> loadStats() {
             return current.loadStats();
         }
         @Override public CompletableFuture<DiagnosticsQuery.HookStatePage> loadHookStates() {
