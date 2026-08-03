@@ -43,7 +43,6 @@ public final class DiagnosticsEventDeduplicator {
             DiagnosticsEventSemanticKey key = DiagnosticsEventSemanticKey.from(event);
             if (key == null) return Outcome.FAIL_OPEN;
             long now = ticker.readNanos();
-            if (now < 0L) return Outcome.FAIL_OPEN;
             int bucketIndex = mixedHash(key.hashCode()) & bucketMask;
             for (int attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
                 Bucket observed = buckets.get(bucketIndex);
@@ -79,7 +78,12 @@ public final class DiagnosticsEventDeduplicator {
     }
 
     private boolean isWithinTtl(long now, long acceptedAt) {
-        return now >= acceptedAt && now - acceptedAt < ttlNanos;
+        return elapsedMagnitude(now, acceptedAt) < ttlNanos;
+    }
+
+    private static long elapsedMagnitude(long first, long second) {
+        long elapsed = first - second;
+        return elapsed == Long.MIN_VALUE ? Long.MAX_VALUE : Math.abs(elapsed);
     }
 
     private static int mixedHash(int value) {
@@ -127,8 +131,7 @@ public final class DiagnosticsEventDeduplicator {
             int liveCount = 0;
             for (Entry entry : entries) {
                 if (entry.key.equals(key)) continue;
-                if (now < entry.acceptedAtNanos
-                        || now - entry.acceptedAtNanos >= ttlNanos) {
+                if (elapsedMagnitude(now, entry.acceptedAtNanos) >= ttlNanos) {
                     continue;
                 }
                 live[liveCount++] = entry;

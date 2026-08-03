@@ -111,6 +111,19 @@ public final class DiagnosticsEventDeduplicatorTest {
     }
 
     @Test
+    public void smallReverseSamplingSkewRemainsInTheSameConcurrentWindow() {
+        FakeTicker ticker = new FakeTicker(1_001L);
+        DiagnosticsEventDeduplicator deduplicator = deduplicator(8, ticker);
+        NormalizedDiagnosticsEvent event = event(10_123, "com.example.target").build();
+
+        assertEquals(DiagnosticsEventDeduplicator.Outcome.ACCEPTED,
+                deduplicator.evaluate(event));
+        ticker.set(1_000L);
+        assertEquals(DiagnosticsEventDeduplicator.Outcome.DUPLICATE,
+                deduplicator.evaluate(event));
+    }
+
+    @Test
     public void concurrentThreadsHaveOneAcceptedSemanticEvent() throws Exception {
         FakeTicker ticker = new FakeTicker(5_000L);
         DiagnosticsEventDeduplicator deduplicator = deduplicator(8, ticker);
