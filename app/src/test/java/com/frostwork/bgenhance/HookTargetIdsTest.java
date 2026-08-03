@@ -15,6 +15,7 @@ public final class HookTargetIdsTest {
     @Test
     public void serializedValuesRemainBackwardCompatible() {
         assertEquals(Arrays.asList(
+                "diagnostics_bridge_startup",
                 "athena_periodic",
                 "oguard_kill",
                 "oguard_force_stop",

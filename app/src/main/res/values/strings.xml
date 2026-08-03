@@ -87,6 +87,7 @@
     <string name="diagnostics_runtime_system_config">系统框架设置</string>
     <string name="diagnostics_runtime_athena_process">Athena 进程</string>
     <string name="diagnostics_runtime_athena_config">Athena 设置</string>
+    <string name="diagnostics_hook_bridge_startup">运行记录连接</string>
     <string name="diagnostics_process_system_server">系统框架</string>
     <string name="diagnostics_process_athena">Athena</string>
     <string name="diagnostics_process_other">其他进程</string>

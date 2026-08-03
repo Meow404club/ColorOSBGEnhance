@@ -82,6 +82,10 @@ public final class DiagnosticsHookCatalog {
                 Kind.RUNTIME_CONFIG,
                 "diagnostics_runtime_athena_config",
                 "后台管理服务设置同步"));
+        entries.add(system(
+                HookTargetIds.DIAGNOSTICS_BRIDGE_STARTUP,
+                "diagnostics_hook_bridge_startup",
+                "运行记录连接"));
         entries.add(athena(
                 HookTargetIds.ATHENA_PERIODIC,
                 "diagnostics_hook_athena_periodic",

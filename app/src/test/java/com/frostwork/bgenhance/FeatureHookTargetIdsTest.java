@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 import com.frostwork.bgenhance.hooks.HansActiveRecoveryHook;
+import com.frostwork.bgenhance.hooks.DiagnosticsBridgeStartupHook;
 import com.frostwork.bgenhance.hooks.HansFastFreezeHook;
 import com.frostwork.bgenhance.hooks.HansFreezeHook;
 
@@ -34,6 +35,12 @@ public final class FeatureHookTargetIdsTest {
     public void activeRecoveryInstallsAfterEveryHansBehaviorGate() {
         List<FeatureHook> hooks = MainHook.systemServerHooks();
         assertTrue(hooks.get(hooks.size() - 1) instanceof HansActiveRecoveryHook);
+    }
+
+    @Test
+    public void diagnosticsBridgeStartupInstallsBeforeAnyReporterCanUseIt() {
+        List<FeatureHook> hooks = MainHook.systemServerHooks();
+        assertTrue(hooks.get(0) instanceof DiagnosticsBridgeStartupHook);
     }
 
     @Test

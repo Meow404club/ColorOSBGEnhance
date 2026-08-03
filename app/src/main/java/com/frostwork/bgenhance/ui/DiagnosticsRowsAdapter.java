@@ -282,6 +282,9 @@ final class DiagnosticsRowsAdapter
                         ? R.string.diagnostics_runtime_athena_config
                         : R.string.diagnostics_runtime_system_config;
             }
+            if (HookTargetIds.DIAGNOSTICS_BRIDGE_STARTUP.equals(target)) {
+                return R.string.diagnostics_hook_bridge_startup;
+            }
             if (HookTargetIds.ATHENA_PERIODIC.equals(target)) return R.string.periodic_title;
             if (HookTargetIds.OGUARD_KILL.equals(target)) return R.string.oguard_kill_title;
             if (HookTargetIds.OGUARD_FORCE_STOP.equals(target)) return R.string.oguard_stop_title;

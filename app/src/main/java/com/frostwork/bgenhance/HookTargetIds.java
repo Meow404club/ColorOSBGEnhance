@@ -8,6 +8,7 @@ import java.util.List;
 public final class HookTargetIds {
     private HookTargetIds() {}
 
+    public static final String DIAGNOSTICS_BRIDGE_STARTUP = "diagnostics_bridge_startup";
     public static final String ATHENA_PERIODIC = "athena_periodic";
     public static final String OGUARD_KILL = "oguard_kill";
     public static final String OGUARD_FORCE_STOP = "oguard_force_stop";
@@ -28,6 +29,7 @@ public final class HookTargetIds {
     public static final String HANS_ACTIVE_RECOVERY = "hans_active_recovery";
 
     private static final List<String> ALL = Collections.unmodifiableList(Arrays.asList(
+            DIAGNOSTICS_BRIDGE_STARTUP,
             ATHENA_PERIODIC,
             OGUARD_KILL,
             OGUARD_FORCE_STOP,

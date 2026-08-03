@@ -2,6 +2,7 @@ package com.frostwork.bgenhance;
 
 import androidx.annotation.NonNull;
 import com.frostwork.bgenhance.hooks.AlarmWakeHook;
+import com.frostwork.bgenhance.hooks.DiagnosticsBridgeStartupHook;
 import com.frostwork.bgenhance.hooks.HansExemptionHook;
 import com.frostwork.bgenhance.hooks.HansActiveRecoveryHook;
 import com.frostwork.bgenhance.hooks.HansFastFreezeHook;
@@ -85,6 +86,7 @@ public final class MainHook extends XposedModule {
 
     static List<FeatureHook> systemServerHooks() {
         return Collections.unmodifiableList(Arrays.asList(
+                new DiagnosticsBridgeStartupHook(),
                 new OguardKillHook(),
                 new OguardForceStopHook(),
                 new NirvanaHook(),
