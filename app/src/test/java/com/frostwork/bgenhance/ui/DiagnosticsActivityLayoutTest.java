@@ -18,6 +18,7 @@ import android.content.res.Configuration;
 import android.view.ContextThemeWrapper;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import androidx.appcompat.app.AlertDialog;
 import androidx.recyclerview.widget.RecyclerView;
@@ -31,8 +32,9 @@ import com.frostwork.bgenhance.diagnostics.NormalizedDiagnosticsEvent;
 import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
 import com.frostwork.bgenhance.ui.diagnostics.FullDiagnosticsExportViewModel;
 import com.google.android.material.appbar.MaterialToolbar;
+import com.google.android.material.button.MaterialButton;
+import com.google.android.material.button.MaterialButtonToggleGroup;
 import com.google.android.material.materialswitch.MaterialSwitch;
-import com.google.android.material.tabs.TabLayout;
 import org.junit.Test;
 import org.json.JSONObject;
 import org.junit.runner.RunWith;
@@ -73,20 +75,40 @@ public final class DiagnosticsActivityLayoutTest {
                 .resume()
                 .get();
 
-        TabLayout tabs = activity.findViewById(R.id.diagnostics_tabs);
-        assertEquals(3, tabs.getTabCount());
+        MaterialButtonToggleGroup tabs = activity.findViewById(R.id.diagnostics_tabs);
+        assertEquals(3, tabs.getChildCount());
+        assertTrue(tabs.isSingleSelection());
+        assertTrue(tabs.isSelectionRequired());
+        assertEquals(R.id.diagnostics_tab_applications, tabs.getCheckedButtonId());
         assertEquals(activity.getString(R.string.diagnostics_tab_applications),
-                tabs.getTabAt(0).getText());
+                ((TextView) tabs.getChildAt(0)).getText());
         assertEquals(activity.getString(R.string.diagnostics_tab_behaviors),
-                tabs.getTabAt(1).getText());
+                ((TextView) tabs.getChildAt(1)).getText());
         assertEquals(activity.getString(R.string.diagnostics_tab_hooks),
-                tabs.getTabAt(2).getText());
+                ((TextView) tabs.getChildAt(2)).getText());
 
         RecyclerView list = activity.findViewById(R.id.diagnostics_list);
         assertNotNull(list.getAdapter());
         assertTrue(list.getAdapter() instanceof DiagnosticsRowsAdapter);
         assertNull(activity.findViewById(R.id.home_stats_overview));
         activity.finish();
+    }
+
+    @Test
+    public void selectedDiagnosticSegmentSurvivesActivityRecreation() {
+        ActivityController<DiagnosticsActivity> controller =
+                Robolectric.buildActivity(DiagnosticsActivity.class).setup();
+        MaterialButtonToggleGroup tabs =
+                controller.get().findViewById(R.id.diagnostics_tabs);
+
+        tabs.check(R.id.diagnostics_tab_hooks);
+        assertEquals(R.id.diagnostics_tab_hooks, tabs.getCheckedButtonId());
+
+        controller.recreate();
+        MaterialButtonToggleGroup recreatedTabs =
+                controller.get().findViewById(R.id.diagnostics_tabs);
+        assertEquals(R.id.diagnostics_tab_hooks, recreatedTabs.getCheckedButtonId());
+        controller.pause().stop().destroy();
     }
 
     @Test
@@ -113,6 +135,18 @@ public final class DiagnosticsActivityLayoutTest {
     public void portraitAndLandscapeRetainListSpaceAtDoubleFontScale() {
         assertListHasSpace(configuredContext(false), 360, 640, 72);
         assertListHasSpace(configuredContext(true), 640, 320, 48);
+    }
+
+    @Test
+    public void diagnosticsTabsReuseHomepageSegmentedControlInDayAndNightThemes() {
+        assertMatchesHomepageSegments(configuredContext(false, false));
+        assertMatchesHomepageSegments(configuredContext(false, true));
+    }
+
+    @Test
+    public void doubleFontScaleKeepsDiagnosticSegmentsCompleteAndEqualHeight() {
+        assertCompleteSegments(configuredContext(false), 360, 640);
+        assertCompleteSegments(configuredContext(true), 640, 320);
     }
 
     @Test
@@ -335,7 +369,81 @@ public final class DiagnosticsActivityLayoutTest {
                 >= dp(context, minimumListDp));
     }
 
+    private static void assertMatchesHomepageSegments(Context context) {
+        View homepage = LayoutInflater.from(context)
+                .inflate(R.layout.activity_settings, null, false);
+        View diagnostics = LayoutInflater.from(context)
+                .inflate(R.layout.activity_diagnostics, null, false);
+        MaterialButtonToggleGroup homepageGroup = homepage.findViewById(R.id.preset_group);
+        MaterialButtonToggleGroup diagnosticsGroup =
+                diagnostics.findViewById(R.id.diagnostics_tabs);
+        homepageGroup.check(R.id.button_preset_balanced);
+        diagnosticsGroup.check(R.id.diagnostics_tab_applications);
+
+        MaterialButton expected = homepage.findViewById(R.id.button_preset_balanced);
+        MaterialButton actual = diagnostics.findViewById(
+                R.id.diagnostics_tab_applications);
+        assertEquals(expected.getMinWidth(), actual.getMinWidth());
+        assertEquals(expected.getMaxLines(), actual.getMaxLines());
+        assertEquals(2, actual.getMinLines());
+        assertEquals(expected.getPaddingStart(), actual.getPaddingStart());
+        assertEquals(expected.getPaddingEnd(), actual.getPaddingEnd());
+        assertEquals(expected.getTextSize(), actual.getTextSize(), 0.01f);
+        assertEquals(expected.getCurrentTextColor(), actual.getCurrentTextColor());
+        assertSameColorStates(expected.getBackgroundTintList(), actual.getBackgroundTintList());
+        assertSameColorStates(expected.getStrokeColor(), actual.getStrokeColor());
+        android.graphics.RectF bounds = new android.graphics.RectF(0f, 0f, 100f, 100f);
+        float expectedRadius = expected.getShapeAppearanceModel()
+                .getTopLeftCornerSize().getCornerSize(bounds);
+        float actualRadius = actual.getShapeAppearanceModel()
+                .getTopLeftCornerSize().getCornerSize(bounds);
+        assertTrue(actualRadius > 0f);
+        assertEquals(expectedRadius, actualRadius, 0.01f);
+    }
+
+    private static void assertSameColorStates(
+            android.content.res.ColorStateList expected,
+            android.content.res.ColorStateList actual) {
+        assertNotNull(expected);
+        assertNotNull(actual);
+        assertEquals(expected.getDefaultColor(), actual.getDefaultColor());
+        int[] checked = {android.R.attr.state_enabled, android.R.attr.state_checked};
+        assertEquals(
+                expected.getColorForState(checked, expected.getDefaultColor()),
+                actual.getColorForState(checked, actual.getDefaultColor()));
+    }
+
+    private static void assertCompleteSegments(
+            Context context, int widthDp, int heightDp) {
+        View root = LayoutInflater.from(context)
+                .inflate(R.layout.activity_diagnostics, null, false);
+        int width = dp(context, widthDp);
+        int height = dp(context, heightDp);
+        root.measure(
+                View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY));
+        root.layout(0, 0, width, height);
+
+        MaterialButtonToggleGroup group = root.findViewById(R.id.diagnostics_tabs);
+        assertEquals(LinearLayout.HORIZONTAL, group.getOrientation());
+        int segmentHeight = group.getChildAt(0).getMeasuredHeight();
+        for (int index = 0; index < group.getChildCount(); index++) {
+            TextView button = (TextView) group.getChildAt(index);
+            assertEquals(segmentHeight, button.getMeasuredHeight());
+            assertNotNull(button.getLayout());
+            assertTrue(button.getLayout().getLineCount() <= 2);
+            for (int line = 0; line < button.getLayout().getLineCount(); line++) {
+                assertEquals(0, button.getLayout().getEllipsisCount(line));
+            }
+        }
+    }
+
     private static ContextThemeWrapper configuredContext(boolean landscape) {
+        return configuredContext(landscape, false);
+    }
+
+    private static ContextThemeWrapper configuredContext(
+            boolean landscape, boolean night) {
         Application application = RuntimeEnvironment.getApplication();
         Configuration configuration = new Configuration(
                 application.getResources().getConfiguration());
@@ -345,6 +453,8 @@ public final class DiagnosticsActivityLayoutTest {
         configuration.screenWidthDp = landscape ? 640 : 360;
         configuration.screenHeightDp = landscape ? 320 : 640;
         configuration.fontScale = 2f;
+        configuration.uiMode = (configuration.uiMode & ~Configuration.UI_MODE_NIGHT_MASK)
+                | (night ? Configuration.UI_MODE_NIGHT_YES : Configuration.UI_MODE_NIGHT_NO);
         Context configured = application.createConfigurationContext(configuration);
         return new ContextThemeWrapper(configured, R.style.AppTheme);
     }

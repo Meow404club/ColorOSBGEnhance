@@ -16,13 +16,41 @@
         app:navigationIcon="@drawable/ic_arrow_back"
         app:title="@string/diagnostics_title" />
 
-    <com.google.android.material.tabs.TabLayout
+    <com.google.android.material.button.MaterialButtonToggleGroup
         android:id="@+id/diagnostics_tabs"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        app:tabGravity="fill"
-        app:tabIndicatorFullWidth="false"
-        app:tabMode="fixed" />
+        app:checkedButton="@id/diagnostics_tab_applications"
+        app:selectionRequired="true"
+        app:singleSelection="true">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/diagnostics_tab_applications"
+            style="@style/Widget.ColorOSBgEnhance.SegmentedButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minLines="2"
+            android:text="@string/diagnostics_tab_applications" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/diagnostics_tab_behaviors"
+            style="@style/Widget.ColorOSBgEnhance.SegmentedButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minLines="2"
+            android:text="@string/diagnostics_tab_behaviors" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/diagnostics_tab_hooks"
+            style="@style/Widget.ColorOSBgEnhance.SegmentedButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minLines="2"
+            android:text="@string/diagnostics_tab_hooks" />
+    </com.google.android.material.button.MaterialButtonToggleGroup>
 
     <TextView
         android:id="@+id/diagnostics_result_count"

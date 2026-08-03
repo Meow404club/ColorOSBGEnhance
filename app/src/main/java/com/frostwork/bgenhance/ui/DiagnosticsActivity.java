@@ -25,9 +25,9 @@ import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
 import com.frostwork.bgenhance.ui.diagnostics.DiagnosticsViewModel;
 import com.frostwork.bgenhance.ui.diagnostics.FullDiagnosticsExportViewModel;
 import com.google.android.material.appbar.MaterialToolbar;
+import com.google.android.material.button.MaterialButtonToggleGroup;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.materialswitch.MaterialSwitch;
-import com.google.android.material.tabs.TabLayout;
 
 /** Material diagnostics screen backed exclusively by the bounded SQLite store. */
 public final class DiagnosticsActivity extends AppCompatActivity {
@@ -44,7 +44,7 @@ public final class DiagnosticsActivity extends AppCompatActivity {
     private FullDiagnosticsExportViewModel fullExportViewModel;
     private DiagnosticsRowsAdapter adapter;
     private RecyclerView list;
-    private TabLayout tabs;
+    private MaterialButtonToggleGroup tabs;
     private TextView resultCount;
     private View loadingState;
     private TextView loadingText;
@@ -86,7 +86,7 @@ public final class DiagnosticsActivity extends AppCompatActivity {
         viewModel = DiagnosticsViewModel.create(this, backend, this::runOnUiThread);
         viewModel.setListener(this::render);
         bindListPaging();
-        viewModel.load(viewForTab(tabs.getSelectedTabPosition()));
+        viewModel.load(viewForTab(selectedTabIndex()));
     }
 
     @Override
@@ -125,7 +125,7 @@ public final class DiagnosticsActivity extends AppCompatActivity {
 
     @Override
     protected void onSaveInstanceState(Bundle outState) {
-        outState.putInt(STATE_SELECTED_TAB, Math.max(0, tabs.getSelectedTabPosition()));
+        outState.putInt(STATE_SELECTED_TAB, selectedTabIndex());
         super.onSaveInstanceState(outState);
     }
 
@@ -173,23 +173,29 @@ public final class DiagnosticsActivity extends AppCompatActivity {
     }
 
     private void bindTabs(int selectedIndex) {
-        tabs.addTab(tabs.newTab().setText(R.string.diagnostics_tab_applications));
-        tabs.addTab(tabs.newTab().setText(R.string.diagnostics_tab_behaviors));
-        tabs.addTab(tabs.newTab().setText(R.string.diagnostics_tab_hooks));
         int index = Math.max(0, Math.min(2, selectedIndex));
-        TabLayout.Tab selected = tabs.getTabAt(index);
-        if (selected != null) selected.select();
-        tabs.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
-            @Override
-            public void onTabSelected(TabLayout.Tab tab) {
-                if (viewModel != null && !clearInFlight) {
-                    viewModel.load(viewForTab(tab.getPosition()));
-                }
+        tabs.check(buttonIdForTab(index));
+        tabs.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
+            if (isChecked && viewModel != null && !clearInFlight) {
+                viewModel.load(viewForTab(tabIndexForButton(checkedId)));
             }
-
-            @Override public void onTabUnselected(TabLayout.Tab tab) {}
-            @Override public void onTabReselected(TabLayout.Tab tab) {}
         });
+    }
+
+    private int selectedTabIndex() {
+        return tabIndexForButton(tabs.getCheckedButtonId());
+    }
+
+    private static int buttonIdForTab(int position) {
+        if (position == 1) return R.id.diagnostics_tab_behaviors;
+        if (position == 2) return R.id.diagnostics_tab_hooks;
+        return R.id.diagnostics_tab_applications;
+    }
+
+    private static int tabIndexForButton(int buttonId) {
+        if (buttonId == R.id.diagnostics_tab_behaviors) return 1;
+        if (buttonId == R.id.diagnostics_tab_hooks) return 2;
+        return 0;
     }
 
     private void bindVerboseLogging() {
