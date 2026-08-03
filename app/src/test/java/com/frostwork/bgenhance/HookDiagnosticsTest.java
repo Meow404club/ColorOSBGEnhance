@@ -4,7 +4,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
@@ -24,6 +23,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -114,48 +115,42 @@ public final class HookDiagnosticsTest {
         HookDiagnostics.recordEventFromLockedPath(event(1), DiagnosticsResult.PASSED);
 
         assertFalse(flushScheduled().get());
-        assertEquals(1, pendingEvents().get());
-        assertEquals(1, outboxSize());
+        assertEquals(2, pendingItemCount());
+        assertEquals(1, pendingRawHitCount());
+        assertEquals(1, pendingNormalizedEventCount());
+        assertEquals(2, outboxSize());
     }
 
     @Test
-    public void eventThresholdPreemptsExistingFiveSecondFlush() throws Exception {
-        ScheduledThreadPoolExecutor executor = executor();
-        CountDownLatch entered = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        executor.execute(() -> {
-            entered.countDown();
-            try {
-                release.await();
-            } catch (InterruptedException error) {
-                Thread.currentThread().interrupt();
-            }
-        });
-        assertTrue(entered.await(2L, TimeUnit.SECONDS));
-
-        try {
-            HookDiagnostics.recordEvent(event(0), DiagnosticsResult.PASSED);
-            ScheduledFuture<?> delayed = scheduledFlush();
-            assertNotNull(delayed);
-            assertTrue(delayed.getDelay(TimeUnit.SECONDS) > 0L);
-
-            for (int index = 1; index < 31; index++) {
-                HookDiagnostics.recordEvent(event(index), DiagnosticsResult.PASSED);
-            }
-            assertSame(delayed, scheduledFlush());
-            assertFalse(delayed.isCancelled());
-
-            HookDiagnostics.recordEvent(event(31), DiagnosticsResult.PASSED);
-
-            ScheduledFuture<?> immediate = scheduledFlush();
-            assertNotNull(immediate);
-            assertNotSame(delayed, immediate);
-            assertTrue(delayed.isCancelled());
-            assertTrue(immediate.getDelay(TimeUnit.MILLISECONDS) <= 100L);
-        } finally {
-            release.countDown();
-            executor.submit(() -> {}).get(2L, TimeUnit.SECONDS);
+    public void allEventPathsOnlyUpdateMemoryOnTheHookThread() throws Exception {
+        for (int index = 0; index < 32; index++) {
+            HookDiagnostics.recordEvent(event(index), DiagnosticsResult.PASSED);
         }
+
+        assertFalse(flushScheduled().get());
+        assertNull(scheduledFlush());
+        assertEquals(32, pendingRawHitCount());
+        assertEquals(32, pendingNormalizedEventCount());
+    }
+
+    @Test
+    public void rawAndNormalizedQueuesRemainIndependentlyBounded() throws Exception {
+        for (int index = 0; index < 512; index++) {
+            HookDiagnostics.recordRawHookHit(
+                    HookTargetIds.HANS_R_TO_M_TIMING, true, true, "");
+        }
+        HookDiagnostics.recordEventFromLockedPath(event(1_000), DiagnosticsResult.PASSED);
+
+        assertEquals(512, pendingRawHitCount());
+        assertEquals(1, pendingNormalizedEventCount());
+
+        for (int index = 1_001; index < 1_700; index++) {
+            HookDiagnostics.recordEventFromLockedPath(event(index), DiagnosticsResult.PASSED);
+        }
+
+        assertEquals(512, pendingRawHitCount());
+        assertEquals(512, pendingNormalizedEventCount());
+        assertFalse(flushScheduled().get());
     }
 
     @Test
@@ -170,7 +165,7 @@ public final class HookDiagnosticsTest {
         Object inFlight = staticValue(HookDiagnostics.class, "sInFlight");
         assertNotNull(inFlight);
         Bundle stablePayload = (Bundle) instanceValue(inFlight, "payload");
-        assertEquals(1, pendingEvents().get());
+        assertEquals(2, pendingItemCount());
         assertEquals(0L, nextBatchSequence());
 
         flushSnapshot();
@@ -183,30 +178,29 @@ public final class HookDiagnosticsTest {
         assertEquals(first.batchIdentity, retry.batchIdentity);
         assertEquals(0L, retry.batchIdentity.batchSequence);
         assertEquals(first.events.get(0).eventToken, retry.events.get(0).eventToken);
-        assertEquals(0, pendingEvents().get());
+        assertEquals(0, pendingItemCount());
         assertEquals(0, outboxSize());
         assertEquals(1L, nextBatchSequence());
         assertNull(staticValue(HookDiagnostics.class, "sInFlight"));
     }
 
     @Test
-    public void epochChangeDropsOldStateAndRestartsSequenceAtZero() throws Exception {
+    public void epochChangeDropsOldStateAndStartsFreshDeduplicationScope() throws Exception {
         setEpoch(EPOCH);
         provider.enqueue(request -> epochMismatch(EPOCH + 1L, request));
         provider.enqueue(request -> acceptedAck(request, EPOCH + 1L));
         HookDiagnostics.recordEventFromLockedPath(event(1), DiagnosticsResult.PASSED);
-        HookDiagnostics.recordEventFromLockedPath(event(2), DiagnosticsResult.PASSED);
 
         flushSnapshot();
 
         assertEquals(EPOCH + 1L, epoch());
         assertEquals(0L, nextBatchSequence());
-        assertEquals(0, pendingEvents().get());
+        assertEquals(0, pendingItemCount());
         assertEquals(0, outboxSize());
         assertNull(staticValue(HookDiagnostics.class, "sInFlight"));
         assertEquals(-1L, reportedStickyGeneration().get());
 
-        HookDiagnostics.recordEventFromLockedPath(event(99), DiagnosticsResult.PASSED);
+        HookDiagnostics.recordEventFromLockedPath(event(1), DiagnosticsResult.PASSED);
         flushSnapshot();
 
         DiagnosticsWriteBatch oldBatch = parse(provider.requests.get(0));
@@ -215,9 +209,9 @@ public final class HookDiagnosticsTest {
         assertEquals(0L, oldBatch.batchIdentity.batchSequence);
         assertEquals(EPOCH + 1L, newBatch.batchIdentity.epoch);
         assertEquals(0L, newBatch.batchIdentity.batchSequence);
-        assertEquals("example.app99", newBatch.events.get(0).packageName);
+        assertEquals("example.app1", newBatch.events.get(0).packageName);
         assertEquals(1L, nextBatchSequence());
-        assertEquals(0, pendingEvents().get());
+        assertEquals(0, pendingItemCount());
     }
 
     @Test
@@ -269,7 +263,7 @@ public final class HookDiagnosticsTest {
     }
 
     @Test
-    public void eventPairsFragmentAtWireBoundaryAndCommitOnlyAcknowledgedPrefix()
+    public void independentStreamsFragmentAndCommitOnlyAcknowledgedPrefixes()
             throws Exception {
         setEpoch(EPOCH);
         provider.enqueue(request -> acceptedAck(request, EPOCH));
@@ -285,8 +279,10 @@ public final class HookDiagnosticsTest {
         assertEquals(128, first.rawHits.size());
         assertEquals(128, first.events.size());
         assertEquals(0L, first.batchIdentity.batchSequence);
-        assertEquals(1, pendingEvents().get());
-        assertEquals(1, outboxSize());
+        assertEquals(2, pendingItemCount());
+        assertEquals(1, pendingRawHitCount());
+        assertEquals(1, pendingNormalizedEventCount());
+        assertEquals(2, outboxSize());
         assertEquals(1L, nextBatchSequence());
 
         flushSnapshot();
@@ -299,7 +295,7 @@ public final class HookDiagnosticsTest {
         assertNotEquals(
                 first.events.get(first.events.size() - 1).eventToken,
                 second.events.get(0).eventToken);
-        assertEquals(0, pendingEvents().get());
+        assertEquals(0, pendingItemCount());
         assertEquals(2L, nextBatchSequence());
     }
 
@@ -317,7 +313,7 @@ public final class HookDiagnosticsTest {
         flushSnapshot();
 
         assertEquals(1L, reportedStickyGeneration().get());
-        assertEquals(0, pendingEvents().get());
+        assertEquals(0, pendingItemCount());
         assertEquals(1L, nextBatchSequence());
 
         flushSnapshot();
@@ -339,6 +335,88 @@ public final class HookDiagnosticsTest {
         assertEquals(1L, sticky.batchIdentity.batchSequence);
         assertEquals(2L, reportedStickyGeneration().get());
         assertEquals(2L, nextBatchSequence());
+    }
+
+    @Test
+    public void semanticDuplicatesAcrossHooksAndThreadsKeepEveryRawHit() throws Exception {
+        setEpoch(EPOCH);
+        provider.enqueue(request -> acceptedAck(request, EPOCH));
+        int workers = 16;
+        ExecutorService executor = Executors.newFixedThreadPool(workers);
+        CountDownLatch ready = new CountDownLatch(workers);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<?>> futures = new ArrayList<>();
+        try {
+            for (int index = 0; index < workers; index++) {
+                final int worker = index;
+                futures.add(executor.submit(() -> {
+                    ready.countDown();
+                    assertTrue(start.await(5L, TimeUnit.SECONDS));
+                    String feature = (worker & 1) == 0
+                            ? FeatureIds.OGUARD_KILL : FeatureIds.OSENSE_PER_PROCESS;
+                    HookDiagnostics.recordEventFromLockedPath(
+                            new HookEvent(
+                                    feature,
+                                    500 + worker,
+                                    10_123,
+                                    "com.example.same",
+                                    "com.example.same:worker",
+                                    "hook_path_" + worker),
+                            DiagnosticsResult.BLOCKED);
+                    return null;
+                }));
+            }
+            assertTrue(ready.await(5L, TimeUnit.SECONDS));
+            start.countDown();
+            for (Future<?> future : futures) future.get(5L, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
+
+        flushSnapshot();
+
+        DiagnosticsWriteBatch batch = parse(provider.requests.get(0));
+        assertEquals(workers, batch.rawHits.size());
+        assertEquals(1, batch.events.size());
+        assertEquals(0, pendingItemCount());
+    }
+
+    @Test
+    public void differentSemanticOutcomesAreNotDeduplicated() throws Exception {
+        setEpoch(EPOCH);
+        provider.enqueue(request -> acceptedAck(request, EPOCH));
+        HookEvent sameBehavior = new HookEvent(
+                FeatureIds.OGUARD_KILL,
+                502,
+                10_123,
+                "com.example.same",
+                "com.example.same",
+                "same_path");
+
+        HookDiagnostics.recordEventFromLockedPath(sameBehavior, DiagnosticsResult.PASSED);
+        HookDiagnostics.recordEventFromLockedPath(sameBehavior, DiagnosticsResult.BLOCKED);
+        flushSnapshot();
+
+        DiagnosticsWriteBatch batch = parse(provider.requests.get(0));
+        assertEquals(2, batch.rawHits.size());
+        assertEquals(2, batch.events.size());
+    }
+
+    @Test
+    public void diagnosticOnlyHookHitNeverCreatesANormalizedEvent() throws Exception {
+        setEpoch(EPOCH);
+        provider.enqueue(request -> acceptedAck(request, EPOCH));
+
+        HookDiagnostics.recordRawHookHit(
+                HookTargetIds.HANS_R_TO_M_TIMING, true, true, "");
+        flushSnapshot();
+
+        DiagnosticsWriteBatch batch = parse(provider.requests.get(0));
+        assertEquals(1, batch.rawHits.size());
+        assertEquals(HookTargetIds.HANS_R_TO_M_TIMING,
+                batch.rawHits.get(0).hookTargetId);
+        assertTrue(batch.events.isEmpty());
+        assertEquals(0, pendingItemCount());
     }
 
     @Test
@@ -439,8 +517,8 @@ public final class HookDiagnosticsTest {
     }
 
     private static void assertUncommitted(String error) throws Exception {
-        assertEquals(1, pendingEvents().get());
-        assertEquals(1, outboxSize());
+        assertEquals(2, pendingItemCount());
+        assertEquals(2, outboxSize());
         assertEquals(0L, nextBatchSequence());
         assertNotNull(staticValue(HookDiagnostics.class, "sInFlight"));
         assertEquals(error, staticValue(HookDiagnostics.class, "sTransportError"));
@@ -466,8 +544,16 @@ public final class HookDiagnosticsTest {
         return (AtomicBoolean) staticValue(HookDiagnostics.class, "FLUSH_SCHEDULED");
     }
 
-    private static AtomicInteger pendingEvents() throws Exception {
-        return (AtomicInteger) staticValue(HookDiagnostics.class, "PENDING_EVENTS");
+    private static int pendingItemCount() throws Exception {
+        return pendingRawHitCount() + pendingNormalizedEventCount();
+    }
+
+    private static int pendingRawHitCount() throws Exception {
+        return ((AtomicInteger) instanceValue(outboxState(), "rawHitCount")).get();
+    }
+
+    private static int pendingNormalizedEventCount() throws Exception {
+        return ((AtomicInteger) instanceValue(outboxState(), "eventCount")).get();
     }
 
     private static AtomicLong stickyGeneration() throws Exception {
@@ -488,11 +574,12 @@ public final class HookDiagnosticsTest {
     }
 
     private static int outboxSize() throws Exception {
-        Object lock = staticValue(HookDiagnostics.class, "OUTBOX_LOCK");
-        synchronized (lock) {
-            return ((ArrayDeque<?>) staticValue(
-                    HookDiagnostics.class, "EVENT_OUTBOX")).size();
-        }
+        return ((java.util.Queue<?>) instanceValue(outboxState(), "rawHits")).size()
+                + ((java.util.Queue<?>) instanceValue(outboxState(), "events")).size();
+    }
+
+    private static Object outboxState() throws Exception {
+        return ((AtomicReference<?>) staticValue(HookDiagnostics.class, "OUTBOX")).get();
     }
 
     private static void resetHookDiagnostics() throws Exception {
@@ -515,12 +602,10 @@ public final class HookDiagnosticsTest {
         }
         executor.purge();
 
-        Object outboxLock = staticValue(HookDiagnostics.class, "OUTBOX_LOCK");
-        synchronized (outboxLock) {
-            ((ArrayDeque<?>) staticValue(
-                    HookDiagnostics.class, "EVENT_OUTBOX")).clear();
-            pendingEvents().set(0);
-        }
+        Method resetForEpoch = HookDiagnostics.class.getDeclaredMethod(
+                "resetForEpoch", long.class);
+        resetForEpoch.setAccessible(true);
+        resetForEpoch.invoke(null, 0L);
         clearMap("FEATURE_STATUSES");
         clearMap("FEATURE_UPDATED_AT");
         clearMap("PROCESS_STAGES");

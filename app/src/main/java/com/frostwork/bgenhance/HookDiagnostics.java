@@ -6,6 +6,8 @@ import android.os.Process;
 import android.os.SystemClock;
 import android.util.Log;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsBootId;
+import com.frostwork.bgenhance.diagnostics.DiagnosticsEventDeduplicator;
+import com.frostwork.bgenhance.diagnostics.DiagnosticsEventNormalizer;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsWireEncoder;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsWireParser;
@@ -18,7 +20,6 @@ import com.frostwork.bgenhance.residency.model.ResourceType;
 import com.frostwork.bgenhance.residency.model.WakeSource;
 import com.frostwork.bgenhance.residency.runtime.IdentityResolutionStatus;
 import com.frostwork.bgenhance.residency.runtime.RuntimeConfigSnapshot;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -27,6 +28,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -43,18 +45,18 @@ public final class HookDiagnostics {
     private HookDiagnostics() {}
 
     private static final long FLUSH_INTERVAL_MS = 5_000L;
-    private static final int FLUSH_EVENT_THRESHOLD = 32;
-    private static final int MAX_PENDING_EVENTS = 512;
+    private static final int MAX_PENDING_RAW_HITS = 512;
+    private static final int MAX_PENDING_NORMALIZED_EVENTS = 512;
+    private static final int MAX_OUTBOX_CAS_ATTEMPTS = 32;
     private static final int MAX_STICKY_STATES = 64;
-    private static final Object OUTBOX_LOCK = new Object();
     private static final Object FLUSH_SCHEDULE_LOCK = new Object();
-    private static final ArrayDeque<PendingEvent> EVENT_OUTBOX = new ArrayDeque<>();
+    private static final AtomicReference<OutboxState> OUTBOX =
+            new AtomicReference<>(new OutboxState());
     private static final Map<String, String> FEATURE_STATUSES = new ConcurrentHashMap<>();
     private static final Map<String, Long> FEATURE_UPDATED_AT = new ConcurrentHashMap<>();
     private static final Map<String, String> PROCESS_STAGES = new ConcurrentHashMap<>();
     private static final Map<String, String> PROCESS_ERRORS = new ConcurrentHashMap<>();
     private static final Map<String, Long> PROCESS_UPDATED_AT = new ConcurrentHashMap<>();
-    private static final AtomicInteger PENDING_EVENTS = new AtomicInteger();
     private static final AtomicBoolean FLUSH_SCHEDULED = new AtomicBoolean();
     private static final AtomicLong STICKY_GENERATION = new AtomicLong();
     private static final AtomicLong REPORTED_STICKY_GENERATION = new AtomicLong(-1L);
@@ -146,56 +148,92 @@ public final class HookDiagnostics {
     }
 
     public static void recordEvent(HookEvent event, String result) {
-        recordEvent(event, result, null, true);
+        recordEvent(event, result, null);
     }
 
     /** Updates bounded memory only while a system lock is held. */
     public static void recordEventFromLockedPath(HookEvent event, String result) {
-        recordEvent(event, result, null, false);
+        recordEvent(event, result, null);
     }
 
     public static void recordDecision(
             HookEvent event, String result, DecisionTrace trace) {
-        recordEvent(event, result, trace, true);
+        recordEvent(event, result, trace);
     }
 
     public static void recordDecisionFromLockedPath(
             HookEvent event, String result, DecisionTrace trace) {
-        recordEvent(event, result, trace, false);
+        recordEvent(event, result, trace);
+    }
+
+    /** Records a diagnostic-only Hook invocation without creating a user-visible event. */
+    public static void recordRawHookHit(
+            String hookTargetId,
+            boolean parsed,
+            boolean identityResolved,
+            String errorCode) {
+        try {
+            String target = stableId(hookTargetId, "");
+            if (target.isEmpty()) return;
+            RevisionPair revisions = currentRevisions(null);
+            RawHookHit rawHit = RawHookHit.builder()
+                    .timestampMillis(System.currentTimeMillis())
+                    .bootId(BOOT_ID)
+                    .processId(safeCurrentProcessId())
+                    .featureId(featureForHookTarget(target))
+                    .hookTargetId(target)
+                    .configRevision(revisions.configRevision)
+                    .policyRevision(revisions.policyRevision)
+                    .parsed(parsed)
+                    .identityResolved(identityResolved)
+                    .errorCode(errorCode)
+                    .build();
+            if (!OUTBOX.get().offerRawHit(rawHit)) markQueueUnavailable("raw");
+        } catch (Throwable ignored) {
+            markRecordFailure();
+        }
     }
 
     private static void recordEvent(
-            HookEvent event, String result, DecisionTrace trace,
-            boolean scheduleImmediately) {
-        if (event == null || stableId(event.feature, "").isEmpty()) return;
-        RuntimeConfigSnapshot snapshot = HookConfig.runtimeSnapshot();
-        PendingEvent pending = new PendingEvent(
-                event,
-                stableId(result, DiagnosticsResult.PASSED),
-                trace,
-                System.currentTimeMillis(),
-                diagnosticRevision(trace == null
-                        ? snapshot.configRevision() : trace.configRevision()),
-                diagnosticRevision(trace == null
-                        ? snapshot.policyRevision() : trace.policyRevision()),
-                SENDER_INSTANCE_ID + ":" + EVENT_SEQUENCE.getAndIncrement());
-        boolean accepted;
-        synchronized (OUTBOX_LOCK) {
-            accepted = EVENT_OUTBOX.size() < MAX_PENDING_EVENTS;
-            if (accepted) {
-                EVENT_OUTBOX.addLast(pending);
-                PENDING_EVENTS.incrementAndGet();
+            HookEvent event, String result, DecisionTrace trace) {
+        try {
+            if (event == null || stableId(event.feature, "").isEmpty()) return;
+            String stableResult = stableId(result, DiagnosticsResult.PASSED);
+            long timestamp = System.currentTimeMillis();
+            String processId = safeCurrentProcessId();
+            RevisionPair revisions = currentRevisions(trace);
+            String hookTarget = safeHookTargetFor(event, trace);
+            boolean resolved = safeIdentityResolved(trace, event);
+            String failOpen = DiagnosticsResult.countsAsFailOpen(stableResult)
+                    ? safeFailOpenReason(stableResult, trace) : "";
+            RawHookHit rawHit = RawHookHit.builder()
+                    .timestampMillis(timestamp)
+                    .bootId(BOOT_ID)
+                    .processId(processId)
+                    .featureId(event.feature)
+                    .hookTargetId(hookTarget)
+                    .configRevision(revisions.configRevision)
+                    .policyRevision(revisions.policyRevision)
+                    .parsed(true)
+                    .identityResolved(resolved)
+                    .errorCode(failOpen)
+                    .build();
+            OutboxState outbox = OUTBOX.get();
+            if (!outbox.offerRawHit(rawHit)) markQueueUnavailable("raw");
+            try {
+                DiagnosticsEventNormalizer.DecisionData decision =
+                        normalizedDecision(event, stableResult, trace, failOpen);
+                DiagnosticsEventNormalizer.Result normalized =
+                        DiagnosticsEventNormalizer.normalize(rawHit, decision);
+                if (normalized.accepted()) {
+                    OfferResult offered = outbox.offerNormalizedEvent(normalized.event);
+                    if (offered == OfferResult.UNAVAILABLE) markQueueUnavailable("event");
+                }
+            } catch (Throwable ignored) {
+                markRecordFailure();
             }
-        }
-        if (!accepted) {
-            sTransportError = "diagnostics_queue_full";
-            STICKY_GENERATION.incrementAndGet();
-            return;
-        }
-        if (scheduleImmediately && PENDING_EVENTS.get() >= FLUSH_EVENT_THRESHOLD) {
-            scheduleFlush(0L);
-        } else if (scheduleImmediately) {
-            scheduleFlush(FLUSH_INTERVAL_MS);
+        } catch (Throwable ignored) {
+            markRecordFailure();
         }
     }
 
@@ -208,8 +246,9 @@ public final class HookDiagnostics {
     }
 
     private static boolean hasPendingData() {
+        OutboxState outbox = OUTBOX.get();
         return sInFlight != null
-                || PENDING_EVENTS.get() > 0
+                || outbox.pendingItemCount() > 0
                 || STICKY_GENERATION.get() > REPORTED_STICKY_GENERATION.get();
     }
 
@@ -270,10 +309,10 @@ public final class HookDiagnostics {
         boolean includeSticky = stickyGeneration > REPORTED_STICKY_GENERATION.get();
         List<DiagnosticsHookState> states = includeSticky
                 ? stickyStates(processId) : Collections.emptyList();
-        int eventCapacity = Math.max(0,
-                (DiagnosticsWireParser.MAX_WIRE_ITEMS - states.size()) / 2);
-        List<PendingEvent> pending = snapshotEvents(eventCapacity);
-        if (pending.isEmpty() && states.isEmpty()) return null;
+        int itemCapacity = Math.max(0, DiagnosticsWireParser.MAX_WIRE_ITEMS - states.size());
+        OutboxState outbox = OUTBOX.get();
+        Snapshot snapshot = outbox.snapshot(itemCapacity);
+        if (snapshot.isEmpty() && states.isEmpty()) return null;
 
         DiagnosticsWriteBatch.Builder batch = DiagnosticsWriteBatch.builder()
                 .wireIdentity(
@@ -284,32 +323,19 @@ public final class HookDiagnostics {
                         sEpoch,
                         sNextBatchSequence)
                 .countingMode(DiagnosticsWriteBatch.CountingMode.TYPED);
-        for (PendingEvent value : pending) {
-            EventPair pair = value.toPair(processId);
-            batch.addRawHit(pair.rawHit);
-            if (pair.event != null) batch.addEvent(pair.event);
-        }
+        for (RawHookHit rawHit : snapshot.rawHits) batch.addRawHit(rawHit);
+        for (NormalizedDiagnosticsEvent event : snapshot.events) batch.addEvent(event);
         for (DiagnosticsHookState state : states) batch.addHookState(state);
         DiagnosticsWriteBatch payload = batch.build();
         return new InFlightBatch(
                 DiagnosticsWireEncoder.encodeTyped(payload),
-                pending.size(),
+                outbox,
+                snapshot.rawHits.size(),
+                snapshot.events.size(),
                 includeSticky ? stickyGeneration : -1L,
                 payload.size(),
                 sEpoch,
                 sNextBatchSequence);
-    }
-
-    private static List<PendingEvent> snapshotEvents(int limit) {
-        if (limit <= 0) return Collections.emptyList();
-        ArrayList<PendingEvent> values = new ArrayList<>(Math.min(limit, PENDING_EVENTS.get()));
-        synchronized (OUTBOX_LOCK) {
-            for (PendingEvent event : EVENT_OUTBOX) {
-                if (values.size() >= limit) break;
-                values.add(event);
-            }
-        }
-        return values;
     }
 
     private static void sendInFlight(InFlightBatch inFlight) {
@@ -344,7 +370,7 @@ public final class HookDiagnostics {
                     "bridge_rejected");
             return;
         }
-        commitEvents(inFlight.eventCount);
+        inFlight.outbox.commit(inFlight.rawHitCount, inFlight.normalizedEventCount);
         if (inFlight.stickyGeneration >= 0L) {
             REPORTED_STICKY_GENERATION.accumulateAndGet(
                     inFlight.stickyGeneration, Math::max);
@@ -352,19 +378,6 @@ public final class HookDiagnostics {
         sNextBatchSequence = inFlight.sequence + 1L;
         sInFlight = null;
         sTransportError = "";
-    }
-
-    private static void commitEvents(int count) {
-        if (count <= 0) return;
-        synchronized (OUTBOX_LOCK) {
-            int removed = 0;
-            while (removed < count && !EVENT_OUTBOX.isEmpty()) {
-                EVENT_OUTBOX.removeFirst();
-                removed++;
-            }
-            PENDING_EVENTS.addAndGet(-removed);
-            if (PENDING_EVENTS.get() < 0) PENDING_EVENTS.set(0);
-        }
     }
 
     private static boolean refreshBridgeState() {
@@ -394,10 +407,7 @@ public final class HookDiagnostics {
     }
 
     private static void resetForEpoch(long epoch) {
-        synchronized (OUTBOX_LOCK) {
-            EVENT_OUTBOX.clear();
-            PENDING_EVENTS.set(0);
-        }
+        OUTBOX.set(new OutboxState());
         sInFlight = null;
         sEpoch = Math.max(0L, epoch);
         sNextBatchSequence = 0L;
@@ -469,6 +479,86 @@ public final class HookDiagnostics {
     private static String currentProcessId() {
         return stableId(HookConfig.processExtras().getString(
                 BridgeContract.EXTRA_PROCESS_ID, "unknown"), "unknown");
+    }
+
+    private static String safeCurrentProcessId() {
+        try {
+            return currentProcessId();
+        } catch (Throwable ignored) {
+            return "unknown";
+        }
+    }
+
+    private static RevisionPair currentRevisions(DecisionTrace trace) {
+        if (trace != null) {
+            try {
+                return new RevisionPair(
+                        diagnosticRevision(trace.configRevision()),
+                        diagnosticRevision(trace.policyRevision()));
+            } catch (Throwable ignored) {
+                return RevisionPair.unknown();
+            }
+        }
+        try {
+            RuntimeConfigSnapshot snapshot = HookConfig.runtimeSnapshot();
+            return new RevisionPair(
+                    diagnosticRevision(snapshot.configRevision()),
+                    diagnosticRevision(snapshot.policyRevision()));
+        } catch (Throwable ignored) {
+            return RevisionPair.unknown();
+        }
+    }
+
+    private static String safeHookTargetFor(HookEvent event, DecisionTrace trace) {
+        try {
+            return hookTargetFor(event, trace);
+        } catch (Throwable ignored) {
+            return "unmapped_event";
+        }
+    }
+
+    private static boolean safeIdentityResolved(DecisionTrace trace, HookEvent event) {
+        try {
+            return identityResolved(trace, event);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static String safeFailOpenReason(String result, DecisionTrace trace) {
+        try {
+            return trace == null ? result : trace.reason().name();
+        } catch (Throwable ignored) {
+            return result;
+        }
+    }
+
+    private static DiagnosticsEventNormalizer.DecisionData normalizedDecision(
+            HookEvent event, String result, DecisionTrace trace, String failOpen) {
+        DiagnosticsEventNormalizer.DecisionData decision =
+                new DiagnosticsEventNormalizer.DecisionData();
+        decision.behavior = behaviorFor(event.feature);
+        decision.source = sourceFor(event);
+        decision.packageName = event.packageName;
+        decision.uid = event.uid;
+        decision.scene = event.scene;
+        decision.reasonCode = event.code;
+        decision.mode = modeFor(trace);
+        decision.decision = decisionFor(result, trace);
+        decision.result = result;
+        decision.failOpenReason = failOpen;
+        decision.rawHitCount = 1;
+        return decision;
+    }
+
+    private static void markQueueUnavailable(String kind) {
+        sTransportError = "diagnostics_" + kind + "_queue_unavailable";
+        STICKY_GENERATION.incrementAndGet();
+    }
+
+    private static void markRecordFailure() {
+        sTransportError = "diagnostics_record_failed";
+        STICKY_GENERATION.incrementAndGet();
     }
 
     private static String featureForHookTarget(String target) {
@@ -655,93 +745,156 @@ public final class HookDiagnostics {
         Log.w(ModuleSettings.TAG, "diagnostics transport failed operation=" + operation, error);
     }
 
-    private static final class PendingEvent {
-        final HookEvent event;
-        final String result;
-        final DecisionTrace trace;
-        final long timestamp;
-        final int configRevision;
-        final int policyRevision;
-        final String token;
+    private static final class OutboxState {
+        private final ConcurrentLinkedQueue<RawHookHit> rawHits =
+                new ConcurrentLinkedQueue<>();
+        private final ConcurrentLinkedQueue<NormalizedDiagnosticsEvent> events =
+                new ConcurrentLinkedQueue<>();
+        private final AtomicInteger rawHitCount = new AtomicInteger();
+        private final AtomicInteger eventCount = new AtomicInteger();
+        private final DiagnosticsEventDeduplicator deduplicator =
+                new DiagnosticsEventDeduplicator();
 
-        PendingEvent(
-                HookEvent event, String result, DecisionTrace trace, long timestamp,
-                int configRevision, int policyRevision, String token) {
-            this.event = event;
-            this.result = result;
-            this.trace = trace;
-            this.timestamp = timestamp;
-            this.configRevision = configRevision;
-            this.policyRevision = policyRevision;
-            this.token = token;
+        private boolean offerRawHit(RawHookHit rawHit) {
+            if (rawHit == null || !rawHit.isStorable()
+                    || !reserve(rawHitCount, MAX_PENDING_RAW_HITS)) {
+                return false;
+            }
+            try {
+                if (rawHits.offer(rawHit)) return true;
+            } catch (Throwable ignored) {
+                // Diagnostics admission is fail-open and never changes Hook behavior.
+            }
+            rawHitCount.decrementAndGet();
+            return false;
         }
 
-        EventPair toPair(String processId) {
-            String hookTarget = hookTargetFor(event, trace);
-            boolean resolved = identityResolved(trace, event);
-            String failOpen = DiagnosticsResult.countsAsFailOpen(result)
-                    ? (trace == null ? result : trace.reason().name()) : "";
-            RawHookHit raw = RawHookHit.builder()
-                    .timestampMillis(timestamp)
-                    .bootId(BOOT_ID)
-                    .processId(processId)
-                    .featureId(event.feature)
-                    .hookTargetId(hookTarget)
-                    .configRevision(configRevision)
-                    .policyRevision(policyRevision)
-                    .parsed(true)
-                    .identityResolved(resolved)
-                    .errorCode(failOpen)
-                    .build();
-            NormalizedDiagnosticsEvent normalized = NormalizedDiagnosticsEvent.builder()
-                    .timestampMillis(timestamp)
-                    .bootId(BOOT_ID)
-                    .processId(processId)
-                    .featureId(event.feature)
-                    .hookTargetId(hookTarget)
-                    .behavior(behaviorFor(event.feature))
-                    .source(sourceFor(event))
-                    .packageName(event.packageName)
-                    .uid(event.uid)
-                    .scene(event.scene)
-                    .reasonCode(event.code)
-                    .configRevision(configRevision)
-                    .policyRevision(policyRevision)
-                    .mode(modeFor(trace))
-                    .decision(decisionFor(result, trace))
-                    .result(result)
-                    .failOpenReason(failOpen)
-                    .rawHitCount(1)
-                    .identityResolved(resolved)
-                    .eventToken(token)
-                    .build();
-            return new EventPair(raw, normalized.isStorable() ? normalized : null);
+        private OfferResult offerNormalizedEvent(NormalizedDiagnosticsEvent event) {
+            if (event == null || !event.isStorable()
+                    || !reserve(eventCount, MAX_PENDING_NORMALIZED_EVENTS)) {
+                return OfferResult.UNAVAILABLE;
+            }
+            try {
+                if (!deduplicator.shouldRecord(event)) {
+                    eventCount.decrementAndGet();
+                    return OfferResult.DUPLICATE;
+                }
+                NormalizedDiagnosticsEvent accepted = event.copyBuilder()
+                        .eventToken(SENDER_INSTANCE_ID + ":"
+                                + EVENT_SEQUENCE.getAndIncrement())
+                        .build();
+                if (events.offer(accepted)) return OfferResult.ACCEPTED;
+            } catch (Throwable ignored) {
+                // Diagnostics admission is fail-open and never changes Hook behavior.
+            }
+            eventCount.decrementAndGet();
+            return OfferResult.UNAVAILABLE;
+        }
+
+        private int pendingItemCount() {
+            return rawHitCount.get() + eventCount.get();
+        }
+
+        private Snapshot snapshot(int limit) {
+            if (limit <= 0) return Snapshot.empty();
+            int rawPending = Math.min(rawHitCount.get(), limit);
+            int eventPending = Math.min(eventCount.get(), limit);
+            int rawLimit = Math.min(rawPending, (limit + 1) / 2);
+            int eventLimit = Math.min(eventPending, limit - rawLimit);
+            int remaining = limit - rawLimit - eventLimit;
+            int extraRaw = Math.min(Math.max(0, rawPending - rawLimit), remaining);
+            rawLimit += extraRaw;
+            remaining -= extraRaw;
+            eventLimit += Math.min(Math.max(0, eventPending - eventLimit), remaining);
+            return new Snapshot(
+                    snapshotQueue(rawHits, rawLimit),
+                    snapshotQueue(events, eventLimit));
+        }
+
+        private void commit(int rawCount, int normalizedCount) {
+            commitQueue(rawHits, rawHitCount, rawCount);
+            commitQueue(events, eventCount, normalizedCount);
+        }
+
+        private static boolean reserve(AtomicInteger count, int capacity) {
+            for (int attempt = 0; attempt < MAX_OUTBOX_CAS_ATTEMPTS; attempt++) {
+                int current = count.get();
+                if (current >= capacity) return false;
+                if (count.compareAndSet(current, current + 1)) return true;
+            }
+            return false;
+        }
+
+        private static <T> List<T> snapshotQueue(ConcurrentLinkedQueue<T> queue, int limit) {
+            if (limit <= 0) return Collections.emptyList();
+            ArrayList<T> values = new ArrayList<>(limit);
+            for (T value : queue) {
+                if (values.size() >= limit) break;
+                values.add(value);
+            }
+            return values;
+        }
+
+        private static <T> void commitQueue(
+                ConcurrentLinkedQueue<T> queue, AtomicInteger count, int limit) {
+            int removed = 0;
+            while (removed < limit && queue.poll() != null) removed++;
+            if (removed > 0) count.addAndGet(-removed);
         }
     }
 
-    private static final class EventPair {
-        final RawHookHit rawHit;
-        final NormalizedDiagnosticsEvent event;
+    private enum OfferResult {
+        ACCEPTED,
+        DUPLICATE,
+        UNAVAILABLE
+    }
 
-        EventPair(RawHookHit rawHit, NormalizedDiagnosticsEvent event) {
-            this.rawHit = rawHit;
-            this.event = event;
+    private static final class Snapshot {
+        final List<RawHookHit> rawHits;
+        final List<NormalizedDiagnosticsEvent> events;
+
+        Snapshot(List<RawHookHit> rawHits, List<NormalizedDiagnosticsEvent> events) {
+            this.rawHits = rawHits;
+            this.events = events;
         }
+
+        static Snapshot empty() {
+            return new Snapshot(Collections.emptyList(), Collections.emptyList());
+        }
+
+        boolean isEmpty() { return rawHits.isEmpty() && events.isEmpty(); }
+    }
+
+    private static final class RevisionPair {
+        final int configRevision;
+        final int policyRevision;
+
+        RevisionPair(int configRevision, int policyRevision) {
+            this.configRevision = configRevision;
+            this.policyRevision = policyRevision;
+        }
+
+        static RevisionPair unknown() { return new RevisionPair(-1, -1); }
     }
 
     private static final class InFlightBatch {
         final Bundle payload;
-        final int eventCount;
+        final OutboxState outbox;
+        final int rawHitCount;
+        final int normalizedEventCount;
         final long stickyGeneration;
         final int itemCount;
         final long epoch;
         final long sequence;
 
         InFlightBatch(
-                Bundle payload, int eventCount, long stickyGeneration,
-                int itemCount, long epoch, long sequence) {
+                Bundle payload, OutboxState outbox,
+                int rawHitCount, int normalizedEventCount,
+                long stickyGeneration, int itemCount, long epoch, long sequence) {
             this.payload = payload;
-            this.eventCount = eventCount;
+            this.outbox = outbox;
+            this.rawHitCount = rawHitCount;
+            this.normalizedEventCount = normalizedEventCount;
             this.stickyGeneration = stickyGeneration;
             this.itemCount = itemCount;
             this.epoch = epoch;

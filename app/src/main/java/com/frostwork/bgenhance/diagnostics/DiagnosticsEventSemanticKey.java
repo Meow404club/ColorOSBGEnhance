@@ -1,7 +1,5 @@
 package com.frostwork.bgenhance.diagnostics;
 
-import java.util.Objects;
-
 /** Stable user-event identity that deliberately excludes Hook and transport metadata. */
 public final class DiagnosticsEventSemanticKey {
     private final int uid;
@@ -45,6 +43,11 @@ public final class DiagnosticsEventSemanticKey {
 
     @Override
     public int hashCode() {
-        return Objects.hash(uid, packageName, behavior, source, decision, result);
+        int hash = uid;
+        hash = 31 * hash + packageName.hashCode();
+        hash = 31 * hash + behavior.hashCode();
+        hash = 31 * hash + source.hashCode();
+        hash = 31 * hash + decision.hashCode();
+        return 31 * hash + result.hashCode();
     }
 }

@@ -4,7 +4,10 @@ import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
-/** Fixed-capacity, non-blocking TTL gate for normalized user-visible events. */
+/**
+ * Fixed-capacity, non-blocking TTL gate for normalized user-visible events.
+ * Each instance is deliberately process- and epoch-local; restart boundaries start empty.
+ */
 public final class DiagnosticsEventDeduplicator {
     public static final int DEFAULT_CAPACITY = 512;
     public static final long DEFAULT_TTL_NANOS = TimeUnit.MILLISECONDS.toNanos(500L);
@@ -145,7 +148,8 @@ public final class DiagnosticsEventDeduplicator {
             }
             int oldest = 0;
             for (int index = 1; index < liveCount; index++) {
-                if (live[index].acceptedAtNanos < live[oldest].acceptedAtNanos) {
+                if (elapsedMagnitude(now, live[index].acceptedAtNanos)
+                        > elapsedMagnitude(now, live[oldest].acceptedAtNanos)) {
                     oldest = index;
                 }
             }

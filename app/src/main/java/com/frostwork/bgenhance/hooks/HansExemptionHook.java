@@ -1,6 +1,7 @@
 package com.frostwork.bgenhance.hooks;
 
 import com.frostwork.bgenhance.FeatureHook;
+import com.frostwork.bgenhance.HookDiagnostics;
 import com.frostwork.bgenhance.HookResidencyRuntime;
 import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.HookUtils;
@@ -60,11 +61,12 @@ public final class HansExemptionHook implements FeatureHook {
     }
 
     private Object intercept(XposedInterface.Chain chain) throws Throwable {
-        return complete(chain::proceed, () -> decide(chain));
+        ResidencyTarget target = target(chain);
+        recordRawHit(target != null);
+        return complete(chain::proceed, () -> decide(target));
     }
 
-    private FreezeExemptionDecision decide(XposedInterface.Chain chain) {
-        ResidencyTarget target = target(chain);
+    private FreezeExemptionDecision decide(ResidencyTarget target) {
         if (target == null) return null;
         FreezeExemptionContext context = new FreezeExemptionContext(
                 target,
@@ -72,6 +74,18 @@ public final class HansExemptionHook implements FeatureHook {
                 "",
                 hookTargetId());
         return HookResidencyRuntime.decideFreezeExemption(context);
+    }
+
+    private void recordRawHit(boolean parsed) {
+        try {
+            HookDiagnostics.recordRawHookHit(
+                    hookTargetId(),
+                    parsed,
+                    parsed,
+                    parsed ? "" : "hook_arguments_unparsed");
+        } catch (Throwable ignored) {
+            // Diagnostics must not change a HANS exemption query.
+        }
     }
 
     HansRuntime.Capability capability() {
