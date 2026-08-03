@@ -374,8 +374,7 @@ public final class DiagnosticsActivity extends AppCompatActivity {
             Toast.makeText(this,
                     R.string.diagnostics_full_export_location_unsupported,
                     Toast.LENGTH_LONG).show();
-        } else if ("destination_name_changed".equals(completion.errorCode)
-                || "commit_name_changed".equals(completion.errorCode)) {
+        } else if ("destination_name_changed".equals(completion.errorCode)) {
             Toast.makeText(this, R.string.diagnostics_full_export_name_changed,
                     Toast.LENGTH_LONG).show();
         } else if (completion.destinationCreated) {

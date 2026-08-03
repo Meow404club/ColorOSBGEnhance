@@ -66,7 +66,6 @@ public final class AtomicSafDiagnosticsExporter {
 
         String failure = "write_failed";
         boolean fsyncApplied = false;
-        Uri cleanupUri = destinationUri;
         try {
             checkInterrupted();
             failure = "destination_name_unavailable";
@@ -112,11 +111,6 @@ public final class AtomicSafDiagnosticsExporter {
             if (committed == null) {
                 throw new IllegalStateException("rename returned no document");
             }
-            cleanupUri = committed;
-            failure = "commit_name_changed";
-            if (!finalDisplayName.equals(store.displayName(committed))) {
-                throw new IllegalStateException("committed name changed");
-            }
             return Result.succeeded(committed, fsyncApplied);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
@@ -125,7 +119,7 @@ public final class AtomicSafDiagnosticsExporter {
             // The stage-specific error code is sufficient for the user-facing flow.
         }
 
-        return Result.failed(failure, deleteQuietly(store, cleanupUri));
+        return Result.failed(failure, deleteQuietly(store, destinationUri));
     }
 
     private static boolean deleteQuietly(DocumentStore store, Uri destinationUri) {
