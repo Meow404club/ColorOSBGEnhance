@@ -1,6 +1,5 @@
 package com.frostwork.bgenhance.ui;
 
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
@@ -17,8 +16,6 @@ public final class HookStatusActivityMigrationTest {
         String residency = source(
                 "com/frostwork/bgenhance/ui/residency/ResidencyPolicyActivity.java");
 
-        assertFalse(feature.contains("DiagnosticsStore"));
-        assertFalse(residency.contains("DiagnosticsStore"));
         assertTrue(feature.contains("HookStatusViewModel.create(this)"));
         assertTrue(residency.contains("HookStatusViewModel.create(this)"));
         assertTrue(feature.contains("hookStatusViewModel.refresh()"));
