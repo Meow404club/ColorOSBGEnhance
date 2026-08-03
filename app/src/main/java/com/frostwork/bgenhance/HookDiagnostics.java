@@ -1,6 +1,7 @@
 package com.frostwork.bgenhance;
 
 import android.content.ContentResolver;
+import android.content.Context;
 import android.os.Bundle;
 import android.os.Process;
 import android.os.SystemClock;
@@ -65,6 +66,7 @@ public final class HookDiagnostics {
     private static final AtomicLong STICKY_GENERATION = new AtomicLong();
     private static final AtomicLong REPORTED_STICKY_GENERATION = new AtomicLong(-1L);
     private static final AtomicLong EVENT_SEQUENCE = new AtomicLong();
+    private static final AtomicInteger MODULE_UID = new AtomicInteger(-1);
     private static final ScheduledThreadPoolExecutor EXECUTOR = new ScheduledThreadPoolExecutor(
             1, runnable -> {
         Thread thread = new Thread(runnable, "BgEnhanceDiagnostics");
@@ -177,6 +179,27 @@ public final class HookDiagnostics {
             boolean parsed,
             boolean identityResolved,
             String errorCode) {
+        recordRawHookHitInternal(
+                hookTargetId, parsed, identityResolved, errorCode);
+    }
+
+    public static void recordRawHookHit(
+            String hookTargetId,
+            int uid,
+            String packageName,
+            boolean parsed,
+            boolean identityResolved,
+            String errorCode) {
+        if (isModuleIdentity(uid, packageName)) return;
+        recordRawHookHitInternal(
+                hookTargetId, parsed, identityResolved, errorCode);
+    }
+
+    private static void recordRawHookHitInternal(
+            String hookTargetId,
+            boolean parsed,
+            boolean identityResolved,
+            String errorCode) {
         try {
             String target = stableId(hookTargetId, "");
             if (target.isEmpty()) return;
@@ -199,10 +222,23 @@ public final class HookDiagnostics {
         }
     }
 
+    static void cacheModuleUid(Context context) {
+        if (context == null || MODULE_UID.get() >= 0) return;
+        try {
+            int uid = context.getPackageManager().getPackageUid(
+                    BridgeContract.MODULE_PACKAGE, 0);
+            if (uid >= 0) MODULE_UID.compareAndSet(-1, uid);
+        } catch (Throwable ignored) {
+            // Package identity remains available through exact package-name checks.
+        }
+    }
+
     private static void recordEvent(
             HookEvent event, String result, DecisionTrace trace) {
         try {
-            if (event == null || stableId(event.feature, "").isEmpty()) return;
+            if (event == null
+                    || isModuleIdentity(event.uid, event.packageName)
+                    || stableId(event.feature, "").isEmpty()) return;
             String stableResult = stableId(result, DiagnosticsResult.PASSED);
             long timestamp = System.currentTimeMillis();
             String processId = safeCurrentProcessId();
@@ -240,6 +276,13 @@ public final class HookDiagnostics {
         } catch (Throwable ignored) {
             markRecordFailure();
         }
+    }
+
+    private static boolean isModuleIdentity(int uid, String packageName) {
+        if (BridgeContract.MODULE_PACKAGE.equals(packageName)) return true;
+        return (packageName == null || packageName.isEmpty())
+                && uid >= 0
+                && uid == MODULE_UID.get();
     }
 
     private static void flushPendingFromPeriodicTask() {

@@ -63,7 +63,7 @@ public final class HansTimingHook implements FeatureHook {
 
     private Object intercept(XposedInterface.Chain chain) throws Throwable {
         ResidencyTarget target = target(chain);
-        recordRawHit(target != null);
+        recordRawHit(target);
         return complete(chain::proceed, () -> decide(target));
     }
 
@@ -77,10 +77,13 @@ public final class HansTimingHook implements FeatureHook {
         return HookResidencyRuntime.decideFreezeTiming(context);
     }
 
-    private void recordRawHit(boolean parsed) {
+    private void recordRawHit(ResidencyTarget target) {
         try {
+            boolean parsed = target != null;
             HookDiagnostics.recordRawHookHit(
                     hookTargetId(),
+                    parsed ? target.uid() : ResidencyTarget.UNKNOWN_UID,
+                    parsed ? target.packageName() : "",
                     parsed,
                     parsed,
                     parsed ? "" : "hook_arguments_unparsed");

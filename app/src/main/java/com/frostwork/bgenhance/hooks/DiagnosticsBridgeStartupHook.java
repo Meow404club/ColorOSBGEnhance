@@ -3,6 +3,7 @@ package com.frostwork.bgenhance.hooks;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.ProviderInfo;
 import android.os.Process;
+import com.frostwork.bgenhance.BridgeContract;
 import com.frostwork.bgenhance.FeatureHook;
 import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.HookUtils;
@@ -19,11 +20,8 @@ public final class DiagnosticsBridgeStartupHook implements FeatureHook {
             "com.android.server.am.ProcessRecord";
     private static final String PROVIDER_RECORD_CLASS =
             "com.android.server.am.ContentProviderRecord";
-    private static final String MODULE_PACKAGE = "com.frostwork.bgenhance";
     private static final String PROVIDER_CLASS =
             "com.frostwork.bgenhance.ModuleBridgeProvider";
-    private static final String PROVIDER_AUTHORITY =
-            "com.frostwork.bgenhance.bridge";
 
     private volatile Field providerInfoField;
     private volatile boolean accessorPrepared = true;
@@ -119,9 +117,9 @@ public final class DiagnosticsBridgeStartupHook implements FeatureHook {
             String providerClass,
             String authorities) {
         return callingUid == Process.SYSTEM_UID
-                && MODULE_PACKAGE.equals(applicationPackage)
+                && BridgeContract.MODULE_PACKAGE.equals(applicationPackage)
                 && PROVIDER_CLASS.equals(providerClass)
-                && containsExactAuthority(authorities, PROVIDER_AUTHORITY);
+                && containsExactAuthority(authorities, BridgeContract.AUTHORITY);
     }
 
     private static boolean containsExactAuthority(String authorities, String expected) {

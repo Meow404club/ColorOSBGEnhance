@@ -6,6 +6,7 @@ import android.net.Uri;
 public final class BridgeContract {
     private BridgeContract() {}
 
+    public static final String MODULE_PACKAGE = "com.frostwork.bgenhance";
     public static final String AUTHORITY = "com.frostwork.bgenhance.bridge";
     public static final Uri URI = Uri.parse("content://" + AUTHORITY);
 

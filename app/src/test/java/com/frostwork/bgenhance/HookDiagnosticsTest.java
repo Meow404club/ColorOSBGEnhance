@@ -135,6 +135,102 @@ public final class HookDiagnosticsTest {
     }
 
     @Test
+    public void moduleOwnedEventsCannotFeedTheDiagnosticsTransport() throws Exception {
+        moduleUid().set(10_044);
+        HookEvent moduleEvent = new HookEvent(
+                FeatureIds.HANS_WAKE,
+                1,
+                10_044,
+                BridgeContract.MODULE_PACKAGE,
+                BridgeContract.MODULE_PACKAGE,
+                "provider");
+
+        HookDiagnostics.recordEvent(moduleEvent, DiagnosticsResult.PASSED);
+        HookDiagnostics.recordEventFromLockedPath(moduleEvent, DiagnosticsResult.PASSED);
+        HookDiagnostics.recordDecision(moduleEvent, DiagnosticsResult.PASSED, null);
+        HookDiagnostics.recordDecisionFromLockedPath(
+                moduleEvent, DiagnosticsResult.PASSED, null);
+        HookDiagnostics.recordEventFromLockedPath(new HookEvent(
+                FeatureIds.HANS_RESOURCE,
+                1,
+                10_044,
+                "",
+                "",
+                "resource"), DiagnosticsResult.PASSED);
+
+        assertEquals(0, pendingRawHitCount());
+        assertEquals(0, pendingNormalizedEventCount());
+        assertEquals(0, outboxSize());
+        flushPendingFromPeriodicTask();
+        assertTrue(provider.methods.isEmpty());
+
+        HookDiagnostics.recordEventFromLockedPath(new HookEvent(
+                FeatureIds.HANS_WAKE,
+                1,
+                10_045,
+                BridgeContract.MODULE_PACKAGE + ".other",
+                BridgeContract.MODULE_PACKAGE + ".other",
+                "provider"), DiagnosticsResult.PASSED);
+        assertEquals(1, pendingRawHitCount());
+        assertEquals(1, pendingNormalizedEventCount());
+    }
+
+    @Test
+    public void identityAwareRawHitsExcludeOnlyTheModuleTarget() throws Exception {
+        moduleUid().set(10_044);
+
+        HookDiagnostics.recordRawHookHit(
+                HookTargetIds.HANS_R_TO_M_TIMING,
+                10_044,
+                "",
+                true,
+                true,
+                "");
+        HookDiagnostics.recordRawHookHit(
+                HookTargetIds.HANS_LCD_ON_EXEMPTION,
+                10_045,
+                BridgeContract.MODULE_PACKAGE,
+                true,
+                true,
+                "");
+        HookDiagnostics.recordRawHookHit(
+                HookTargetIds.HANS_R_TO_M_TIMING,
+                10_045,
+                "example.app",
+                true,
+                true,
+                "");
+
+        assertEquals(1, pendingRawHitCount());
+        assertEquals(0, pendingNormalizedEventCount());
+    }
+
+    @Test
+    public void providerWakeDuringAckCannotScheduleAnotherDiagnosticsBatch()
+            throws Exception {
+        setEpoch(EPOCH);
+        moduleUid().set(10_044);
+        provider.enqueue(request -> {
+            HookDiagnostics.recordEventFromLockedPath(new HookEvent(
+                    FeatureIds.HANS_WAKE,
+                    1,
+                    10_044,
+                    BridgeContract.MODULE_PACKAGE,
+                    BridgeContract.MODULE_PACKAGE,
+                    "provider"), DiagnosticsResult.PASSED);
+            return acceptedAck(request, EPOCH);
+        });
+        HookDiagnostics.recordEventFromLockedPath(event(1), DiagnosticsResult.PASSED);
+
+        flushSnapshot();
+        flushPendingFromPeriodicTask();
+
+        assertEquals(1, provider.requests.size());
+        assertEquals(0, pendingItemCount());
+        assertEquals(0, outboxSize());
+    }
+
+    @Test
     public void rawAndNormalizedQueuesRemainIndependentlyBounded() throws Exception {
         for (int index = 0; index < 512; index++) {
             HookDiagnostics.recordRawHookHit(
@@ -505,6 +601,13 @@ public final class HookDiagnosticsTest {
         method.invoke(null);
     }
 
+    private static void flushPendingFromPeriodicTask() throws Exception {
+        Method method = HookDiagnostics.class.getDeclaredMethod(
+                "flushPendingFromPeriodicTask");
+        method.setAccessible(true);
+        method.invoke(null);
+    }
+
     private static DiagnosticsWriteBatch parse(Bundle request) {
         DiagnosticsWireParser.ParseResult parsed =
                 new DiagnosticsWireParser().parseSnapshot(request);
@@ -663,6 +766,7 @@ public final class HookDiagnosticsTest {
         stickyGeneration().set(0L);
         reportedStickyGeneration().set(0L);
         ((AtomicLong) staticValue(HookDiagnostics.class, "EVENT_SEQUENCE")).set(0L);
+        moduleUid().set(-1);
         @SuppressWarnings("unchecked")
         AtomicReference<HookDiagnostics.ConfigReportState> config =
                 (AtomicReference<HookDiagnostics.ConfigReportState>) staticValue(
@@ -683,6 +787,10 @@ public final class HookDiagnosticsTest {
 
     private static void clearMap(String fieldName) throws Exception {
         ((Map<?, ?>) staticValue(HookDiagnostics.class, fieldName)).clear();
+    }
+
+    private static AtomicInteger moduleUid() throws Exception {
+        return (AtomicInteger) staticValue(HookDiagnostics.class, "MODULE_UID");
     }
 
     private static Object staticValue(Class<?> owner, String fieldName) throws Exception {

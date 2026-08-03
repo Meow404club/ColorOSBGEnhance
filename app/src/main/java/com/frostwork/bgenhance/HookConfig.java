@@ -88,6 +88,7 @@ public final class HookConfig {
         Context app = context.getApplicationContext();
         Context resolverContext = app != null ? app : context;
         sContext = resolverContext;
+        HookDiagnostics.cacheModuleUid(resolverContext);
         try {
             sResolver = resolverContext.getContentResolver();
         } catch (Throwable t) {
