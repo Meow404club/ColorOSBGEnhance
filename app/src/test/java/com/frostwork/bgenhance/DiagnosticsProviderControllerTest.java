@@ -263,22 +263,20 @@ public final class DiagnosticsProviderControllerTest {
         try {
             assertEquals(0L, backend.currentEpochAsync()
                     .get(5, TimeUnit.SECONDS).longValue());
+            DiagnosticsProviderController.BatchSink sink = value -> {
+                CompletableFuture<ResidencyDiagnosticsBackend.DurableWriteResult>
+                        persisted = backend.enqueueDurable(value);
+                if (calls.getAndIncrement() == 0) {
+                    return persisted.thenCompose(result -> {
+                        firstCommitted.countDown();
+                        return releaseFirstResponse.thenApply(ignored -> durable(result));
+                    });
+                }
+                return persisted.thenApply(DiagnosticsProviderControllerTest::durable);
+            };
             DiagnosticsProviderController controller = new DiagnosticsProviderController(
                     MODULE_UID, SYSTEM_UID, ATHENA_UID, "boot", backend::admissionEpoch,
-                    value -> {
-                        CompletableFuture<ResidencyDiagnosticsBackend.DurableWriteResult>
-                                persisted = backend.enqueueDurable(value);
-                        if (calls.getAndIncrement() == 0) {
-                            return persisted.thenCompose(result -> {
-                                firstCommitted.countDown();
-                                return releaseFirstResponse.thenApply(ignored -> durable(result));
-                            });
-                        }
-                        return persisted.thenApply(
-                                DiagnosticsProviderControllerTest::durable);
-                    },
-                    new DiagnosticsWireParser(),
-                    10L);
+                    sink, new DiagnosticsWireParser(), 10L);
             DiagnosticsWriteBatch batch = batch(
                     BridgeContract.PROCESS_SYSTEM_SERVER, "boot", 0L, 0L);
             Bundle payload = DiagnosticsWireEncoder.encodeTyped(batch);
@@ -290,7 +288,12 @@ public final class DiagnosticsProviderControllerTest {
             assertTrue(firstCommitted.await(5, TimeUnit.SECONDS));
             releaseFirstResponse.complete(null);
 
-            Bundle replayed = controller.handle(
+            DiagnosticsProviderController retryController =
+                    new DiagnosticsProviderController(
+                            MODULE_UID, SYSTEM_UID, ATHENA_UID, "boot",
+                            backend::admissionEpoch, sink,
+                            new DiagnosticsWireParser(), 2_000L);
+            Bundle replayed = retryController.handle(
                     SYSTEM_UID, BridgeContract.METHOD_REPORT_BATCH, payload);
             assertTrue(replayed.getBoolean(BridgeContract.EXTRA_OK));
             DiagnosticsQuery.HomeStatsSnapshot stats = backend.queryHomeStatsAsync(
