@@ -3,10 +3,13 @@ package com.frostwork.bgenhance.ui;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.TextView;
 import android.widget.Toast;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -14,11 +17,13 @@ import com.frostwork.bgenhance.FeatureIds;
 import com.frostwork.bgenhance.ModuleApplication;
 import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
+import com.frostwork.bgenhance.diagnostics.AtomicSafDiagnosticsExporter;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsExportCodec;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsReportMetadata;
 import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
 import com.frostwork.bgenhance.ui.diagnostics.DiagnosticsViewModel;
+import com.frostwork.bgenhance.ui.diagnostics.FullDiagnosticsExportViewModel;
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.materialswitch.MaterialSwitch;
@@ -28,9 +33,15 @@ import com.google.android.material.tabs.TabLayout;
 public final class DiagnosticsActivity extends AppCompatActivity {
     private static final String STATE_SELECTED_TAB = "selected_tab";
     private static final long REFRESH_SETTLE_DELAY_MS = 1_200L;
+    private final ActivityResultLauncher<String> fullExportDocumentLauncher =
+            registerForActivityResult(
+                    new ActivityResultContracts.CreateDocument(
+                            AtomicSafDiagnosticsExporter.MIME_TYPE),
+                    this::onFullExportDocumentSelected);
 
     private ResidencyDiagnosticsBackend backend;
     private DiagnosticsViewModel viewModel;
+    private FullDiagnosticsExportViewModel fullExportViewModel;
     private DiagnosticsRowsAdapter adapter;
     private RecyclerView list;
     private TabLayout tabs;
@@ -46,6 +57,7 @@ public final class DiagnosticsActivity extends AppCompatActivity {
     private boolean bindingVerbose;
     private boolean clearInFlight;
     private boolean exportInFlight;
+    private boolean started;
     private boolean destroyed;
 
     private final ModuleApplication.StateListener moduleStateListener = () ->
@@ -55,6 +67,8 @@ public final class DiagnosticsActivity extends AppCompatActivity {
     private final Runnable settledRefresh = () -> {
         if (!destroyed && viewModel != null && !clearInFlight) viewModel.refresh();
     };
+    private final FullDiagnosticsExportViewModel.Listener fullExportListener =
+            this::renderFullExport;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -62,6 +76,7 @@ public final class DiagnosticsActivity extends AppCompatActivity {
         setContentView(R.layout.activity_diagnostics);
         UiUtils.applyWindowStyle(this);
         backend = ModuleApplication.initializeDiagnostics(this);
+        fullExportViewModel = FullDiagnosticsExportViewModel.create(this, this, backend);
         bindViews();
         bindToolbar();
         bindTabs(savedInstanceState == null
@@ -77,6 +92,8 @@ public final class DiagnosticsActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
+        started = true;
+        fullExportViewModel.setListener(fullExportListener);
         ModuleApplication.addStateListener(moduleStateListener);
     }
 
@@ -88,7 +105,9 @@ public final class DiagnosticsActivity extends AppCompatActivity {
 
     @Override
     protected void onStop() {
+        started = false;
         ModuleApplication.removeStateListener(moduleStateListener);
+        fullExportViewModel.removeListener(fullExportListener);
         super.onStop();
     }
 
@@ -96,6 +115,9 @@ public final class DiagnosticsActivity extends AppCompatActivity {
     protected void onDestroy() {
         destroyed = true;
         list.removeCallbacks(settledRefresh);
+        if (fullExportViewModel != null) {
+            fullExportViewModel.removeListener(fullExportListener);
+        }
         if (viewModel != null) viewModel.close();
         if (adapter != null) adapter.close();
         super.onDestroy();
@@ -136,6 +158,10 @@ public final class DiagnosticsActivity extends AppCompatActivity {
             }
             if (item.getItemId() == R.id.action_export_diagnostics) {
                 exportDiagnostics();
+                return true;
+            }
+            if (item.getItemId() == R.id.action_save_full_diagnostics) {
+                confirmFullExport();
                 return true;
             }
             if (item.getItemId() == R.id.action_clear_diagnostics) {
@@ -253,7 +279,7 @@ public final class DiagnosticsActivity extends AppCompatActivity {
     }
 
     private void exportDiagnostics() {
-        if (exportInFlight) return;
+        if (exportInFlight || isFullExportBusy()) return;
         exportInFlight = true;
         DiagnosticsReportMetadata metadata =
                 DiagnosticsReportMetadata.capture(this, false);
@@ -287,8 +313,86 @@ public final class DiagnosticsActivity extends AppCompatActivity {
                 }));
     }
 
+    private void confirmFullExport() {
+        if (exportInFlight || fullExportViewModel == null
+                || fullExportViewModel.state().status
+                != FullDiagnosticsExportViewModel.Status.IDLE) return;
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.diagnostics_full_export_confirm_title)
+                .setMessage(R.string.diagnostics_full_export_confirm_message)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(
+                        R.string.diagnostics_full_export_choose_location,
+                        (dialog, which) -> prepareFullExport())
+                .show();
+    }
+
+    private void prepareFullExport() {
+        DiagnosticsReportMetadata metadata = DiagnosticsReportMetadata.capture(this, true);
+        if (!fullExportViewModel.prepare(metadata)) return;
+        Toast.makeText(this, R.string.diagnostics_full_export_preparing,
+                Toast.LENGTH_SHORT).show();
+    }
+
+    private void onFullExportDocumentSelected(Uri documentUri) {
+        if (fullExportViewModel != null) {
+            fullExportViewModel.onDestinationSelected(documentUri);
+        }
+    }
+
+    private void renderFullExport(FullDiagnosticsExportViewModel.State state) {
+        if (destroyed || !started || state == null) return;
+        if (state.status == FullDiagnosticsExportViewModel.Status.READY) {
+            FullDiagnosticsExportViewModel.DestinationRequest request =
+                    fullExportViewModel.takeDestinationRequest();
+            if (request == null) return;
+            try {
+                fullExportDocumentLauncher.launch(request.displayName);
+            } catch (Throwable ignored) {
+                fullExportViewModel.destinationLaunchFailed(request.operationId);
+            }
+            return;
+        }
+        if (state.status != FullDiagnosticsExportViewModel.Status.SUCCESS
+                && state.status != FullDiagnosticsExportViewModel.Status.ERROR) return;
+
+        FullDiagnosticsExportViewModel.Completion completion =
+                fullExportViewModel.consumeCompletion(state.operationId);
+        if (completion == null) return;
+        if (completion.successful) {
+            Toast.makeText(this, R.string.diagnostics_full_export_saved,
+                    Toast.LENGTH_LONG).show();
+        } else if (FullDiagnosticsExportViewModel.ERROR_INCOMPLETE_REPORT.equals(
+                completion.errorCode)) {
+            Toast.makeText(this, R.string.diagnostics_full_export_incomplete,
+                    Toast.LENGTH_LONG).show();
+        } else if (completion.destinationCreated
+                && !completion.incompleteDocumentDeleted) {
+            Toast.makeText(this, R.string.diagnostics_full_export_partial_remains,
+                    Toast.LENGTH_LONG).show();
+        } else if ("atomic_commit_unsupported".equals(completion.errorCode)) {
+            Toast.makeText(this,
+                    R.string.diagnostics_full_export_location_unsupported,
+                    Toast.LENGTH_LONG).show();
+        } else if ("destination_name_changed".equals(completion.errorCode)
+                || "commit_name_changed".equals(completion.errorCode)) {
+            Toast.makeText(this, R.string.diagnostics_full_export_name_changed,
+                    Toast.LENGTH_LONG).show();
+        } else if (completion.destinationCreated) {
+            Toast.makeText(this, R.string.diagnostics_full_export_failed_cleaned,
+                    Toast.LENGTH_LONG).show();
+        } else {
+            Toast.makeText(this, R.string.diagnostics_full_export_failed,
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private boolean isFullExportBusy() {
+        return fullExportViewModel != null && fullExportViewModel.state().busy();
+    }
+
     private void confirmClear() {
-        if (clearInFlight) return;
+        if (clearInFlight || isFullExportBusy()) return;
         new MaterialAlertDialogBuilder(this)
                 .setTitle(R.string.reset_stats_title)
                 .setMessage(R.string.reset_stats_message)

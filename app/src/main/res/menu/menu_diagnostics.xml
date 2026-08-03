@@ -15,6 +15,11 @@
         app:showAsAction="ifRoom" />
 
     <item
+        android:id="@+id/action_save_full_diagnostics"
+        android:title="@string/diagnostics_full_export_action"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/action_clear_diagnostics"
         android:title="@string/reset_stats"
         app:showAsAction="never" />

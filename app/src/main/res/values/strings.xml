@@ -93,6 +93,18 @@
     <string name="diagnostics_export_preparing">正在生成脱敏诊断信息</string>
     <string name="diagnostics_export_copied">已复制脱敏诊断信息</string>
     <string name="diagnostics_export_failed">暂时无法导出诊断信息</string>
+    <string name="diagnostics_full_export_action">保存完整诊断报告</string>
+    <string name="diagnostics_full_export_confirm_title">保存完整诊断报告？</string>
+    <string name="diagnostics_full_export_confirm_message">完整报告会包含应用与设备的详细识别信息，以及更完整的运行记录，可能涉及隐私。请只保存到可信位置，并仅发送给你信任的人。</string>
+    <string name="diagnostics_full_export_choose_location">继续</string>
+    <string name="diagnostics_full_export_preparing">正在生成完整诊断报告</string>
+    <string name="diagnostics_full_export_saved">完整诊断报告已保存</string>
+    <string name="diagnostics_full_export_failed">保存失败，未生成完整诊断报告</string>
+    <string name="diagnostics_full_export_incomplete">运行记录还没有完整读取，暂时无法保存，请稍后重试</string>
+    <string name="diagnostics_full_export_failed_cleaned">保存失败，未保留不完整文件</string>
+    <string name="diagnostics_full_export_name_changed">文件名已被更改，报告未保存。请保留建议名称，或选择其他位置重试</string>
+    <string name="diagnostics_full_export_location_unsupported">这个保存位置不支持安全写入，请选择其他位置</string>
+    <string name="diagnostics_full_export_partial_remains">保存失败，所选位置可能留有未完成文件，请手动删除</string>
     <string name="diagnostics_clear_failed">暂时无法清除运行记录</string>
 
     <string name="fast_clear_page_title">场景后台保护</string>
@@ -196,7 +208,7 @@
     <string name="stats_metric_observed">已检测</string>
     <string name="stats_metric_blocked">已阻止</string>
     <string name="stats_metric_fail_open">安全放行</string>
-    <string name="copy_debug">复制诊断信息</string>
+    <string name="copy_debug">复制脱敏诊断信息</string>
     <string name="reset_stats">重置统计</string>
     <string name="reset_stats_title">重置所有统计？</string>
     <string name="reset_stats_message">将清除应用与行为运行记录，不会改变任何保护开关。</string>

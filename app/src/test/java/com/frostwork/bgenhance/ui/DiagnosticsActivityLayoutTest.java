@@ -4,16 +4,22 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import android.app.Application;
+import android.app.Activity;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.app.Dialog;
+import android.content.DialogInterface;
+import android.content.Intent;
 import android.content.res.Configuration;
 import android.view.ContextThemeWrapper;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.widget.TextView;
+import androidx.appcompat.app.AlertDialog;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.core.graphics.ColorUtils;
 import com.frostwork.bgenhance.R;
@@ -23,6 +29,7 @@ import com.frostwork.bgenhance.ModuleApplication;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
 import com.frostwork.bgenhance.diagnostics.NormalizedDiagnosticsEvent;
 import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
+import com.frostwork.bgenhance.ui.diagnostics.FullDiagnosticsExportViewModel;
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.materialswitch.MaterialSwitch;
 import com.google.android.material.tabs.TabLayout;
@@ -30,11 +37,15 @@ import org.junit.Test;
 import org.json.JSONObject;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
+import org.robolectric.android.controller.ActivityController;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowDialog;
+import org.robolectric.shadows.ShadowActivity;
+import org.robolectric.shadow.api.Shadow;
 import org.robolectric.shadows.ShadowLooper;
+import org.robolectric.shadows.ShadowToast;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.lang.reflect.Field;
@@ -90,6 +101,7 @@ public final class DiagnosticsActivityLayoutTest {
         MaterialToolbar toolbar = activity.findViewById(R.id.toolbar);
         assertNotNull(toolbar.getMenu().findItem(R.id.action_refresh_diagnostics));
         assertNotNull(toolbar.getMenu().findItem(R.id.action_export_diagnostics));
+        assertNotNull(toolbar.getMenu().findItem(R.id.action_save_full_diagnostics));
         assertNotNull(toolbar.getMenu().findItem(R.id.action_clear_diagnostics));
         assertNotNull(activity.<MaterialSwitch>findViewById(
                 R.id.diagnostics_verbose_switch));
@@ -166,6 +178,126 @@ public final class DiagnosticsActivityLayoutTest {
     }
 
     @Test
+    public void fullExportRequiresConfirmationAndPayloadBeforeCreateDocument()
+            throws Exception {
+        DiagnosticsActivity activity = Robolectric.buildActivity(DiagnosticsActivity.class)
+                .setup()
+                .get();
+        ShadowActivity shadow = Shadow.extract(activity);
+        MaterialToolbar toolbar = activity.findViewById(R.id.toolbar);
+
+        assertTrue(toolbar.getMenu().performIdentifierAction(
+                R.id.action_save_full_diagnostics, 0));
+        assertNull(shadow.peekNextStartedActivityForResult());
+        Dialog latest = ShadowDialog.getLatestDialog();
+        assertTrue(latest instanceof AlertDialog);
+        AlertDialog confirmation = (AlertDialog) latest;
+        TextView message = confirmation.findViewById(android.R.id.message);
+        assertNotNull(message);
+        assertEquals(activity.getString(R.string.diagnostics_full_export_confirm_message),
+                message.getText().toString());
+
+        confirmation.getButton(DialogInterface.BUTTON_POSITIVE).performClick();
+        ShadowActivity.IntentForResult request = waitForCreateDocument(shadow);
+        assertNotNull(request);
+        assertEquals(Intent.ACTION_CREATE_DOCUMENT, request.intent.getAction());
+        assertEquals("application/json", request.intent.getType());
+        String displayName = request.intent.getStringExtra(Intent.EXTRA_TITLE);
+        assertNotNull(displayName);
+        assertTrue(displayName.startsWith("BgEnhance-diagnostics-"));
+        assertTrue(displayName.endsWith(".json.partial"));
+        activity.finish();
+    }
+
+    @Test
+    public void cancelingFullExportConfirmationDoesNotOpenSaf() {
+        DiagnosticsActivity activity = Robolectric.buildActivity(DiagnosticsActivity.class)
+                .setup()
+                .get();
+        ShadowActivity shadow = Shadow.extract(activity);
+        MaterialToolbar toolbar = activity.findViewById(R.id.toolbar);
+
+        assertTrue(toolbar.getMenu().performIdentifierAction(
+                R.id.action_save_full_diagnostics, 0));
+        AlertDialog confirmation = (AlertDialog) ShadowDialog.getLatestDialog();
+        confirmation.getButton(DialogInterface.BUTTON_NEGATIVE).performClick();
+
+        assertNull(shadow.peekNextStartedActivityForResult());
+        activity.finish();
+    }
+
+    @Test
+    public void unavailableSnapshotNeverLaunchesCreateDocument() throws Exception {
+        DiagnosticsActivity activity = Robolectric.buildActivity(DiagnosticsActivity.class)
+                .setup()
+                .get();
+        ResidencyDiagnosticsBackend backend = ModuleApplication.diagnosticsBackend();
+        backend.closeAsync().get(5, TimeUnit.SECONDS);
+        ShadowActivity shadow = Shadow.extract(activity);
+        MaterialToolbar toolbar = activity.findViewById(R.id.toolbar);
+
+        assertTrue(toolbar.getMenu().performIdentifierAction(
+                R.id.action_save_full_diagnostics, 0));
+        AlertDialog confirmation = (AlertDialog) ShadowDialog.getLatestDialog();
+        confirmation.getButton(DialogInterface.BUTTON_POSITIVE).performClick();
+        waitForToast(activity.getString(R.string.diagnostics_full_export_failed));
+
+        assertNull(shadow.peekNextStartedActivityForResult());
+        activity.finish();
+    }
+
+    @Test
+    public void cancelingCreateDocumentDiscardsPreparedPayload() throws Exception {
+        DiagnosticsActivity activity = Robolectric.buildActivity(DiagnosticsActivity.class)
+                .setup()
+                .get();
+        ShadowActivity shadow = Shadow.extract(activity);
+        MaterialToolbar toolbar = activity.findViewById(R.id.toolbar);
+        assertTrue(toolbar.getMenu().performIdentifierAction(
+                R.id.action_save_full_diagnostics, 0));
+        AlertDialog confirmation = (AlertDialog) ShadowDialog.getLatestDialog();
+        confirmation.getButton(DialogInterface.BUTTON_POSITIVE).performClick();
+        ShadowActivity.IntentForResult request = waitForCreateDocument(shadow);
+
+        shadow.receiveResult(request.intent, Activity.RESULT_CANCELED, null);
+        FullDiagnosticsExportViewModel exportViewModel = fullExportViewModel(activity);
+        waitForFullExportStatus(
+                exportViewModel, FullDiagnosticsExportViewModel.Status.IDLE);
+
+        assertEquals(FullDiagnosticsExportViewModel.Status.IDLE,
+                exportViewModel.state().status);
+        activity.finish();
+    }
+
+    @Test
+    public void rotationRetainsPayloadWithoutLaunchingCreateDocumentAgain()
+            throws Exception {
+        ActivityController<DiagnosticsActivity> controller =
+                Robolectric.buildActivity(DiagnosticsActivity.class).setup();
+        DiagnosticsActivity activity = controller.get();
+        ShadowActivity firstShadow = Shadow.extract(activity);
+        MaterialToolbar toolbar = activity.findViewById(R.id.toolbar);
+        assertTrue(toolbar.getMenu().performIdentifierAction(
+                R.id.action_save_full_diagnostics, 0));
+        AlertDialog confirmation = (AlertDialog) ShadowDialog.getLatestDialog();
+        confirmation.getButton(DialogInterface.BUTTON_POSITIVE).performClick();
+        assertNotNull(waitForCreateDocument(firstShadow));
+        FullDiagnosticsExportViewModel retained = fullExportViewModel(activity);
+        assertEquals(FullDiagnosticsExportViewModel.Status.AWAITING_URI,
+                retained.state().status);
+
+        controller.recreate();
+
+        DiagnosticsActivity recreated = controller.get();
+        assertSame(retained, fullExportViewModel(recreated));
+        assertEquals(FullDiagnosticsExportViewModel.Status.AWAITING_URI,
+                retained.state().status);
+        ShadowActivity recreatedShadow = Shadow.extract(recreated);
+        assertNull(recreatedShadow.peekNextStartedActivityForResult());
+        controller.pause().stop().destroy();
+    }
+
+    @Test
     public void clearActionPublishesNewEpochBeforeReloading() throws Exception {
         DiagnosticsActivity activity = Robolectric.buildActivity(DiagnosticsActivity.class)
                 .setup()
@@ -235,6 +367,45 @@ public final class DiagnosticsActivityLayoutTest {
             Thread.sleep(10L);
         }
         throw new AssertionError("diagnostics export was not copied");
+    }
+
+    private static ShadowActivity.IntentForResult waitForCreateDocument(
+            ShadowActivity shadow) throws Exception {
+        for (int attempt = 0; attempt < 200; attempt++) {
+            ShadowLooper.idleMainLooper();
+            if (shadow.peekNextStartedActivityForResult() != null) {
+                return shadow.getNextStartedActivityForResult();
+            }
+            Thread.sleep(10L);
+        }
+        throw new AssertionError("CreateDocument was not launched");
+    }
+
+    private static void waitForToast(String expected) throws Exception {
+        for (int attempt = 0; attempt < 100; attempt++) {
+            ShadowLooper.idleMainLooper();
+            if (expected.equals(ShadowToast.getTextOfLatestToast())) return;
+            Thread.sleep(10L);
+        }
+        throw new AssertionError("expected toast was not shown: " + expected);
+    }
+
+    private static void waitForFullExportStatus(
+            FullDiagnosticsExportViewModel viewModel,
+            FullDiagnosticsExportViewModel.Status expected) throws Exception {
+        for (int attempt = 0; attempt < 100; attempt++) {
+            ShadowLooper.idleMainLooper();
+            if (viewModel.state().status == expected) return;
+            Thread.sleep(10L);
+        }
+        throw new AssertionError("full export state did not become " + expected);
+    }
+
+    private static FullDiagnosticsExportViewModel fullExportViewModel(
+            DiagnosticsActivity activity) throws Exception {
+        Field field = DiagnosticsActivity.class.getDeclaredField("fullExportViewModel");
+        field.setAccessible(true);
+        return (FullDiagnosticsExportViewModel) field.get(activity);
     }
 
     private static long waitForNewEpoch(long before) throws Exception {
