@@ -91,6 +91,9 @@ public final class SettingsActivity extends AppCompatActivity {
         effectNotice = findViewById(R.id.text_effect_notice);
         customAdvancedSection = findViewById(R.id.custom_advanced_section);
         statsOverview = findViewById(R.id.home_stats_overview);
+        HomeResponsiveRows.adaptResidencyRow(
+                findViewById(R.id.row_residency),
+                getResources().getConfiguration().fontScale);
     }
 
     private void bindListeners() {

@@ -22,6 +22,7 @@
         android:src="@drawable/ic_residency_app" />
 
     <LinearLayout
+        android:id="@+id/residency_home_text_container"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
