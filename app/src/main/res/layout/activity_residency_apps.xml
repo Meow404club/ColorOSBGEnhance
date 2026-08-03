@@ -55,11 +55,15 @@
                     android:id="@+id/residency_search"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
                     android:hint="@string/residency_search_hint"
                     android:imeOptions="actionDone"
+                    android:includeFontPadding="false"
                     android:inputType="text"
                     android:maxLines="1"
                     android:minHeight="@dimen/field_min_height"
+                    android:paddingTop="0dp"
+                    android:paddingBottom="0dp"
                     android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Option" />
             </com.google.android.material.textfield.TextInputLayout>
 

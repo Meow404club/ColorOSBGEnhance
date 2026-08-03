@@ -25,11 +25,17 @@ public final class ResidencyAppsAdapter
 
     private final ResidencyAppIconLoader iconLoader;
     private final Listener listener;
+    private final boolean roundedGroup;
     private List<ResidencyAppItem> items = new ArrayList<>();
 
     public ResidencyAppsAdapter(Context context, Listener listener) {
+        this(context, listener, false);
+    }
+
+    ResidencyAppsAdapter(Context context, Listener listener, boolean roundedGroup) {
         this.iconLoader = new ResidencyAppIconLoader(context);
         this.listener = Objects.requireNonNull(listener, "listener");
+        this.roundedGroup = roundedGroup;
     }
 
     public void submitList(List<ResidencyAppItem> nextItems) {
@@ -49,7 +55,7 @@ public final class ResidencyAppsAdapter
 
     @Override
     public void onBindViewHolder(@NonNull AppViewHolder holder, int position) {
-        holder.bind(items.get(position), position == items.size() - 1);
+        holder.bind(items.get(position), position == 0, position == items.size() - 1);
     }
 
     @Override
@@ -84,8 +90,15 @@ public final class ResidencyAppsAdapter
             divider = itemView.findViewById(R.id.residency_app_divider);
         }
 
-        void bind(ResidencyAppItem item, boolean last) {
+        void bind(ResidencyAppItem item, boolean first, boolean last) {
             Context context = itemView.getContext();
+            if (roundedGroup) {
+                itemView.setBackgroundResource(groupBackground(first, last));
+                itemView.setClipToOutline(true);
+            } else {
+                itemView.setBackgroundResource(R.color.card_bg);
+                itemView.setClipToOutline(false);
+            }
             name.setText(item.label());
             packageName.setText(item.packageName());
             iconLoader.bind(icon, item.packageName());
@@ -98,6 +111,13 @@ public final class ResidencyAppsAdapter
                     item.label(), item.packageName(), statusText));
             itemView.setOnClickListener(view -> listener.onAppSelected(item));
         }
+    }
+
+    private static int groupBackground(boolean first, boolean last) {
+        if (first && last) return R.drawable.bg_residency_app_group_single;
+        if (first) return R.drawable.bg_residency_app_group_top;
+        if (last) return R.drawable.bg_residency_app_group_bottom;
+        return R.drawable.bg_residency_app_group_middle;
     }
 
     private static String statusText(Context context, ResidencyAppItem item) {
@@ -135,7 +155,8 @@ public final class ResidencyAppsAdapter
         public boolean areContentsTheSame(int oldPosition, int newPosition) {
             ResidencyAppItem oldItem = oldItems.get(oldPosition);
             ResidencyAppItem newItem = newItems.get(newPosition);
-            return (oldPosition == oldItems.size() - 1)
+            return (oldPosition == 0) == (newPosition == 0)
+                    && (oldPosition == oldItems.size() - 1)
                             == (newPosition == newItems.size() - 1)
                     && oldItem.label().equals(newItem.label())
                     && oldItem.installed() == newItem.installed()

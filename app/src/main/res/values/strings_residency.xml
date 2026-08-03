@@ -13,7 +13,6 @@
     <string name="residency_search_hint">搜索应用名称或包名</string>
     <string name="residency_filter_mode_hint">模式</string>
     <string name="residency_filter_status_hint">状态</string>
-    <string name="residency_filter_availability_hint">可配置</string>
     <string name="residency_show_system_apps">显示系统应用</string>
     <string name="residency_show_system_apps_summary">系统应用中包含重要组件，不能更改的项目会明确标出</string>
     <string name="residency_add_app">添加应用</string>

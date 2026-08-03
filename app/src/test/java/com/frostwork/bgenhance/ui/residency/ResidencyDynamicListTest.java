@@ -11,9 +11,9 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import androidx.annotation.NonNull;
+import androidx.recyclerview.widget.ConcatAdapter;
 import androidx.recyclerview.widget.RecyclerView;
 import com.frostwork.bgenhance.R;
-import com.google.android.material.card.MaterialCardView;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -32,28 +32,40 @@ public final class ResidencyDynamicListTest {
     public void ordinaryFontShortListsStayCompact() {
         ActivityController<ResidencyAppsActivity> appsController =
                 Robolectric.buildActivity(ResidencyAppsActivity.class).create();
-        ActivityController<ResidencyAppPickerActivity> pickerController =
-                Robolectric.buildActivity(ResidencyAppPickerActivity.class).create();
         try {
             assertShortListStaysCompact(appsController.get());
-            assertShortListStaysCompact(pickerController.get());
         } finally {
-            pickerController.destroy();
             appsController.destroy();
+        }
+    }
+
+    @Test
+    public void pickerAlwaysUsesOneFullHeightScroller() {
+        ActivityController<ResidencyAppPickerActivity> controller =
+                Robolectric.buildActivity(ResidencyAppPickerActivity.class).create();
+        try {
+            ResidencyAppPickerActivity picker = controller.get();
+            RecyclerView list = picker.findViewById(R.id.residency_app_list);
+            measure(picker, 360, 640);
+
+            assertTrue(list.getAdapter() instanceof ConcatAdapter);
+            assertEquals(2, list.getAdapter().getItemCount());
+            LinearLayout.LayoutParams surfaceParams = surfaceParams(picker);
+            assertEquals(0, surfaceParams.height);
+            assertEquals(1f, surfaceParams.weight, 0f);
+            assertEquals(ViewGroup.LayoutParams.MATCH_PARENT, list.getLayoutParams().height);
+        } finally {
+            controller.destroy();
         }
     }
 
     @Test
     public void largeFontStartsBoundedAndBoundedPaddingPreservesScreenInsets() {
         assertFalse(ResidencyAppsActivity.shouldStartBoundedList(1f));
-        assertFalse(ResidencyAppPickerActivity.shouldStartBoundedList(1f));
         assertTrue(ResidencyAppsActivity.shouldStartBoundedList(2f));
-        assertTrue(ResidencyAppPickerActivity.shouldStartBoundedList(2f));
 
         ActivityController<ResidencyAppsActivity> appsController =
                 Robolectric.buildActivity(ResidencyAppsActivity.class).create();
-        ActivityController<ResidencyAppPickerActivity> pickerController =
-                Robolectric.buildActivity(ResidencyAppPickerActivity.class).create();
         try {
             ResidencyAppsActivity apps = appsController.get();
             RecyclerView appsList = apps.findViewById(R.id.residency_app_list);
@@ -64,18 +76,7 @@ public final class ResidencyDynamicListTest {
             apps.setListSurfaceMode(true);
             setFontScale(apps, 1f);
             assertBounded(apps, appsNormalPadding);
-
-            ResidencyAppPickerActivity picker = pickerController.get();
-            RecyclerView pickerList = picker.findViewById(R.id.residency_app_list);
-            int pickerNormalPadding = pickerList.getPaddingBottom();
-            picker.applyListSurfaceMode(true, false);
-            assertEquals(pickerNormalPadding, pickerList.getPaddingBottom());
-            setFontScale(picker, 2f);
-            picker.setListSurfaceMode(true);
-            setFontScale(picker, 1f);
-            assertBounded(picker, pickerNormalPadding);
         } finally {
-            pickerController.destroy();
             appsController.destroy();
         }
     }
@@ -92,7 +93,10 @@ public final class ResidencyDynamicListTest {
             assertLongListBecomesBounded(apps);
 
             ResidencyAppPickerActivity picker = pickerController.get();
-            assertLongListBecomesBounded(picker);
+            RecyclerView pickerList = picker.findViewById(R.id.residency_app_list);
+            pickerList.setAdapter(new FixedHeightAdapter(40));
+            measure(picker, 360, 640);
+            assertTrue(pickerList.canScrollVertically(1));
         } finally {
             pickerController.destroy();
             appsController.destroy();
@@ -150,11 +154,7 @@ public final class ResidencyDynamicListTest {
     }
 
     private static void setContentMode(Activity activity) {
-        if (activity instanceof ResidencyAppsActivity) {
-            ((ResidencyAppsActivity) activity).setListSurfaceMode(true);
-        } else {
-            ((ResidencyAppPickerActivity) activity).setListSurfaceMode(true);
-        }
+        ((ResidencyAppsActivity) activity).setListSurfaceMode(true);
     }
 
     private static void assertBounded(Activity activity, int expectedBottomPadding) {
@@ -167,7 +167,7 @@ public final class ResidencyDynamicListTest {
     }
 
     private static LinearLayout.LayoutParams surfaceParams(Activity activity) {
-        MaterialCardView surface = activity.findViewById(R.id.residency_list_surface);
+        View surface = activity.findViewById(R.id.residency_list_surface);
         return (LinearLayout.LayoutParams) surface.getLayoutParams();
     }
 

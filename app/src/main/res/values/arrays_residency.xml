@@ -20,9 +20,4 @@
         <item>已启用</item>
         <item>已停用</item>
     </string-array>
-    <string-array name="residency_availability_filters">
-        <item>全部应用</item>
-        <item>可配置</item>
-        <item>不可配置</item>
-    </string-array>
 </resources>

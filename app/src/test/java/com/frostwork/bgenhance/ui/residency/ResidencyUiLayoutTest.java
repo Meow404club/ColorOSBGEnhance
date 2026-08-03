@@ -52,7 +52,7 @@ public final class ResidencyUiLayoutTest {
     @Test
     public void iconOnlySwitchesExposeUserFacingNamesAndProgressBlocksTouches() {
         View policy = inflate(R.layout.activity_residency_policy);
-        View picker = inflate(R.layout.activity_residency_app_picker);
+        View picker = inflate(R.layout.item_residency_app_picker_header);
         View importer = inflate(R.layout.activity_residency_import);
 
         assertHasDescription(policy, R.id.residency_policy_enabled);
@@ -100,12 +100,12 @@ public final class ResidencyUiLayoutTest {
     @Test
     public void residencyInputsShareFilledMaterialStyling() {
         View apps = inflate(R.layout.activity_residency_apps);
-        View picker = inflate(R.layout.activity_residency_app_picker);
+        View picker = inflate(R.layout.item_residency_app_picker_header);
         View policy = inflate(R.layout.activity_residency_policy);
 
         assertFilled(apps, R.id.residency_mode_filter);
         assertFilled(apps, R.id.residency_status_filter);
-        assertFilled(picker, R.id.residency_availability_filter);
+        assertFilled(picker, R.id.residency_search);
         assertFilled(policy, R.id.residency_mode_selector);
     }
 
@@ -118,21 +118,11 @@ public final class ResidencyUiLayoutTest {
                 portrait, R.layout.activity_residency_apps, R.id.residency_mode_filter);
         assertDropdownValue(
                 portrait, R.layout.activity_residency_apps, R.id.residency_status_filter);
-        assertDropdownValue(
-                portrait,
-                R.layout.activity_residency_app_picker,
-                R.id.residency_availability_filter);
-
         ContextThemeWrapper landscape = landscapeContext(1f);
         assertDropdownValue(
                 landscape, R.layout.activity_residency_apps, R.id.residency_mode_filter);
         assertDropdownValue(
                 landscape, R.layout.activity_residency_apps, R.id.residency_status_filter);
-        assertDropdownValue(
-                landscape,
-                R.layout.activity_residency_app_picker,
-                R.id.residency_availability_filter);
-
         TypedArray style = portrait.obtainStyledAttributes(
                 R.style.Widget_ColorOSBgEnhance_DropdownValue,
                 new int[] {android.R.attr.textStyle});
@@ -150,26 +140,11 @@ public final class ResidencyUiLayoutTest {
                 portrait, R.layout.activity_residency_apps, R.id.residency_mode_filter_label);
         assertDropdownLabel(
                 portrait, R.layout.activity_residency_apps, R.id.residency_status_filter_label);
-        assertDropdownLabel(
-                portrait,
-                R.layout.activity_residency_app_picker,
-                R.id.residency_availability_filter_label);
-
-        View picker = inflate(portrait, R.layout.activity_residency_app_picker);
-        assertSameTextStyle(
-                picker.findViewById(R.id.residency_show_system_title),
-                picker.findViewById(R.id.residency_availability_filter_label));
-
         ContextThemeWrapper landscape = landscapeContext(1f);
         assertDropdownLabel(
                 landscape, R.layout.activity_residency_apps, R.id.residency_mode_filter_label);
         assertDropdownLabel(
                 landscape, R.layout.activity_residency_apps, R.id.residency_status_filter_label);
-        assertDropdownLabel(
-                landscape,
-                R.layout.activity_residency_app_picker,
-                R.id.residency_availability_filter_label);
-
         TypedArray titleStyle = portrait.obtainStyledAttributes(
                 R.style.TextAppearance_ColorOSBgEnhance_SettingTitle,
                 new int[] {android.R.attr.textStyle});
@@ -200,18 +175,6 @@ public final class ResidencyUiLayoutTest {
                 apps, R.id.residency_mode_filter_row, R.id.residency_mode_filter);
         assertStackedFilterRow(
                 apps, R.id.residency_status_filter_row, R.id.residency_status_filter);
-
-        View picker = inflate(context, R.layout.activity_residency_app_picker);
-        ResidencyFilterRows.stackForLargeText(
-                picker,
-                2f,
-                R.id.residency_availability_filter_row,
-                R.id.residency_availability_filter_label,
-                R.id.residency_availability_filter);
-        assertStackedFilterRow(
-                picker,
-                R.id.residency_availability_filter_row,
-                R.id.residency_availability_filter);
     }
 
     @Test
@@ -237,8 +200,8 @@ public final class ResidencyUiLayoutTest {
                 >= context.getResources().getDimensionPixelSize(R.dimen.field_min_height));
 
         MaterialAutoCompleteTextView field = inflate(
-                context, R.layout.activity_residency_app_picker)
-                .findViewById(R.id.residency_availability_filter);
+                context, R.layout.activity_residency_apps)
+                .findViewById(R.id.residency_mode_filter);
         Drawable background = field.getDropDownBackground();
         assertNotNull(background);
         assertEquals(dp(context, 4), field.getDropDownVerticalOffset());
@@ -247,7 +210,7 @@ public final class ResidencyUiLayoutTest {
     @Test
     public void primarySwitchRowsAreClickableAndCountsAnnounceUpdates() {
         View apps = inflate(R.layout.activity_residency_apps);
-        View picker = inflate(R.layout.activity_residency_app_picker);
+        View picker = inflate(R.layout.item_residency_app_picker_header);
         View policy = inflate(R.layout.activity_residency_policy);
 
         assertTrue(picker.findViewById(R.id.residency_show_system_row).isClickable());
@@ -259,16 +222,31 @@ public final class ResidencyUiLayoutTest {
     }
 
     @Test
-    public void pickerListSurfaceOwnsEveryDynamicListState() {
+    public void pickerUsesOneListAndItsHeaderOwnsEveryFilterControl() {
         View picker = inflate(R.layout.activity_residency_app_picker);
         View surface = picker.findViewById(R.id.residency_list_surface);
+        View header = inflate(R.layout.item_residency_app_picker_header);
+        View state = inflate(R.layout.item_residency_app_picker_state);
 
         assertTrue(isDescendant(surface, picker.findViewById(R.id.residency_app_list)));
-        assertTrue(isDescendant(surface, picker.findViewById(R.id.residency_loading_state)));
-        assertTrue(isDescendant(surface, picker.findViewById(R.id.residency_empty_state)));
-        assertTrue(isDescendant(surface, picker.findViewById(R.id.residency_error_state)));
-        assertTrue(!isDescendant(
-                surface, picker.findViewById(R.id.residency_show_system_row)));
+        assertNotNull(header.findViewById(R.id.residency_search));
+        assertNotNull(header.findViewById(R.id.residency_show_system_row));
+        assertNotNull(header.findViewById(R.id.residency_result_count));
+        assertNotNull(state.findViewById(R.id.residency_state_progress));
+        assertNotNull(state.findViewById(R.id.residency_state_action));
+    }
+
+    @Test
+    public void pickerSearchTextIsVerticallyCenteredWithSymmetricSpacing() {
+        View header = inflate(R.layout.item_residency_app_picker_header);
+        com.google.android.material.textfield.TextInputEditText search =
+                header.findViewById(R.id.residency_search);
+
+        assertEquals(Gravity.CENTER_VERTICAL, search.getGravity() & Gravity.VERTICAL_GRAVITY_MASK);
+        assertEquals(search.getPaddingTop(), search.getPaddingBottom());
+        assertTrue(!search.getIncludeFontPadding());
+        assertTrue(search.getMinimumHeight()
+                >= header.getResources().getDimensionPixelSize(R.dimen.field_min_height));
     }
 
     @Test
@@ -309,9 +287,6 @@ public final class ResidencyUiLayoutTest {
         assertNoEllipsis(
                 apps, context, R.id.residency_status_filter, "全部状态");
 
-        View picker = inflate(context, R.layout.activity_residency_app_picker);
-        assertNoEllipsis(
-                picker, context, R.id.residency_availability_filter, "不可配置");
     }
 
     @Test

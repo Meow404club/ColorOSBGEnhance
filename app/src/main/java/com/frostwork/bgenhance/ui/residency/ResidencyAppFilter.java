@@ -31,9 +31,7 @@ public final class ResidencyAppFilter {
         ALL,
         ENABLED,
         DISABLED,
-        UNMANAGED,
-        CONFIGURABLE,
-        RESTRICTED
+        UNMANAGED
     }
 
     public static List<ResidencyAppItem> apply(
@@ -91,10 +89,6 @@ public final class ResidencyAppFilter {
                 return item.policy() != null && !item.policy().enabled();
             case UNMANAGED:
                 return item.policy() == null;
-            case CONFIGURABLE:
-                return !item.safety().isRestricted();
-            case RESTRICTED:
-                return item.safety().isRestricted();
             default:
                 throw new AssertionError(filter);
         }

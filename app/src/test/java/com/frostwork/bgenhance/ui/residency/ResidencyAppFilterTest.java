@@ -79,7 +79,7 @@ public final class ResidencyAppFilterTest {
     }
 
     @Test
-    public void restrictedAndConfigurableFiltersAreMutuallyExclusive() {
+    public void pickerKeepsRestrictedEntriesVisibleForAnExplicitSafetyExplanation() {
         ResidencyAppItem configurable = item(
                 "User", "com.example.user", false, true, null);
         ResidencyAppItem restricted = new ResidencyAppItem(
@@ -93,23 +93,17 @@ public final class ResidencyAppFilterTest {
                 null);
         List<ResidencyAppItem> source = Arrays.asList(configurable, restricted);
 
-        List<ResidencyAppItem> configurableOnly = ResidencyAppFilter.apply(
+        List<ResidencyAppItem> filtered = ResidencyAppFilter.apply(
                 source,
                 ResidencyAppCatalog.Source.PICKER,
                 "",
                 ResidencyAppFilter.ModeFilter.ALL,
-                ResidencyAppFilter.StatusFilter.CONFIGURABLE,
-                true);
-        List<ResidencyAppItem> restrictedOnly = ResidencyAppFilter.apply(
-                source,
-                ResidencyAppCatalog.Source.PICKER,
-                "",
-                ResidencyAppFilter.ModeFilter.ALL,
-                ResidencyAppFilter.StatusFilter.RESTRICTED,
+                ResidencyAppFilter.StatusFilter.ALL,
                 true);
 
-        assertEquals(configurable.packageName(), configurableOnly.get(0).packageName());
-        assertEquals(restricted.packageName(), restrictedOnly.get(0).packageName());
+        assertEquals(2, filtered.size());
+        assertEquals(configurable.packageName(), filtered.get(0).packageName());
+        assertEquals(restricted.packageName(), filtered.get(1).packageName());
     }
 
     private static List<ResidencyAppItem> filterPicker(
