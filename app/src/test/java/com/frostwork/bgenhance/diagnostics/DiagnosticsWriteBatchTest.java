@@ -9,7 +9,7 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 public final class DiagnosticsWriteBatchTest {
-    private static final int TEST_WIRE_VERSION = 2;
+    private static final int TEST_WIRE_VERSION = 3;
 
     @Test
     public void identityHasStableValueSemanticsForBackendDeduplication() {

@@ -68,7 +68,8 @@ public final class DiagnosticsWireEncoderTest {
                 .updatedAt(1_700_000_000_003L)
                 .build();
         DiagnosticsWriteBatch input = DiagnosticsWriteBatch.builder()
-                .wireIdentity(2, "boot-42", "system_server", "sender-42", 3L, 9L)
+                .wireIdentity(DiagnosticsWireParser.WIRE_VERSION,
+                        "boot-42", "system_server", "sender-42", 3L, 9L)
                 .countingMode(DiagnosticsWriteBatch.CountingMode.TYPED)
                 .addRawHit(raw)
                 .addEvent(event)
@@ -81,7 +82,10 @@ public final class DiagnosticsWireEncoderTest {
 
         assertTrue(parsed.accepted());
         assertEquals(3, parsed.acceptedItems);
-        assertEquals(input.batchIdentity, parsed.batch.batchIdentity);
+        assertEquals(input.batchIdentity.batchSequence,
+                parsed.batch.batchIdentity.batchSequence);
+        assertTrue(DiagnosticsValues.isSha256(
+                parsed.batch.batchIdentity.payloadHash, false));
         assertEquals(DiagnosticsWriteBatch.CountingMode.TYPED, parsed.batch.countingMode);
         assertEquals(raw.featureId, parsed.batch.rawHits.get(0).featureId);
         assertEquals(raw.hookTargetId, parsed.batch.rawHits.get(0).hookTargetId);
@@ -96,7 +100,8 @@ public final class DiagnosticsWireEncoderTest {
     @Test(expected = IllegalArgumentException.class)
     public void encoderRejectsLegacyCountingMode() {
         DiagnosticsWriteBatch legacy = DiagnosticsWriteBatch.builder()
-                .wireIdentity(2, "boot", "system_server", "sender", 0L, 0L)
+                .wireIdentity(DiagnosticsWireParser.WIRE_VERSION,
+                        "boot", "system_server", "sender", 0L, 0L)
                 .countingMode(DiagnosticsWriteBatch.CountingMode.LEGACY)
                 .addLegacyFeatureDelta(new DiagnosticsWriteBatch.LegacyFeatureDelta(
                         FeatureIds.HANS, 1L, 0L, 0L, 1L,

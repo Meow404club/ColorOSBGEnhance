@@ -5,16 +5,31 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import android.content.Context;
 import android.os.Bundle;
 import android.os.Process;
+import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
+import com.frostwork.bgenhance.diagnostics.DiagnosticsRetentionPolicy;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsWireEncoder;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsWireParser;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsWriteBatch;
 import com.frostwork.bgenhance.diagnostics.NormalizedDiagnosticsEvent;
+import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
+import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsDb;
+import java.util.Collections;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
+import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 
 @RunWith(RobolectricTestRunner.class)
@@ -73,6 +88,275 @@ public final class DiagnosticsProviderControllerTest {
         assertTrue(response.getBoolean(BridgeContract.EXTRA_OK));
         assertEquals(batch.size(), response.getInt(BridgeContract.EXTRA_ACCEPTED_ITEMS));
         assertEquals(0, response.getInt(BridgeContract.EXTRA_DROPPED_ITEMS));
+    }
+
+    @Test
+    public void successfulAckWaitsForPersistenceCompletion() throws Exception {
+        CompletableFuture<DiagnosticsProviderController.BatchResult> persistence =
+                new CompletableFuture<>();
+        CountDownLatch invoked = new CountDownLatch(1);
+        DiagnosticsProviderController controller = new DiagnosticsProviderController(
+                MODULE_UID, SYSTEM_UID, ATHENA_UID, "boot", () -> EPOCH,
+                batch -> {
+                    invoked.countDown();
+                    return persistence;
+                },
+                new DiagnosticsWireParser(),
+                1_000L);
+        DiagnosticsWriteBatch batch = batch(
+                BridgeContract.PROCESS_SYSTEM_SERVER, "boot", EPOCH, 40L);
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        try {
+            Future<Bundle> response = caller.submit(() -> controller.handle(
+                    SYSTEM_UID,
+                    BridgeContract.METHOD_REPORT_BATCH,
+                    DiagnosticsWireEncoder.encodeTyped(batch)));
+
+            assertTrue(invoked.await(5, TimeUnit.SECONDS));
+            assertFalse(response.isDone());
+            persistence.complete(accepted(batch.size()));
+            assertTrue(response.get(5, TimeUnit.SECONDS).getBoolean(
+                    BridgeContract.EXTRA_OK));
+        } finally {
+            caller.shutdownNow();
+        }
+    }
+
+    @Test
+    public void persistenceTimeoutIsNeverReportedAsSuccess() {
+        DiagnosticsProviderController controller = new DiagnosticsProviderController(
+                MODULE_UID, SYSTEM_UID, ATHENA_UID, "boot", () -> EPOCH,
+                batch -> new CompletableFuture<>(),
+                new DiagnosticsWireParser(),
+                10L);
+        DiagnosticsWriteBatch batch = batch(
+                BridgeContract.PROCESS_SYSTEM_SERVER, "boot", EPOCH, 41L);
+
+        Bundle response = controller.handle(
+                SYSTEM_UID,
+                BridgeContract.METHOD_REPORT_BATCH,
+                DiagnosticsWireEncoder.encodeTyped(batch));
+
+        assertFalse(response.getBoolean(BridgeContract.EXTRA_OK));
+        assertEquals("backend_timeout", response.getString(BridgeContract.EXTRA_ERROR));
+        assertEquals(0, response.getInt(BridgeContract.EXTRA_ACCEPTED_ITEMS));
+        assertEquals(0, response.getInt(BridgeContract.EXTRA_DROPPED_ITEMS));
+    }
+
+    @Test
+    public void epochChangeWhileWaitingCannotAcknowledgeOldBatch() throws Exception {
+        CompletableFuture<DiagnosticsProviderController.BatchResult> persistence =
+                new CompletableFuture<>();
+        CountDownLatch invoked = new CountDownLatch(1);
+        AtomicLong epoch = new AtomicLong(EPOCH);
+        DiagnosticsProviderController controller = new DiagnosticsProviderController(
+                MODULE_UID, SYSTEM_UID, ATHENA_UID, "boot", epoch::get,
+                batch -> {
+                    invoked.countDown();
+                    return persistence;
+                },
+                new DiagnosticsWireParser(),
+                1_000L);
+        DiagnosticsWriteBatch batch = batch(
+                BridgeContract.PROCESS_SYSTEM_SERVER, "boot", EPOCH, 42L);
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        try {
+            Future<Bundle> pending = caller.submit(() -> controller.handle(
+                    SYSTEM_UID,
+                    BridgeContract.METHOD_REPORT_BATCH,
+                    DiagnosticsWireEncoder.encodeTyped(batch)));
+            assertTrue(invoked.await(5, TimeUnit.SECONDS));
+
+            epoch.set(EPOCH + 1L);
+            persistence.complete(accepted(batch.size()));
+            Bundle response = pending.get(5, TimeUnit.SECONDS);
+
+            assertFalse(response.getBoolean(BridgeContract.EXTRA_OK));
+            assertEquals("epoch_mismatch", response.getString(BridgeContract.EXTRA_ERROR));
+            assertEquals(EPOCH + 1L,
+                    response.getLong(BridgeContract.EXTRA_DIAGNOSTICS_EPOCH));
+            assertEquals(0, response.getInt(BridgeContract.EXTRA_ACCEPTED_ITEMS));
+        } finally {
+            caller.shutdownNow();
+        }
+    }
+
+    @Test
+    public void excessPersistenceWaitersAreRejectedWithoutEnteringSink()
+            throws Exception {
+        @SuppressWarnings("unchecked")
+        CompletableFuture<DiagnosticsProviderController.BatchResult>[] completions =
+                new CompletableFuture[] {
+                        new CompletableFuture<>(), new CompletableFuture<>()
+                };
+        AtomicInteger calls = new AtomicInteger();
+        CountDownLatch waiting = new CountDownLatch(2);
+        DiagnosticsProviderController controller = new DiagnosticsProviderController(
+                MODULE_UID, SYSTEM_UID, ATHENA_UID, "boot", () -> EPOCH,
+                batch -> {
+                    int index = calls.getAndIncrement();
+                    if (index >= completions.length) {
+                        throw new AssertionError("excess batch entered persistence sink");
+                    }
+                    waiting.countDown();
+                    return completions[index];
+                },
+                new DiagnosticsWireParser(),
+                5_000L);
+        ExecutorService callers = Executors.newFixedThreadPool(2);
+        try {
+            Future<Bundle> first = callers.submit(() -> controller.handle(
+                    SYSTEM_UID,
+                    BridgeContract.METHOD_REPORT_BATCH,
+                    DiagnosticsWireEncoder.encodeTyped(batch(
+                            BridgeContract.PROCESS_SYSTEM_SERVER,
+                            "boot", EPOCH, 50L))));
+            Future<Bundle> second = callers.submit(() -> controller.handle(
+                    SYSTEM_UID,
+                    BridgeContract.METHOD_REPORT_BATCH,
+                    DiagnosticsWireEncoder.encodeTyped(batch(
+                            BridgeContract.PROCESS_SYSTEM_SERVER,
+                            "boot", EPOCH, 51L))));
+            assertTrue(waiting.await(5, TimeUnit.SECONDS));
+
+            Bundle excess = controller.handle(
+                    SYSTEM_UID,
+                    BridgeContract.METHOD_REPORT_BATCH,
+                    DiagnosticsWireEncoder.encodeTyped(batch(
+                            BridgeContract.PROCESS_SYSTEM_SERVER,
+                            "boot", EPOCH, 52L)));
+
+            assertFalse(excess.getBoolean(BridgeContract.EXTRA_OK));
+            assertEquals("backend_busy", excess.getString(BridgeContract.EXTRA_ERROR));
+            assertEquals(2, calls.get());
+            completions[0].complete(accepted(1));
+            completions[1].complete(accepted(1));
+            assertTrue(first.get(5, TimeUnit.SECONDS)
+                    .getBoolean(BridgeContract.EXTRA_OK));
+            assertTrue(second.get(5, TimeUnit.SECONDS)
+                    .getBoolean(BridgeContract.EXTRA_OK));
+        } finally {
+            for (CompletableFuture<?> completion : completions) {
+                completion.completeExceptionally(new IllegalStateException("test cleanup"));
+            }
+            callers.shutdownNow();
+        }
+    }
+
+    @Test
+    public void timeoutThenLateCommitRetriesAsReplayWithoutDoubleCounting()
+            throws Exception {
+        Context context = RuntimeEnvironment.getApplication();
+        context.deleteDatabase(ResidencyDiagnosticsDb.DATABASE_NAME);
+        DiagnosticsRetentionPolicy policy = DiagnosticsRetentionPolicy.builder()
+                .queueCapacity(16)
+                .batchSize(4)
+                .flushDelayMillis(0L)
+                .maintenanceIntervalMillis(60_000L)
+                .maxDatabaseBytes(1_048_576L)
+                .build();
+        ResidencyDiagnosticsBackend backend = ResidencyDiagnosticsBackend.open(
+                context, policy, "boot");
+        CompletableFuture<Void> releaseFirstResponse = new CompletableFuture<>();
+        CountDownLatch firstCommitted = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        try {
+            assertEquals(0L, backend.currentEpochAsync()
+                    .get(5, TimeUnit.SECONDS).longValue());
+            DiagnosticsProviderController controller = new DiagnosticsProviderController(
+                    MODULE_UID, SYSTEM_UID, ATHENA_UID, "boot", backend::admissionEpoch,
+                    value -> {
+                        CompletableFuture<ResidencyDiagnosticsBackend.DurableWriteResult>
+                                persisted = backend.enqueueDurable(value);
+                        if (calls.getAndIncrement() == 0) {
+                            return persisted.thenCompose(result -> {
+                                firstCommitted.countDown();
+                                return releaseFirstResponse.thenApply(ignored -> durable(result));
+                            });
+                        }
+                        return persisted.thenApply(
+                                DiagnosticsProviderControllerTest::durable);
+                    },
+                    new DiagnosticsWireParser(),
+                    10L);
+            DiagnosticsWriteBatch batch = batch(
+                    BridgeContract.PROCESS_SYSTEM_SERVER, "boot", 0L, 0L);
+            Bundle payload = DiagnosticsWireEncoder.encodeTyped(batch);
+
+            Bundle timedOut = controller.handle(
+                    SYSTEM_UID, BridgeContract.METHOD_REPORT_BATCH, payload);
+            assertFalse(timedOut.getBoolean(BridgeContract.EXTRA_OK));
+            assertEquals("backend_timeout", timedOut.getString(BridgeContract.EXTRA_ERROR));
+            assertTrue(firstCommitted.await(5, TimeUnit.SECONDS));
+            releaseFirstResponse.complete(null);
+
+            Bundle replayed = controller.handle(
+                    SYSTEM_UID, BridgeContract.METHOD_REPORT_BATCH, payload);
+            assertTrue(replayed.getBoolean(BridgeContract.EXTRA_OK));
+            DiagnosticsQuery.HomeStatsSnapshot stats = backend.queryHomeStatsAsync(
+                    Collections.singletonList(FeatureIds.HANS))
+                    .get(5, TimeUnit.SECONDS);
+            assertEquals(1L, stats.observed);
+            assertEquals(2, calls.get());
+        } finally {
+            releaseFirstResponse.complete(null);
+            backend.closeAsync().get(5, TimeUnit.SECONDS);
+            context.deleteDatabase(ResidencyDiagnosticsDb.DATABASE_NAME);
+        }
+    }
+
+    @Test
+    public void clearAfterCommitButBeforeResponseCannotAckOldEpoch()
+            throws Exception {
+        Context context = RuntimeEnvironment.getApplication();
+        context.deleteDatabase(ResidencyDiagnosticsDb.DATABASE_NAME);
+        DiagnosticsRetentionPolicy policy = DiagnosticsRetentionPolicy.builder()
+                .queueCapacity(16)
+                .batchSize(4)
+                .flushDelayMillis(0L)
+                .maintenanceIntervalMillis(60_000L)
+                .maxDatabaseBytes(1_048_576L)
+                .build();
+        ResidencyDiagnosticsBackend backend = ResidencyDiagnosticsBackend.open(
+                context, policy, "boot");
+        CompletableFuture<Void> releaseResponse = new CompletableFuture<>();
+        CountDownLatch committed = new CountDownLatch(1);
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        try {
+            assertEquals(0L, backend.currentEpochAsync()
+                    .get(5, TimeUnit.SECONDS).longValue());
+            DiagnosticsProviderController controller = new DiagnosticsProviderController(
+                    MODULE_UID, SYSTEM_UID, ATHENA_UID, "boot", backend::admissionEpoch,
+                    value -> backend.enqueueDurable(value).thenCompose(result -> {
+                        committed.countDown();
+                        return releaseResponse.thenApply(ignored -> durable(result));
+                    }),
+                    new DiagnosticsWireParser(),
+                    5_000L);
+            Bundle payload = DiagnosticsWireEncoder.encodeTyped(batch(
+                    BridgeContract.PROCESS_SYSTEM_SERVER, "boot", 0L, 0L));
+            Future<Bundle> pending = caller.submit(() -> controller.handle(
+                    SYSTEM_UID, BridgeContract.METHOD_REPORT_BATCH, payload));
+            assertTrue(committed.await(5, TimeUnit.SECONDS));
+
+            DiagnosticsQuery.ClearResult clear = backend.clearAsync(
+                    DiagnosticsQuery.ClearScope.USER_ACTIVITY)
+                    .get(5, TimeUnit.SECONDS);
+            assertTrue(clear.success);
+            releaseResponse.complete(null);
+            Bundle response = pending.get(5, TimeUnit.SECONDS);
+
+            assertFalse(response.getBoolean(BridgeContract.EXTRA_OK));
+            assertEquals("epoch_mismatch", response.getString(BridgeContract.EXTRA_ERROR));
+            assertEquals(clear.epoch,
+                    response.getLong(BridgeContract.EXTRA_DIAGNOSTICS_EPOCH));
+            assertEquals(0, response.getInt(BridgeContract.EXTRA_ACCEPTED_ITEMS));
+        } finally {
+            releaseResponse.complete(null);
+            caller.shutdownNow();
+            backend.closeAsync().get(5, TimeUnit.SECONDS);
+            context.deleteDatabase(ResidencyDiagnosticsDb.DATABASE_NAME);
+        }
     }
 
     @Test
@@ -154,7 +438,7 @@ public final class DiagnosticsProviderControllerTest {
                 MODULE_UID, SYSTEM_UID, SYSTEM_UID, "boot", () -> EPOCH,
                 batch -> {
                     calls.incrementAndGet();
-                    return accepted(batch.size());
+                    return CompletableFuture.completedFuture(accepted(batch.size()));
                 },
                 new DiagnosticsWireParser());
 
@@ -221,20 +505,29 @@ public final class DiagnosticsProviderControllerTest {
     public void unresolvedAthenaUidDoesNotAuthorizeArbitraryNegativeUid() {
         DiagnosticsProviderController controller = new DiagnosticsProviderController(
                 MODULE_UID, SYSTEM_UID, -1, "boot", () -> EPOCH,
-                batch -> accepted(batch.size()), new DiagnosticsWireParser());
+                batch -> CompletableFuture.completedFuture(accepted(batch.size())),
+                new DiagnosticsWireParser());
 
         assertFalse(controller.isAllowedCaller(-1));
     }
 
     private static DiagnosticsProviderController controller(
-            DiagnosticsProviderController.BatchSink sink) {
+            Function<DiagnosticsWriteBatch, DiagnosticsProviderController.BatchResult> sink) {
         return new DiagnosticsProviderController(
                 MODULE_UID, SYSTEM_UID, ATHENA_UID, "boot", () -> EPOCH,
-                sink, new DiagnosticsWireParser());
+                batch -> CompletableFuture.completedFuture(sink.apply(batch)),
+                new DiagnosticsWireParser());
     }
 
     private static DiagnosticsProviderController.BatchResult accepted(int count) {
         return new DiagnosticsProviderController.BatchResult(count, 0);
+    }
+
+    private static DiagnosticsProviderController.BatchResult durable(
+            ResidencyDiagnosticsBackend.DurableWriteResult result) {
+        return result.persisted
+                ? accepted(result.itemCount)
+                : new DiagnosticsProviderController.BatchResult(0, 0, result.errorCode);
     }
 
     private static void assertRejectedIdentity(Bundle response, int droppedItems) {

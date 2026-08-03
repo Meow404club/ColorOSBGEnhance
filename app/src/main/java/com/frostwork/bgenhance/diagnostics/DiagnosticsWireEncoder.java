@@ -52,6 +52,11 @@ public final class DiagnosticsWireEncoder {
             for (DiagnosticsHookState state : batch.hookStates) values.add(hookState(state));
             out.putParcelableArrayList(DiagnosticsWireParser.KEY_HOOK_STATES, values);
         }
+        String payloadHash = DiagnosticsPayloadFingerprint.compute(out);
+        if (!identity.payloadHash.isEmpty() && !identity.payloadHash.equals(payloadHash)) {
+            throw new IllegalArgumentException("diagnostics payload hash mismatch");
+        }
+        out.putString(DiagnosticsWireParser.KEY_PAYLOAD_HASH, payloadHash);
         return out;
     }
 

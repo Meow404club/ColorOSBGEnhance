@@ -3,21 +3,35 @@ package com.frostwork.bgenhance;
 import android.os.Bundle;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsWireParser;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsWriteBatch;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.LongSupplier;
 
-/** Pure Binder-thread boundary: fixed caller checks, bounded parsing, enqueue, and ACK only. */
+/** Binder boundary with bounded parsing and bounded waiting for the asynchronous SQLite commit. */
 final class DiagnosticsProviderController {
+    private static final long DEFAULT_ACK_TIMEOUT_MILLIS = 4_000L;
+    private static final int MAX_PERSISTENCE_WAITERS = 2;
+
     interface BatchSink {
-        BatchResult enqueue(DiagnosticsWriteBatch batch);
+        CompletableFuture<BatchResult> persist(DiagnosticsWriteBatch batch);
     }
 
     static final class BatchResult {
         final int accepted;
         final int dropped;
+        final String errorCode;
 
         BatchResult(int accepted, int dropped) {
+            this(accepted, dropped, "");
+        }
+
+        BatchResult(int accepted, int dropped, String errorCode) {
             this.accepted = Math.max(0, accepted);
             this.dropped = Math.max(0, dropped);
+            this.errorCode = errorCode == null ? "" : errorCode;
         }
     }
 
@@ -28,6 +42,9 @@ final class DiagnosticsProviderController {
     private final LongSupplier currentEpoch;
     private final BatchSink sink;
     private final DiagnosticsWireParser parser;
+    private final long ackTimeoutMillis;
+    private final Semaphore persistenceWaiters =
+            new Semaphore(MAX_PERSISTENCE_WAITERS, true);
 
     DiagnosticsProviderController(
             int moduleUid,
@@ -37,6 +54,19 @@ final class DiagnosticsProviderController {
             LongSupplier currentEpoch,
             BatchSink sink,
             DiagnosticsWireParser parser) {
+        this(moduleUid, systemUid, athenaUid, currentBootId,
+                currentEpoch, sink, parser, DEFAULT_ACK_TIMEOUT_MILLIS);
+    }
+
+    DiagnosticsProviderController(
+            int moduleUid,
+            int systemUid,
+            int athenaUid,
+            String currentBootId,
+            LongSupplier currentEpoch,
+            BatchSink sink,
+            DiagnosticsWireParser parser,
+            long ackTimeoutMillis) {
         this.moduleUid = moduleUid;
         this.systemUid = systemUid;
         this.athenaUid = athenaUid;
@@ -44,6 +74,7 @@ final class DiagnosticsProviderController {
         this.currentEpoch = currentEpoch;
         this.sink = sink;
         this.parser = parser == null ? new DiagnosticsWireParser() : parser;
+        this.ackTimeoutMillis = Math.max(1L, ackTimeoutMillis);
     }
 
     Bundle handle(int callerUid, String method, Bundle extras) {
@@ -83,13 +114,47 @@ final class DiagnosticsProviderController {
             return rejectedBatch(epoch, "epoch_mismatch", parsed.acceptedItems);
         }
 
-        BatchResult accepted = sink.enqueue(parsed.batch);
-        boolean complete = accepted.accepted == parsed.acceptedItems && accepted.dropped == 0;
-        Bundle out = baseResponse(complete, epoch);
-        out.putInt(BridgeContract.EXTRA_ACCEPTED_ITEMS, accepted.accepted);
+        BatchResult accepted;
+        if (!persistenceWaiters.tryAcquire()) {
+            return rejectedBatch(epoch, "backend_busy", parsed.acceptedItems);
+        }
+        try {
+            accepted = awaitPersistence(sink.persist(parsed.batch));
+        } catch (Throwable error) {
+            accepted = new BatchResult(0, 0, "backend_failure");
+        } finally {
+            persistenceWaiters.release();
+        }
+        long responseEpoch = currentEpoch == null ? -1L : currentEpoch.getAsLong();
+        boolean currentIdentity = responseEpoch == identity.epoch;
+        boolean complete = currentIdentity
+                && accepted.accepted == parsed.acceptedItems
+                && accepted.dropped == 0;
+        Bundle out = baseResponse(complete, responseEpoch);
+        out.putInt(BridgeContract.EXTRA_ACCEPTED_ITEMS,
+                currentIdentity ? accepted.accepted : 0);
         out.putInt(BridgeContract.EXTRA_DROPPED_ITEMS, accepted.dropped);
-        if (!complete) out.putString(BridgeContract.EXTRA_ERROR, "backend_busy");
+        if (!complete) out.putString(
+                BridgeContract.EXTRA_ERROR,
+                !currentIdentity
+                        ? "epoch_mismatch"
+                        : accepted.errorCode.isEmpty() ? "backend_busy" : accepted.errorCode);
         return out;
+    }
+
+    private BatchResult awaitPersistence(CompletableFuture<BatchResult> completion) {
+        if (completion == null) return new BatchResult(0, 0, "backend_failure");
+        try {
+            BatchResult result = completion.get(ackTimeoutMillis, TimeUnit.MILLISECONDS);
+            return result == null ? new BatchResult(0, 0, "backend_failure") : result;
+        } catch (TimeoutException timeout) {
+            return new BatchResult(0, 0, "backend_timeout");
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return new BatchResult(0, 0, "backend_interrupted");
+        } catch (ExecutionException failure) {
+            return new BatchResult(0, 0, "backend_failure");
+        }
     }
 
     boolean isAllowedCaller(int uid) {

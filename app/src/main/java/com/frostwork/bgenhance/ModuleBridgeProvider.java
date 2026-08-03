@@ -34,11 +34,12 @@ public final class ModuleBridgeProvider extends ContentProvider {
                 athenaUid,
                 ModuleApplication.diagnosticsBootId(),
                 backend::admissionEpoch,
-                batch -> {
-                    ResidencyDiagnosticsBackend.EnqueueResult result = backend.enqueue(batch);
-                    return new DiagnosticsProviderController.BatchResult(
-                            result.accepted, result.dropped);
-                },
+                batch -> backend.enqueueDurable(batch).thenApply(result ->
+                        result.persisted
+                                ? new DiagnosticsProviderController.BatchResult(
+                                        result.itemCount, 0)
+                                : new DiagnosticsProviderController.BatchResult(
+                                        0, 0, result.errorCode)),
                 new DiagnosticsWireParser());
         return true;
     }

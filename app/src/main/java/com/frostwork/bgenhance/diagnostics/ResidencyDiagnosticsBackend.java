@@ -14,6 +14,7 @@ import com.frostwork.bgenhance.residency.model.WakeSource;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +42,8 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
     private final String currentBootId;
     private final LegacyMigrationSource legacyMigrationSource;
     private final ArrayDeque<PendingBatch> queue = new ArrayDeque<>();
+    private final Map<DiagnosticsWriteBatch.BatchIdentity, PendingBatch> durablePending =
+            new LinkedHashMap<>();
     private final Object stateLock = new Object();
     private final int commandCapacity;
     private final AtomicBoolean drainScheduled = new AtomicBoolean();
@@ -178,6 +181,54 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
         acceptedWrites.addAndGet(total);
         requestDrain(queuedAfter >= policy.batchSize ? 0L : policy.flushDelayMillis);
         return new EnqueueResult(total, 0);
+    }
+
+    /**
+     * Enqueues a versioned Provider batch and completes only after SQLite commits or replays it.
+     */
+    public CompletableFuture<DurableWriteResult> enqueueDurable(
+            DiagnosticsWriteBatch batch) {
+        int total = batch == null ? 0 : batch.size();
+        if (batch == null || batch.isEmpty() || batch.batchIdentity == null
+                || total > DiagnosticsRetentionPolicy.MAX_ACCEPTED_BATCH_ITEMS
+                || !isValidBatch(batch)) {
+            if (total > 0) droppedWrites.addAndGet(total);
+            return CompletableFuture.completedFuture(
+                    DurableWriteResult.rejected(total, "invalid_batch"));
+        }
+
+        CompletableFuture<DurableWriteResult> completion = new CompletableFuture<>();
+        String rejection = "";
+        synchronized (stateLock) {
+            DiagnosticsWriteBatch.BatchIdentity identity = batch.batchIdentity;
+            long currentAdmissionEpoch = admissionEpoch.get();
+            if (closed.get()) {
+                rejection = "backend_closed";
+            } else if (currentAdmissionEpoch < 0L
+                    || identity.epoch != currentAdmissionEpoch) {
+                rejection = "epoch_mismatch";
+            } else if (durablePending.containsKey(identity)) {
+                rejection = "batch_pending";
+            } else if (total > policy.queueCapacity - queuedWrites) {
+                rejection = "backend_busy";
+            } else {
+                PendingBatch pending = new PendingBatch(
+                        batch, writeGeneration.get(), completion);
+                queue.addLast(pending);
+                durablePending.put(identity, pending);
+                queuedWrites += total;
+            }
+        }
+        if (!rejection.isEmpty()) {
+            if (!"batch_pending".equals(rejection)) droppedWrites.addAndGet(total);
+            completion.complete(DurableWriteResult.rejected(total, rejection));
+            return completion;
+        }
+        acceptedWrites.addAndGet(total);
+        if (!requestDrain(0L)) {
+            rejectQueuedDurableBatches("backend_unavailable");
+        }
+        return completion;
     }
 
     public CompletableFuture<Void> flushAsync() {
@@ -373,6 +424,7 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
      * Calls made after the close barrier receive their fail-open result without touching storage.
      */
     public CompletableFuture<Void> closeAsync() {
+        boolean schedulingFailed = false;
         synchronized (stateLock) {
             if (!closed.compareAndSet(false, true)) return closeCompletion;
             admissionEpoch.set(-1L);
@@ -385,6 +437,7 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                         closeStorage();
                     } catch (Throwable ignored) {
                         failedBatches.incrementAndGet();
+                        rejectQueuedDurableBatches("backend_closed");
                     } finally {
                         executor.shutdownNow();
                         closeCompletion.complete(null);
@@ -394,10 +447,14 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 failedBatches.incrementAndGet();
                 closeStorage();
                 executor.shutdownNow();
-                closeCompletion.complete(null);
+                schedulingFailed = true;
             }
-            return closeCompletion;
         }
+        if (schedulingFailed) {
+            rejectQueuedDurableBatches("backend_closed");
+            closeCompletion.complete(null);
+        }
+        return closeCompletion;
     }
 
     @Override
@@ -488,8 +545,9 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
         }
     }
 
-    private void requestDrain(long delayMillis) {
-        if (closed.get() || !drainScheduled.compareAndSet(false, true)) return;
+    private boolean requestDrain(long delayMillis) {
+        // Once close owns the barrier it will drain every batch accepted before close.
+        if (closed.get() || !drainScheduled.compareAndSet(false, true)) return true;
         try {
             executor.schedule(() -> {
                 try {
@@ -503,9 +561,33 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                     }
                 }
             }, Math.max(0L, delayMillis), TimeUnit.MILLISECONDS);
+            return true;
         } catch (Throwable error) {
             drainScheduled.set(false);
             failedBatches.incrementAndGet();
+            return false;
+        }
+    }
+
+    private void rejectQueuedDurableBatches(String errorCode) {
+        ArrayList<PendingBatch> rejected = new ArrayList<>();
+        int rejectedItems = 0;
+        synchronized (stateLock) {
+            Iterator<PendingBatch> iterator = queue.iterator();
+            while (iterator.hasNext()) {
+                PendingBatch pending = iterator.next();
+                if (pending.durableCompletion == null) continue;
+                iterator.remove();
+                queuedWrites -= pending.size;
+                durablePending.remove(pending.batch.batchIdentity, pending);
+                rejected.add(pending);
+                rejectedItems += pending.size;
+            }
+        }
+        if (rejectedItems > 0) droppedWrites.addAndGet(rejectedItems);
+        for (PendingBatch pending : rejected) {
+            pending.durableCompletion.complete(
+                    DurableWriteResult.rejected(pending.size, errorCode));
         }
     }
 
@@ -529,13 +611,28 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 ? null : writeWithRecovery(current, pending.batch);
         if (writeResult == ResidencyDiagnosticsStorage.WriteResult.COMMITTED) {
             committedWrites.addAndGet(drained);
+            completeDurable(pending, DurableWriteResult.committed(drained));
             performRegularMaintenanceSafely(current);
+        } else if (writeResult == ResidencyDiagnosticsStorage.WriteResult.REPLAYED) {
+            completeDurable(pending, DurableWriteResult.replayed(drained));
         } else if (writeResult != null && writeResult.isRejected()) {
             recordFailedWrite(drained);
+            completeDurable(pending, DurableWriteResult.rejected(
+                    drained, writeResult.name().toLowerCase(java.util.Locale.ROOT)));
         } else if (writeResult == null) {
             recordFailedWrite(drained);
+            completeDurable(pending, DurableWriteResult.rejected(
+                    drained, "storage_unavailable"));
         }
         return drained;
+    }
+
+    private void completeDurable(PendingBatch pending, DurableWriteResult result) {
+        if (pending == null || pending.durableCompletion == null) return;
+        synchronized (stateLock) {
+            durablePending.remove(pending.batch.batchIdentity, pending);
+        }
+        pending.durableCompletion.complete(result);
     }
 
     private ResidencyDiagnosticsStorage.WriteResult writeWithRecovery(
@@ -630,7 +727,8 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
 
     private boolean isValidBatch(DiagnosticsWriteBatch batch) {
         DiagnosticsWriteBatch.BatchIdentity identity = batch.batchIdentity;
-        if (identity != null && (currentBootId.isEmpty()
+        if (identity != null && (!DiagnosticsValues.isSha256(identity.payloadHash, false)
+                || currentBootId.isEmpty()
                 || !currentBootId.equals(identity.bootId))) return false;
         for (RawHookHit hit : batch.rawHits) {
             if (hit == null || !hit.isStorable()
@@ -942,14 +1040,50 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
         }
     }
 
+    public static final class DurableWriteResult {
+        public final boolean persisted;
+        public final boolean replayed;
+        public final int itemCount;
+        public final String errorCode;
+
+        private DurableWriteResult(
+                boolean persisted, boolean replayed, int itemCount, String errorCode) {
+            this.persisted = persisted;
+            this.replayed = replayed;
+            this.itemCount = Math.max(0, itemCount);
+            this.errorCode = DiagnosticsValues.id(errorCode);
+        }
+
+        static DurableWriteResult committed(int itemCount) {
+            return new DurableWriteResult(true, false, itemCount, "");
+        }
+
+        static DurableWriteResult replayed(int itemCount) {
+            return new DurableWriteResult(true, true, itemCount, "");
+        }
+
+        static DurableWriteResult rejected(int itemCount, String errorCode) {
+            return new DurableWriteResult(false, false, itemCount, errorCode);
+        }
+    }
+
     private static final class PendingBatch {
         final DiagnosticsWriteBatch batch;
         final long generation;
         final int size;
+        final CompletableFuture<DurableWriteResult> durableCompletion;
 
         PendingBatch(DiagnosticsWriteBatch batch, long generation) {
+            this(batch, generation, null);
+        }
+
+        PendingBatch(
+                DiagnosticsWriteBatch batch,
+                long generation,
+                CompletableFuture<DurableWriteResult> durableCompletion) {
             this.batch = batch;
             this.generation = generation;
+            this.durableCompletion = durableCompletion;
             size = batch.size();
         }
     }

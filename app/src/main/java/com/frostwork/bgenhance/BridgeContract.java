@@ -9,7 +9,7 @@ public final class BridgeContract {
     public static final String AUTHORITY = "com.frostwork.bgenhance.bridge";
     public static final Uri URI = Uri.parse("content://" + AUTHORITY);
 
-    public static final int BRIDGE_VERSION = 2;
+    public static final int BRIDGE_VERSION = 3;
 
     public static final String METHOD_PING = "ping";
     public static final String METHOD_REPORT_BATCH = "report_diagnostics_batch";

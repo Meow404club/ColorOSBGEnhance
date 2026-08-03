@@ -64,6 +64,18 @@ final class DiagnosticsValues {
         return isStrictString(value, maxLength, allowEmpty);
     }
 
+    static boolean isSha256(String value, boolean allowEmpty) {
+        if (value == null || (value.isEmpty() && !allowEmpty)) return false;
+        if (value.isEmpty()) return true;
+        if (value.length() != 64) return false;
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
+            if (!((current >= '0' && current <= '9')
+                    || (current >= 'a' && current <= 'f'))) return false;
+        }
+        return true;
+    }
+
     private static boolean isStrictString(String value, int maxLength, boolean allowEmpty) {
         if (value == null || value.length() > maxLength) return false;
         if (value.isEmpty()) return allowEmpty;

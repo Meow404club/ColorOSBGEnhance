@@ -15,6 +15,10 @@ import android.database.sqlite.SQLiteDatabase;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -320,19 +324,46 @@ public final class ResidencyDiagnosticsDbTest {
         database = open(policy(20, 20, 20, 60_000L));
         long now = System.currentTimeMillis();
         DiagnosticsWriteBatch first = versionedBatch(
-                0L, 1L, event(now, "first", "pkg.first", 1, "FREEZE", "blocked"));
+                0L, 0L, event(now, "first", "pkg.first", 1, "FREEZE", "blocked"));
         DiagnosticsWriteBatch second = versionedBatch(
-                0L, 2L, event(now + 1L, "second", "pkg.second", 2, "FREEZE", "blocked"));
+                0L, 1L, event(now + 1L, "second", "pkg.second", 2, "FREEZE", "blocked"));
 
-        database.writeBatch(first);
-        database.writeBatch(first);
-        database.writeBatch(second);
-        database.writeBatch(first);
+        assertEquals(ResidencyDiagnosticsStorage.WriteResult.COMMITTED,
+                database.writeBatch(first));
+        assertEquals(ResidencyDiagnosticsStorage.WriteResult.REPLAYED,
+                database.writeBatch(first));
+        assertEquals(ResidencyDiagnosticsStorage.WriteResult.COMMITTED,
+                database.writeBatch(second));
+        assertEquals(ResidencyDiagnosticsStorage.WriteResult.REJECTED_SEQUENCE,
+                database.writeBatch(first));
 
         DiagnosticsQuery.EventPage events = database.queryEvents(
                 DiagnosticsQuery.EventFilter.builder().limit(20).build());
         assertEquals(2, events.items.size());
         assertEquals(2L, database.queryHomeStats(
+                Collections.singletonList("freeze")).observed);
+    }
+
+    @Test
+    public void cursorRejectsSequenceGapsAndDifferentPayloadForSameSequence() {
+        database = open(policy(20, 20, 20, 60_000L));
+        long now = System.currentTimeMillis();
+        DiagnosticsWriteBatch first = versionedBatch(
+                0L, 0L, event(now, "first", "pkg.first", 1, "FREEZE", "blocked"));
+        DiagnosticsWriteBatch changed = versionedBatch(
+                0L, 0L, event(now + 1L, "changed", "pkg.changed", 2,
+                        "FREEZE", "blocked"));
+        DiagnosticsWriteBatch gap = versionedBatch(
+                0L, 2L, event(now + 2L, "gap", "pkg.gap", 3,
+                        "FREEZE", "blocked"));
+
+        assertEquals(ResidencyDiagnosticsStorage.WriteResult.COMMITTED,
+                database.writeBatch(first));
+        assertEquals(ResidencyDiagnosticsStorage.WriteResult.REJECTED_PAYLOAD,
+                database.writeBatch(changed));
+        assertEquals(ResidencyDiagnosticsStorage.WriteResult.REJECTED_SEQUENCE,
+                database.writeBatch(gap));
+        assertEquals(1L, database.queryHomeStats(
                 Collections.singletonList("freeze")).observed);
     }
 
@@ -352,6 +383,87 @@ public final class ResidencyDiagnosticsDbTest {
 
         assertEquals(1L, database.queryHomeStats(
                 Collections.singletonList("freeze")).observed);
+    }
+
+    @Test
+    public void durableRetryAfterLostResponseCommitsExactlyOnce() throws Exception {
+        DiagnosticsRetentionPolicy retention = policy(20, 20, 20, 60_000L);
+        database = open(retention);
+        ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(1);
+        ResidencyDiagnosticsBackend backend = new ResidencyDiagnosticsBackend(
+                retention, database, executor, "42");
+        try {
+            assertEquals(0L, backend.currentEpochAsync()
+                    .get(5, TimeUnit.SECONDS).longValue());
+            DiagnosticsWriteBatch batch = versionedBatch(
+                    0L, 0L, "lost-response",
+                    event(System.currentTimeMillis(), "durable-once", "pkg.once", 1,
+                            "FREEZE", "blocked"));
+
+            ResidencyDiagnosticsBackend.DurableWriteResult first =
+                    backend.enqueueDurable(batch).get(5, TimeUnit.SECONDS);
+            ResidencyDiagnosticsBackend.DurableWriteResult retry =
+                    backend.enqueueDurable(batch).get(5, TimeUnit.SECONDS);
+
+            assertTrue(first.persisted);
+            assertFalse(first.replayed);
+            assertTrue(retry.persisted);
+            assertTrue(retry.replayed);
+            assertEquals(1L, backend.queryHomeStatsAsync(
+                    Collections.singletonList("freeze"))
+                    .get(5, TimeUnit.SECONDS).observed);
+        } finally {
+            backend.closeAsync().get(5, TimeUnit.SECONDS);
+            database = null;
+        }
+    }
+
+    @Test
+    public void clearBarrierRejectsOldEpochBeforeSQLiteClearRuns() throws Exception {
+        DiagnosticsRetentionPolicy retention = policy(20, 20, 20, 60_000L);
+        database = open(retention);
+        ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(1);
+        ResidencyDiagnosticsBackend backend = new ResidencyDiagnosticsBackend(
+                retention, database, executor, "42");
+        CountDownLatch workerBlocked = new CountDownLatch(1);
+        CountDownLatch releaseWorker = new CountDownLatch(1);
+        try {
+            assertEquals(0L, backend.currentEpochAsync()
+                    .get(5, TimeUnit.SECONDS).longValue());
+            executor.execute(() -> {
+                workerBlocked.countDown();
+                try {
+                    releaseWorker.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            assertTrue(workerBlocked.await(5, TimeUnit.SECONDS));
+
+            CompletableFuture<DiagnosticsQuery.ClearResult> clear = backend.clearAsync(
+                    DiagnosticsQuery.ClearScope.USER_ACTIVITY);
+            ResidencyDiagnosticsBackend.DurableWriteResult stale = backend.enqueueDurable(
+                    versionedBatch(
+                            0L, 0L, "stale-during-clear",
+                            event(System.currentTimeMillis(), "stale", "pkg.stale", 2,
+                                    "FREEZE", "blocked")))
+                    .get(5, TimeUnit.SECONDS);
+
+            assertFalse(stale.persisted);
+            assertEquals("epoch_mismatch", stale.errorCode);
+            assertFalse(clear.isDone());
+            releaseWorker.countDown();
+            DiagnosticsQuery.ClearResult cleared = clear.get(5, TimeUnit.SECONDS);
+            assertTrue(cleared.success);
+            assertEquals(1L, cleared.epoch);
+            assertEquals(0L, backend.queryHomeStatsAsync(
+                    Collections.singletonList("freeze"))
+                    .get(5, TimeUnit.SECONDS).observed);
+        } finally {
+            releaseWorker.countDown();
+            backend.closeAsync().get(5, TimeUnit.SECONDS);
+            database = null;
+        }
     }
 
     @Test
@@ -378,7 +490,9 @@ public final class ResidencyDiagnosticsDbTest {
                 0L, 0L, "sender-a",
                 event(now, "typed", "pkg.typed", 1, "FREEZE", "blocked")));
         DiagnosticsWriteBatch legacy = DiagnosticsWriteBatch.builder()
-                .wireIdentity(2, "42", "system_server", "sender-a", 0L, 1L)
+                .wireIdentity(DiagnosticsWireParser.WIRE_VERSION,
+                        "42", "system_server", "sender-a", 0L, 1L,
+                        testPayloadHash("legacy"))
                 .addLegacyFeatureDelta(new DiagnosticsWriteBatch.LegacyFeatureDelta(
                         "freeze", 10L, 10L, 0L, now + 1L,
                         "pkg.legacy", "system_server", "FAST", "7", "blocked"))
@@ -453,7 +567,7 @@ public final class ResidencyDiagnosticsDbTest {
         database = open(policy(20, 20, 20, 60_000L));
         long now = System.currentTimeMillis();
         database.writeBatch(versionedBatch(
-                0L, 1L, event(now, "before", "pkg.before", 1, "FREEZE", "blocked")));
+                0L, 0L, event(now, "before", "pkg.before", 1, "FREEZE", "blocked")));
 
         DiagnosticsQuery.ClearResult clear =
                 database.clear(DiagnosticsQuery.ClearScope.USER_ACTIVITY);
@@ -541,6 +655,45 @@ public final class ResidencyDiagnosticsDbTest {
             }
             assertTrue(eventTokenFound);
         }
+    }
+
+    @Test
+    public void migrationFromVersionFiveInvalidatesLegacyCursorsAndAddsPayloadHash() {
+        SQLiteDatabase legacy = context.openOrCreateDatabase(
+                databaseName, Context.MODE_PRIVATE, null);
+        ResidencyDiagnosticsDb.createVersionFiveForTest(legacy);
+        legacy.execSQL("UPDATE " + ResidencyDiagnosticsDb.TABLE_METADATA
+                + " SET value='7' WHERE name='epoch'");
+        ContentValues cursor = new ContentValues();
+        cursor.put("wire_version", 2);
+        cursor.put("boot_id", "42");
+        cursor.put("process_id", "system_server");
+        cursor.put("sender_instance_id", "old-sender");
+        cursor.put("epoch", 7L);
+        cursor.put("counting_mode", "typed");
+        cursor.put("last_sequence", 9L);
+        cursor.put("updated_at", System.currentTimeMillis());
+        legacy.insertOrThrow(ResidencyDiagnosticsDb.TABLE_BATCH_CURSORS, null, cursor);
+        legacy.setVersion(5);
+        legacy.close();
+
+        database = open(policy(20, 20, 20, 60_000L));
+        SQLiteDatabase upgraded = database.getWritableDatabase();
+
+        assertEquals(8L, database.currentEpoch());
+        assertEquals(0L, DatabaseUtils.queryNumEntries(
+                upgraded, ResidencyDiagnosticsDb.TABLE_BATCH_CURSORS));
+        boolean payloadHashFound = false;
+        try (Cursor columns = upgraded.rawQuery(
+                "PRAGMA table_info(" + ResidencyDiagnosticsDb.TABLE_BATCH_CURSORS + ")",
+                null)) {
+            while (columns.moveToNext()) {
+                if ("last_payload_hash".equals(columns.getString(1))) {
+                    payloadHashFound = true;
+                }
+            }
+        }
+        assertTrue(payloadHashFound);
     }
 
     private ResidencyDiagnosticsDb open(DiagnosticsRetentionPolicy policy) {
@@ -643,8 +796,19 @@ public final class ResidencyDiagnosticsDbTest {
             NormalizedDiagnosticsEvent event) {
         return DiagnosticsWriteBatch.builder()
                 .wireIdentity(
-                        2, event.bootId, "system_server", senderInstanceId, epoch, sequence)
+                        DiagnosticsWireParser.WIRE_VERSION,
+                        event.bootId,
+                        "system_server",
+                        senderInstanceId,
+                        epoch,
+                        sequence,
+                        testPayloadHash(senderInstanceId + ":" + sequence
+                                + ":" + event.eventToken))
                 .addEvent(event)
                 .build();
+    }
+
+    private static String testPayloadHash(String seed) {
+        return String.format(java.util.Locale.ROOT, "%08x", seed.hashCode()).repeat(8);
     }
 }

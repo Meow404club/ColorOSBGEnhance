@@ -17,7 +17,7 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
     private static final long MAX_WAL_BYTES = 2L * 1_024L * 1_024L;
 
     public static final String DATABASE_NAME = "residency_diagnostics.db";
-    public static final int SCHEMA_VERSION = 5;
+    public static final int SCHEMA_VERSION = 6;
 
     static final String TABLE_EVENTS = "normalized_events";
     static final String TABLE_AGGREGATES = "event_aggregates";
@@ -99,6 +99,10 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         if (current == 4 && newVersion >= 5) {
             migrateVersionFourToFive(db);
             current = 5;
+        }
+        if (current == 5 && newVersion >= 6) {
+            migrateVersionFiveToSix(db);
+            current = 6;
         }
         if (current != newVersion) {
             throw new IllegalStateException(
@@ -673,9 +677,9 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         if (countingMode == null || countingMode == DiagnosticsWriteBatch.CountingMode.NONE) {
             return WriteResult.REJECTED_COUNTING_MODE;
         }
-        ContentValues update = new ContentValues();
-        update.put("last_sequence", identity.batchSequence);
-        update.put("updated_at", now);
+        if (!DiagnosticsValues.isSha256(identity.payloadHash, false)) {
+            return WriteResult.REJECTED_PAYLOAD;
+        }
         String cursorSelection = "wire_version=? AND boot_id=? AND process_id=? "
                 + "AND sender_instance_id=? AND epoch=?";
         String[] cursorArguments = new String[] {
@@ -685,21 +689,27 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                 identity.senderInstanceId,
                 String.valueOf(identity.epoch)
         };
-        String[] advancingArguments = new String[] {
-                cursorArguments[0], cursorArguments[1], cursorArguments[2],
-                cursorArguments[3], cursorArguments[4], countingMode.wireValue,
-                String.valueOf(identity.batchSequence)
-        };
-        if (db.update(
-                TABLE_BATCH_CURSORS,
-                update,
-                cursorSelection + " AND counting_mode=? AND last_sequence<?",
-                advancingArguments) == 1) return WriteResult.COMMITTED;
-        String existingMode = queryCursorCountingMode(db, cursorSelection, cursorArguments);
-        if (existingMode != null) {
-            return countingMode.wireValue.equals(existingMode)
-                    ? WriteResult.REPLAYED : WriteResult.REJECTED_COUNTING_MODE;
+        BatchCursor existing = queryBatchCursor(db, cursorSelection, cursorArguments);
+        if (existing != null) {
+            WriteResult classification = classifyExistingCursor(
+                    existing, identity, countingMode);
+            if (classification != WriteResult.COMMITTED) return classification;
+            ContentValues update = new ContentValues();
+            update.put("last_sequence", identity.batchSequence);
+            update.put("last_payload_hash", identity.payloadHash);
+            update.put("updated_at", now);
+            return db.update(
+                    TABLE_BATCH_CURSORS,
+                    update,
+                    cursorSelection + " AND counting_mode=? AND last_sequence=? "
+                            + "AND last_payload_hash=?",
+                    new String[] {
+                            cursorArguments[0], cursorArguments[1], cursorArguments[2],
+                            cursorArguments[3], cursorArguments[4], countingMode.wireValue,
+                            String.valueOf(existing.lastSequence), existing.payloadHash
+                    }) == 1 ? WriteResult.COMMITTED : WriteResult.REJECTED_SEQUENCE;
         }
+        if (identity.batchSequence != 0L) return WriteResult.REJECTED_SEQUENCE;
         pruneObsoleteBatchCursors(db);
         if (DatabaseUtils.queryNumEntries(
                 db, TABLE_BATCH_CURSORS, "epoch=? AND boot_id=?",
@@ -716,27 +726,49 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         values.put("epoch", identity.epoch);
         values.put("counting_mode", countingMode.wireValue);
         values.put("last_sequence", identity.batchSequence);
+        values.put("last_payload_hash", identity.payloadHash);
         values.put("updated_at", now);
         if (db.insertWithOnConflict(
                 TABLE_BATCH_CURSORS, null, values, SQLiteDatabase.CONFLICT_IGNORE) != -1L) {
             return WriteResult.COMMITTED;
         }
-        existingMode = queryCursorCountingMode(db, cursorSelection, cursorArguments);
-        if (existingMode == null) return WriteResult.REJECTED_CAPACITY;
-        return countingMode.wireValue.equals(existingMode)
-                ? WriteResult.REPLAYED : WriteResult.REJECTED_COUNTING_MODE;
+        existing = queryBatchCursor(db, cursorSelection, cursorArguments);
+        if (existing == null) return WriteResult.REJECTED_CAPACITY;
+        WriteResult conflict = classifyExistingCursor(existing, identity, countingMode);
+        return conflict == WriteResult.COMMITTED
+                ? WriteResult.REJECTED_SEQUENCE : conflict;
     }
 
-    private static String queryCursorCountingMode(
+    private static WriteResult classifyExistingCursor(
+            BatchCursor existing,
+            DiagnosticsWriteBatch.BatchIdentity identity,
+            DiagnosticsWriteBatch.CountingMode countingMode) {
+        if (!countingMode.wireValue.equals(existing.countingMode)) {
+            return WriteResult.REJECTED_COUNTING_MODE;
+        }
+        if (identity.batchSequence == existing.lastSequence) {
+            return identity.payloadHash.equals(existing.payloadHash)
+                    ? WriteResult.REPLAYED : WriteResult.REJECTED_PAYLOAD;
+        }
+        if (existing.lastSequence == Long.MAX_VALUE
+                || identity.batchSequence != existing.lastSequence + 1L) {
+            return WriteResult.REJECTED_SEQUENCE;
+        }
+        return WriteResult.COMMITTED;
+    }
+
+    private static BatchCursor queryBatchCursor(
             SQLiteDatabase db, String selection, String[] selectionArguments) {
         try (Cursor cursor = db.query(
                 TABLE_BATCH_CURSORS,
-                new String[] { "counting_mode" },
+                new String[] { "counting_mode", "last_sequence", "last_payload_hash" },
                 selection,
                 selectionArguments,
                 null, null, null,
                 "1")) {
-            return cursor.moveToFirst() ? cursor.getString(0) : null;
+            return cursor.moveToFirst()
+                    ? new BatchCursor(cursor.getString(0), cursor.getLong(1), cursor.getString(2))
+                    : null;
         }
     }
 
@@ -1038,6 +1070,22 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                 + "behavior,source,decision,result))");
     }
 
+    static void createVersionFiveForTest(SQLiteDatabase db) {
+        createEventTableLatest(db);
+        createAggregateTableLatest(db);
+        createRawTable(db);
+        createFeatureTotalsTable(db);
+        createHookStateTable(db);
+        createMetadataTable(db);
+        db.execSQL("CREATE TABLE " + TABLE_BATCH_CURSORS + " ("
+                + "wire_version INTEGER NOT NULL,boot_id TEXT NOT NULL,"
+                + "process_id TEXT NOT NULL,sender_instance_id TEXT NOT NULL,"
+                + "epoch INTEGER NOT NULL,counting_mode TEXT NOT NULL,"
+                + "last_sequence INTEGER NOT NULL,updated_at INTEGER NOT NULL,"
+                + "PRIMARY KEY(wire_version,boot_id,process_id,sender_instance_id,epoch))");
+        createIndexes(db);
+    }
+
     private static void migrateVersionOneToTwo(SQLiteDatabase db) {
         db.execSQL("ALTER TABLE " + TABLE_EVENTS
                 + " ADD COLUMN boot_id TEXT NOT NULL DEFAULT ''");
@@ -1106,6 +1154,14 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
     }
 
     private static void migrateVersionFourToFive(SQLiteDatabase db) {
+        createMetadataTable(db);
+        putMetadataLong(db, METADATA_EPOCH, currentEpoch(db) + 1L);
+        db.execSQL("DROP TABLE IF EXISTS " + TABLE_BATCH_CURSORS);
+        createBatchCursorTable(db);
+        createIndexes(db);
+    }
+
+    private static void migrateVersionFiveToSix(SQLiteDatabase db) {
         createMetadataTable(db);
         putMetadataLong(db, METADATA_EPOCH, currentEpoch(db) + 1L);
         db.execSQL("DROP TABLE IF EXISTS " + TABLE_BATCH_CURSORS);
@@ -1192,8 +1248,21 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                 + "wire_version INTEGER NOT NULL,boot_id TEXT NOT NULL,"
                 + "process_id TEXT NOT NULL,sender_instance_id TEXT NOT NULL,"
                 + "epoch INTEGER NOT NULL,counting_mode TEXT NOT NULL,"
-                + "last_sequence INTEGER NOT NULL,updated_at INTEGER NOT NULL,"
+                + "last_sequence INTEGER NOT NULL,last_payload_hash TEXT NOT NULL,"
+                + "updated_at INTEGER NOT NULL,"
                 + "PRIMARY KEY(wire_version,boot_id,process_id,sender_instance_id,epoch))");
+    }
+
+    private static final class BatchCursor {
+        final String countingMode;
+        final long lastSequence;
+        final String payloadHash;
+
+        BatchCursor(String countingMode, long lastSequence, String payloadHash) {
+            this.countingMode = countingMode;
+            this.lastSequence = lastSequence;
+            this.payloadHash = payloadHash == null ? "" : payloadHash;
+        }
     }
 
     private static void createMetadataTable(SQLiteDatabase db) {

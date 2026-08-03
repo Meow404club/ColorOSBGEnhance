@@ -10,7 +10,7 @@ import java.util.Set;
 /** Defensive, all-or-nothing parser for the restricted diagnostics Provider wire format. */
 @SuppressWarnings("deprecation")
 public final class DiagnosticsWireParser {
-    public static final int WIRE_VERSION = 2;
+    public static final int WIRE_VERSION = 3;
     public static final int MAX_WIRE_ITEMS = 256;
     public static final int MAX_WIRE_BUNDLE_BYTES = 512 * 1_024;
     public static final int MAX_WIRE_ITEM_BYTES = 16 * 1_024;
@@ -23,6 +23,7 @@ public final class DiagnosticsWireParser {
     public static final String KEY_SENDER_INSTANCE_ID = "diagnostics_sender_instance_id";
     public static final String KEY_EPOCH = "diagnostics_epoch";
     public static final String KEY_BATCH_SEQUENCE = "diagnostics_batch_sequence";
+    public static final String KEY_PAYLOAD_HASH = "diagnostics_payload_hash";
     public static final String KEY_RAW_HITS = "diagnostics_raw_hits";
     public static final String KEY_EVENTS = "diagnostics_events";
     public static final String KEY_HOOK_STATES = "diagnostics_hook_states";
@@ -126,6 +127,7 @@ public final class DiagnosticsWireParser {
             if (batch.size() != claimedItems || batch.isEmpty()) {
                 throw invalid("invalid_provider_payload");
             }
+            requireMatchingPayloadHash(extras, identity);
             return new ParseResult(batch, claimedItems, 0, "");
         } catch (InvalidPayload error) {
             return ParseResult.failed(error.errorCode,
@@ -200,6 +202,7 @@ public final class DiagnosticsWireParser {
                     .countingMode(DiagnosticsWriteBatch.CountingMode.LEGACY)
                     .addLegacyFeatureDelta(delta)
                     .build();
+            requireMatchingPayloadHash(extras, identity);
             return new ParseResult(batch, 1, 0, "");
         } catch (InvalidPayload error) {
             return ParseResult.failed(error.errorCode, error.rejectedItems);
@@ -227,9 +230,24 @@ public final class DiagnosticsWireParser {
         long epoch = requiredLong(extras, KEY_EPOCH, "invalid_batch_identity");
         long sequence = requiredLong(
                 extras, KEY_BATCH_SEQUENCE, "invalid_batch_identity");
+        String payloadHash = stringValue(
+                extras, KEY_PAYLOAD_HASH, null,
+                64, false, StringKind.TEXT, "invalid_batch_identity");
         if (epoch < 0L || sequence < 0L) throw invalid("invalid_batch_identity");
+        if (!DiagnosticsValues.isSha256(payloadHash, false)) {
+            throw invalid("invalid_batch_identity");
+        }
         return new DiagnosticsWriteBatch.BatchIdentity(
-                wireVersion, bootId, processId, senderInstanceId, epoch, sequence);
+                wireVersion, bootId, processId, senderInstanceId,
+                epoch, sequence, payloadHash);
+    }
+
+    private static void requireMatchingPayloadHash(
+            Bundle extras, DiagnosticsWriteBatch.BatchIdentity identity) {
+        if (identity == null
+                || !identity.payloadHash.equals(DiagnosticsPayloadFingerprint.compute(extras))) {
+            throw invalid("payload_hash_mismatch");
+        }
     }
 
     private static DiagnosticsWriteBatch.CountingMode parseCountingMode(Bundle extras) {
@@ -599,7 +617,8 @@ public final class DiagnosticsWireParser {
                 || BridgeContract.EXTRA_PROCESS_ID.equals(key)
                 || KEY_SENDER_INSTANCE_ID.equals(key)
                 || KEY_EPOCH.equals(key)
-                || KEY_BATCH_SEQUENCE.equals(key);
+                || KEY_BATCH_SEQUENCE.equals(key)
+                || KEY_PAYLOAD_HASH.equals(key);
     }
 
     private static void requireRawHitKeys(Bundle item) {

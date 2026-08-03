@@ -19,6 +19,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -210,7 +211,9 @@ public final class ResidencyDiagnosticsBackendTest {
         ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 4, 60_000L));
         assertEquals(3L, backend.currentEpochAsync().get(5, TimeUnit.SECONDS).longValue());
         DiagnosticsWriteBatch batch = DiagnosticsWriteBatch.builder()
-                .wireIdentity(2, "boot", "system_server", "sender-a", 3L, 9L)
+                .wireIdentity(DiagnosticsWireParser.WIRE_VERSION,
+                        "boot", "system_server", "sender-a", 3L, 9L,
+                        testPayloadHash("wire"))
                 .addEvent(event("wire", "pkg", 1))
                 .build();
 
@@ -218,6 +221,161 @@ public final class ResidencyDiagnosticsBackendTest {
         backend.flushAsync().get(5, TimeUnit.SECONDS);
 
         assertEquals(batch.batchIdentity, storage.lastBatchIdentity);
+    }
+
+    @Test
+    public void durableCompletionWaitsForWorkerCommitAndRejectsPendingDuplicate()
+            throws Exception {
+        FakeStorage storage = new FakeStorage();
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 4, 60_000L));
+        assertEquals(0L, backend.currentEpochAsync().get(5, TimeUnit.SECONDS).longValue());
+        storage.blockWrites();
+        DiagnosticsWriteBatch batch = versionedEventBatch(0L, 0L, "durable");
+        String callerThread = Thread.currentThread().getName();
+
+        CompletableFuture<ResidencyDiagnosticsBackend.DurableWriteResult> first =
+                backend.enqueueDurable(batch);
+        assertTrue(storage.writeStarted.await(5, TimeUnit.SECONDS));
+        assertFalse(first.isDone());
+        assertNotEquals(callerThread, storage.writeThread);
+
+        ResidencyDiagnosticsBackend.DurableWriteResult duplicate =
+                backend.enqueueDurable(batch).get(5, TimeUnit.SECONDS);
+        assertFalse(duplicate.persisted);
+        assertEquals("batch_pending", duplicate.errorCode);
+        assertEquals(1, storage.writeAttempts);
+
+        storage.releaseWrites.countDown();
+        ResidencyDiagnosticsBackend.DurableWriteResult committed =
+                first.get(5, TimeUnit.SECONDS);
+        assertTrue(committed.persisted);
+        assertFalse(committed.replayed);
+        assertEquals(batch.size(), committed.itemCount);
+        assertEquals(1L, backend.health().committedWrites);
+    }
+
+    @Test
+    public void durableCompletionOnlyAcceptsCommittedOrReplayedResults()
+            throws Exception {
+        for (ResidencyDiagnosticsStorage.WriteResult writeResult
+                : ResidencyDiagnosticsStorage.WriteResult.values()) {
+            FakeStorage storage = new FakeStorage();
+            storage.writeResult = writeResult;
+            ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 4, 60_000L));
+            backend.currentEpochAsync().get(5, TimeUnit.SECONDS);
+
+            ResidencyDiagnosticsBackend.DurableWriteResult result = backend.enqueueDurable(
+                    versionedEventBatch(0L, 0L, writeResult.name()))
+                    .get(5, TimeUnit.SECONDS);
+
+            boolean expected = writeResult == ResidencyDiagnosticsStorage.WriteResult.COMMITTED
+                    || writeResult == ResidencyDiagnosticsStorage.WriteResult.REPLAYED;
+            assertEquals(writeResult.name(), expected, result.persisted);
+            assertEquals(writeResult == ResidencyDiagnosticsStorage.WriteResult.REPLAYED,
+                    result.replayed);
+            if (!expected) assertFalse(result.errorCode.isEmpty());
+        }
+    }
+
+    @Test
+    public void durableStorageFailureReturnsRetryableRejection() throws Exception {
+        FakeStorage storage = new FakeStorage();
+        storage.failWrites = true;
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 4, 60_000L));
+        backend.currentEpochAsync().get(5, TimeUnit.SECONDS);
+
+        ResidencyDiagnosticsBackend.DurableWriteResult result = backend.enqueueDurable(
+                versionedEventBatch(0L, 0L, "failure")).get(5, TimeUnit.SECONDS);
+
+        assertFalse(result.persisted);
+        assertEquals("storage_unavailable", result.errorCode);
+        assertEquals(0L, backend.health().committedWrites);
+
+        storage.failWrites = false;
+        ResidencyDiagnosticsBackend.DurableWriteResult retry = backend.enqueueDurable(
+                versionedEventBatch(0L, 0L, "failure")).get(5, TimeUnit.SECONDS);
+        assertTrue(retry.persisted);
+        assertEquals(1, storage.written);
+    }
+
+    @Test
+    public void durableSchedulingFailureCompletesAndReleasesPendingIdentity()
+            throws Exception {
+        FakeStorage storage = new FakeStorage();
+        RejectOnceExecutor executor = new RejectOnceExecutor();
+        ResidencyDiagnosticsBackend backend = new ResidencyDiagnosticsBackend(
+                policy(8, 4, 60_000L), storage, executor, "boot");
+        backends.add(backend);
+        backend.currentEpochAsync().get(5, TimeUnit.SECONDS);
+        DiagnosticsWriteBatch batch = versionedEventBatch(0L, 0L, "schedule");
+        executor.rejectNextSchedule();
+
+        ResidencyDiagnosticsBackend.DurableWriteResult rejected =
+                backend.enqueueDurable(batch).get(5, TimeUnit.SECONDS);
+
+        assertFalse(rejected.persisted);
+        assertEquals("backend_unavailable", rejected.errorCode);
+        assertEquals(0, backend.health().queuedWrites);
+        assertEquals(0, storage.writeAttempts);
+
+        ResidencyDiagnosticsBackend.DurableWriteResult retry =
+                backend.enqueueDurable(batch).get(5, TimeUnit.SECONDS);
+        assertTrue(retry.persisted);
+        assertEquals(1, storage.writeAttempts);
+    }
+
+    @Test
+    public void closeWaitsForInFlightDurableCommit() throws Exception {
+        FakeStorage storage = new FakeStorage();
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 4, 60_000L));
+        backend.currentEpochAsync().get(5, TimeUnit.SECONDS);
+        storage.blockWrites();
+
+        CompletableFuture<ResidencyDiagnosticsBackend.DurableWriteResult> durable =
+                backend.enqueueDurable(versionedEventBatch(0L, 0L, "close-in-flight"));
+        assertTrue(storage.writeStarted.await(5, TimeUnit.SECONDS));
+        CompletableFuture<Void> close = backend.closeAsync();
+
+        assertFalse(durable.isDone());
+        assertFalse(close.isDone());
+        storage.releaseWrites.countDown();
+        assertTrue(durable.get(5, TimeUnit.SECONDS).persisted);
+        close.get(5, TimeUnit.SECONDS);
+        assertTrue(storage.closed);
+    }
+
+    @Test
+    public void rejectedCloseSchedulingCompletesQueuedDurableFuture()
+            throws Exception {
+        FakeStorage storage = new FakeStorage();
+        RejectOnceExecutor executor = new RejectOnceExecutor();
+        ResidencyDiagnosticsBackend backend = new ResidencyDiagnosticsBackend(
+                policy(8, 4, 60_000L), storage, executor, "boot");
+        backends.add(backend);
+        backend.currentEpochAsync().get(5, TimeUnit.SECONDS);
+        CountDownLatch workerBlocked = new CountDownLatch(1);
+        CountDownLatch releaseWorker = new CountDownLatch(1);
+        executor.execute(() -> {
+            workerBlocked.countDown();
+            try {
+                releaseWorker.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        assertTrue(workerBlocked.await(5, TimeUnit.SECONDS));
+        CompletableFuture<ResidencyDiagnosticsBackend.DurableWriteResult> durable =
+                backend.enqueueDurable(versionedEventBatch(0L, 0L, "close-rejected"));
+        executor.rejectNextExecute();
+
+        backend.closeAsync().get(5, TimeUnit.SECONDS);
+        ResidencyDiagnosticsBackend.DurableWriteResult rejected =
+                durable.get(5, TimeUnit.SECONDS);
+
+        releaseWorker.countDown();
+        assertFalse(rejected.persisted);
+        assertEquals("backend_closed", rejected.errorCode);
+        assertEquals(0, backend.health().queuedWrites);
     }
 
     @Test
@@ -368,7 +526,9 @@ public final class ResidencyDiagnosticsBackendTest {
                 .bootId("stale-boot")
                 .build();
         DiagnosticsWriteBatch batch = DiagnosticsWriteBatch.builder()
-                .wireIdentity(2, "stale-boot", "system_server", "sender-a", 0L, 0L)
+                .wireIdentity(DiagnosticsWireParser.WIRE_VERSION,
+                        "stale-boot", "system_server", "sender-a", 0L, 0L,
+                        testPayloadHash("stale"))
                 .addEvent(stale)
                 .build();
 
@@ -663,10 +823,16 @@ public final class ResidencyDiagnosticsBackendTest {
     private static DiagnosticsWriteBatch versionedEventBatch(
             long epoch, long sequence, String token) {
         return DiagnosticsWriteBatch.builder()
-                .wireIdentity(2, "boot", "system_server", "sender-a", epoch, sequence)
+                .wireIdentity(DiagnosticsWireParser.WIRE_VERSION,
+                        "boot", "system_server", "sender-a", epoch, sequence,
+                        testPayloadHash(token))
                 .countingMode(DiagnosticsWriteBatch.CountingMode.TYPED)
                 .addEvent(event(token, "pkg", 1))
                 .build();
+    }
+
+    private static String testPayloadHash(String seed) {
+        return String.format(java.util.Locale.ROOT, "%08x", seed.hashCode()).repeat(8);
     }
 
     private static final class FakeStorage implements ResidencyDiagnosticsStorage {
@@ -695,6 +861,8 @@ public final class ResidencyDiagnosticsBackendTest {
         volatile boolean closed;
         volatile int fullWriteFailures;
         volatile CountDownLatch maintenanceLatch;
+        volatile CountDownLatch writeStarted;
+        volatile CountDownLatch releaseWrites;
         volatile CountDownLatch queryStarted;
         volatile CountDownLatch releaseQueries;
         volatile CountDownLatch clearStarted;
@@ -710,6 +878,20 @@ public final class ResidencyDiagnosticsBackendTest {
         @Override
         public synchronized WriteResult writeBatch(DiagnosticsWriteBatch batch) {
             writeAttempts++;
+            writeThread = Thread.currentThread().getName();
+            CountDownLatch started = writeStarted;
+            CountDownLatch release = releaseWrites;
+            if (started != null && release != null) {
+                started.countDown();
+                try {
+                    if (!release.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("write release timed out");
+                    }
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("write interrupted", interrupted);
+                }
+            }
             if (alwaysFull || fullWriteFailures > 0) {
                 if (fullWriteFailures > 0) fullWriteFailures--;
                 operations.add("write_full");
@@ -717,7 +899,6 @@ public final class ResidencyDiagnosticsBackendTest {
             }
             if (failWrites) throw new IllegalStateException("write failed");
             if (writeResult != WriteResult.COMMITTED) return writeResult;
-            writeThread = Thread.currentThread().getName();
             lastBatchIdentity = batch.batchIdentity;
             written += batch.size();
             events.addAll(batch.events);
@@ -844,6 +1025,11 @@ public final class ResidencyDiagnosticsBackendTest {
             releaseQueries = new CountDownLatch(1);
         }
 
+        void blockWrites() {
+            writeStarted = new CountDownLatch(1);
+            releaseWrites = new CountDownLatch(1);
+        }
+
         void blockClears() {
             clearStarted = new CountDownLatch(1);
             releaseClears = new CountDownLatch(1);
@@ -855,6 +1041,7 @@ public final class ResidencyDiagnosticsBackendTest {
 
     private static final class RejectOnceExecutor extends ScheduledThreadPoolExecutor {
         private final AtomicBoolean rejectNext = new AtomicBoolean();
+        private final AtomicBoolean rejectNextSchedule = new AtomicBoolean();
 
         RejectOnceExecutor() {
             super(1);
@@ -865,12 +1052,25 @@ public final class ResidencyDiagnosticsBackendTest {
             rejectNext.set(true);
         }
 
+        void rejectNextSchedule() {
+            rejectNextSchedule.set(true);
+        }
+
         @Override
         public void execute(Runnable command) {
             if (rejectNext.compareAndSet(true, false)) {
                 throw new RejectedExecutionException("rejected for test");
             }
             super.execute(command);
+        }
+
+        @Override
+        public ScheduledFuture<?> schedule(
+                Runnable command, long delay, TimeUnit unit) {
+            if (rejectNextSchedule.compareAndSet(true, false)) {
+                throw new RejectedExecutionException("schedule rejected for test");
+            }
+            return super.schedule(command, delay, unit);
         }
     }
 }

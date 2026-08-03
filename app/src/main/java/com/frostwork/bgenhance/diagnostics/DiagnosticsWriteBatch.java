@@ -83,6 +83,7 @@ public final class DiagnosticsWriteBatch {
         public final String senderInstanceId;
         public final long epoch;
         public final long batchSequence;
+        public final String payloadHash;
 
         public BatchIdentity(
                 int wireVersion,
@@ -91,6 +92,18 @@ public final class DiagnosticsWriteBatch {
                 String senderInstanceId,
                 long epoch,
                 long batchSequence) {
+            this(wireVersion, bootId, processId, senderInstanceId,
+                    epoch, batchSequence, "");
+        }
+
+        public BatchIdentity(
+                int wireVersion,
+                String bootId,
+                String processId,
+                String senderInstanceId,
+                long epoch,
+                long batchSequence,
+                String payloadHash) {
             if (wireVersion <= 0) {
                 throw new IllegalArgumentException("wireVersion must be positive");
             }
@@ -107,19 +120,24 @@ public final class DiagnosticsWriteBatch {
             if (batchSequence < 0L) {
                 throw new IllegalArgumentException("batchSequence must be non-negative");
             }
+            if (!DiagnosticsValues.isSha256(payloadHash, true)) {
+                throw new IllegalArgumentException("payloadHash is invalid");
+            }
             this.wireVersion = wireVersion;
             this.bootId = bootId;
             this.processId = processId;
             this.senderInstanceId = senderInstanceId;
             this.epoch = epoch;
             this.batchSequence = batchSequence;
+            this.payloadHash = payloadHash;
         }
 
         public String deduplicationKey() {
             return wireVersion + ":" + epoch + ":" + batchSequence + ":"
                     + bootId.length() + ":" + bootId
                     + processId.length() + ":" + processId
-                    + senderInstanceId.length() + ":" + senderInstanceId;
+                    + senderInstanceId.length() + ":" + senderInstanceId
+                    + payloadHash.length() + ":" + payloadHash;
         }
 
         @Override
@@ -132,13 +150,15 @@ public final class DiagnosticsWriteBatch {
                     && batchSequence == that.batchSequence
                     && bootId.equals(that.bootId)
                     && processId.equals(that.processId)
-                    && senderInstanceId.equals(that.senderInstanceId);
+                    && senderInstanceId.equals(that.senderInstanceId)
+                    && payloadHash.equals(that.payloadHash);
         }
 
         @Override
         public int hashCode() {
             return Objects.hash(
-                    wireVersion, bootId, processId, senderInstanceId, epoch, batchSequence);
+                    wireVersion, bootId, processId, senderInstanceId,
+                    epoch, batchSequence, payloadHash);
         }
     }
 
@@ -168,6 +188,19 @@ public final class DiagnosticsWriteBatch {
                 long batchSequence) {
             return batchIdentity(new BatchIdentity(
                     wireVersion, bootId, processId, senderInstanceId, epoch, batchSequence));
+        }
+
+        public Builder wireIdentity(
+                int wireVersion,
+                String bootId,
+                String processId,
+                String senderInstanceId,
+                long epoch,
+                long batchSequence,
+                String payloadHash) {
+            return batchIdentity(new BatchIdentity(
+                    wireVersion, bootId, processId, senderInstanceId,
+                    epoch, batchSequence, payloadHash));
         }
 
         public Builder countingMode(CountingMode value) {

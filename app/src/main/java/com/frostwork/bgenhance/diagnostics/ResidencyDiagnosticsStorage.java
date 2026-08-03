@@ -10,6 +10,8 @@ interface ResidencyDiagnosticsStorage extends AutoCloseable {
         REJECTED_BOOT,
         REJECTED_EPOCH,
         REJECTED_COUNTING_MODE,
+        REJECTED_SEQUENCE,
+        REJECTED_PAYLOAD,
         REJECTED_CAPACITY;
 
         boolean isRejected() {
@@ -17,6 +19,8 @@ interface ResidencyDiagnosticsStorage extends AutoCloseable {
                     || this == REJECTED_BOOT
                     || this == REJECTED_EPOCH
                     || this == REJECTED_COUNTING_MODE
+                    || this == REJECTED_SEQUENCE
+                    || this == REJECTED_PAYLOAD
                     || this == REJECTED_CAPACITY;
         }
     }

@@ -31,6 +31,7 @@ public final class DiagnosticsWireParserTest {
                 DiagnosticsWireParser.KEY_EVENTS, list(validEvent()));
         payload.putParcelableArrayList(
                 DiagnosticsWireParser.KEY_HOOK_STATES, list(validHookState()));
+        DiagnosticsPayloadFingerprint.seal(payload);
 
         DiagnosticsWireParser.ParseResult result = parser.parseSnapshot(payload, NOW);
 
@@ -153,6 +154,7 @@ public final class DiagnosticsWireParserTest {
         event.putString(BridgeContract.EXTRA_PROCESS, "system_server");
         event.putString(BridgeContract.EXTRA_SCENE, "FAST");
         event.putInt(BridgeContract.EXTRA_CODE, 7);
+        DiagnosticsPayloadFingerprint.seal(event);
 
         DiagnosticsWireParser.ParseResult accepted =
                 parser.parseLegacyRecordEvent(event, NOW);
@@ -195,6 +197,7 @@ public final class DiagnosticsWireParserTest {
             raw.add(validRawHit());
         }
         maximum.putParcelableArrayList(DiagnosticsWireParser.KEY_RAW_HITS, raw);
+        DiagnosticsPayloadFingerprint.seal(maximum);
         Bundle empty = envelope(DiagnosticsWriteBatch.CountingMode.TYPED, 2L);
 
         assertAccepted(parser.parseSnapshot(maximum, NOW),
@@ -283,6 +286,7 @@ public final class DiagnosticsWireParserTest {
         payload.putString(
                 DiagnosticsWireParser.KEY_BOOT_ID,
                 repeated('b', DiagnosticsValues.MAX_ID_LENGTH));
+        DiagnosticsPayloadFingerprint.seal(payload);
 
         DiagnosticsWireParser.ParseResult result = parser.parseSnapshot(payload, NOW);
 
@@ -299,6 +303,19 @@ public final class DiagnosticsWireParserTest {
         assertRejected(
                 parser.parseSnapshot(typedPayloadWithRawHit(1L, raw), NOW),
                 "batch_identity_mismatch",
+                1);
+    }
+
+    @Test
+    public void payloadMutationAfterSealingRejectsTheWholeBatch() {
+        Bundle payload = typedPayloadWithEvent(1L, validEvent());
+        ArrayList<Bundle> events = payload.getParcelableArrayList(
+                DiagnosticsWireParser.KEY_EVENTS);
+        events.get(0).putString(BridgeContract.EXTRA_PACKAGE, "com.example.changed");
+
+        assertRejected(
+                parser.parseSnapshot(payload, NOW),
+                "payload_hash_mismatch",
                 1);
     }
 
@@ -351,24 +368,28 @@ public final class DiagnosticsWireParserTest {
                 DiagnosticsWireParser.KEY_SENDER_INSTANCE_ID, "sender-instance-9");
         payload.putLong(DiagnosticsWireParser.KEY_EPOCH, 5L);
         payload.putLong(DiagnosticsWireParser.KEY_BATCH_SEQUENCE, sequence);
+        payload.putString(DiagnosticsWireParser.KEY_PAYLOAD_HASH, repeated('0', 64));
         return payload;
     }
 
     private static Bundle typedPayloadWithRawHit(long sequence, Bundle raw) {
         Bundle payload = envelope(DiagnosticsWriteBatch.CountingMode.TYPED, sequence);
         payload.putParcelableArrayList(DiagnosticsWireParser.KEY_RAW_HITS, list(raw));
+        DiagnosticsPayloadFingerprint.seal(payload);
         return payload;
     }
 
     private static Bundle typedPayloadWithEvent(long sequence, Bundle event) {
         Bundle payload = envelope(DiagnosticsWriteBatch.CountingMode.TYPED, sequence);
         payload.putParcelableArrayList(DiagnosticsWireParser.KEY_EVENTS, list(event));
+        DiagnosticsPayloadFingerprint.seal(payload);
         return payload;
     }
 
     private static Bundle typedPayloadWithHookState(long sequence, Bundle state) {
         Bundle payload = envelope(DiagnosticsWriteBatch.CountingMode.TYPED, sequence);
         payload.putParcelableArrayList(DiagnosticsWireParser.KEY_HOOK_STATES, list(state));
+        DiagnosticsPayloadFingerprint.seal(payload);
         return payload;
     }
 
@@ -380,6 +401,7 @@ public final class DiagnosticsWireParserTest {
             int failOpen) {
         Bundle payload = envelope(DiagnosticsWriteBatch.CountingMode.LEGACY, sequence);
         addLegacyFeature(payload, feature, observed, blocked, failOpen);
+        DiagnosticsPayloadFingerprint.seal(payload);
         return payload;
     }
 
