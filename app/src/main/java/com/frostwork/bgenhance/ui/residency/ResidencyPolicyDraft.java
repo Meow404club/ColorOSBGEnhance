@@ -77,6 +77,31 @@ public final class ResidencyPolicyDraft {
                 preset.refreezePolicy());
     }
 
+    public ResidencyPolicyDraft withKillPolicy(KillPolicy killPolicy) {
+        return new ResidencyPolicyDraft(enabled, mode, killPolicy, customFreezePolicy,
+                customWakePolicy, customResourcePolicy, customRefreezePolicy);
+    }
+
+    public ResidencyPolicyDraft withFreezePolicy(FreezePolicy freezePolicy) {
+        return new ResidencyPolicyDraft(enabled, mode, customKillPolicy, freezePolicy,
+                customWakePolicy, customResourcePolicy, customRefreezePolicy);
+    }
+
+    public ResidencyPolicyDraft withWakePolicy(WakePolicy wakePolicy) {
+        return new ResidencyPolicyDraft(enabled, mode, customKillPolicy, customFreezePolicy,
+                wakePolicy, customResourcePolicy, customRefreezePolicy);
+    }
+
+    public ResidencyPolicyDraft withResourcePolicy(ResourcePolicy resourcePolicy) {
+        return new ResidencyPolicyDraft(enabled, mode, customKillPolicy, customFreezePolicy,
+                customWakePolicy, resourcePolicy, customRefreezePolicy);
+    }
+
+    public ResidencyPolicyDraft withRefreezePolicy(RefreezePolicy refreezePolicy) {
+        return new ResidencyPolicyDraft(enabled, mode, customKillPolicy, customFreezePolicy,
+                customWakePolicy, customResourcePolicy, refreezePolicy);
+    }
+
     public boolean enabled() { return enabled; }
     public ResidencyMode mode() { return mode; }
     public KillPolicy customKillPolicy() { return customKillPolicy; }

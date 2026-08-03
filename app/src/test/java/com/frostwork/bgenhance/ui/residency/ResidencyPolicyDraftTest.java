@@ -2,6 +2,7 @@ package com.frostwork.bgenhance.ui.residency;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertSame;
 
 import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
 import com.frostwork.bgenhance.residency.model.FreezePolicy;
@@ -84,5 +85,114 @@ public final class ResidencyPolicyDraftTest {
         assertEquals(refreeze, policy.refreezePolicy());
         assertEquals(draft.toPolicy(PACKAGE_NAME),
                 ResidencyPolicyDraft.from(policy).toPolicy(PACKAGE_NAME));
+    }
+
+    @Test
+    public void withKillPolicyOnlyReplacesKillPolicy() {
+        ResidencyPolicyDraft original = customDraft();
+        KillPolicy replacement = KillPolicy.none();
+
+        ResidencyPolicyDraft updated = original.withKillPolicy(replacement);
+
+        assertSame(replacement, updated.customKillPolicy());
+        assertUnchangedExcept(original, updated, PolicyFamily.KILL);
+    }
+
+    @Test
+    public void withFreezePolicyOnlyReplacesFreezePolicy() {
+        ResidencyPolicyDraft original = customDraft();
+        FreezePolicy replacement = FreezePolicy.followSystem();
+
+        ResidencyPolicyDraft updated = original.withFreezePolicy(replacement);
+
+        assertSame(replacement, updated.customFreezePolicy());
+        assertUnchangedExcept(original, updated, PolicyFamily.FREEZE);
+    }
+
+    @Test
+    public void withWakePolicyOnlyReplacesWakePolicy() {
+        ResidencyPolicyDraft original = customDraft();
+        WakePolicy replacement = WakePolicy.allowAll();
+
+        ResidencyPolicyDraft updated = original.withWakePolicy(replacement);
+
+        assertSame(replacement, updated.customWakePolicy());
+        assertUnchangedExcept(original, updated, PolicyFamily.WAKE);
+    }
+
+    @Test
+    public void withResourcePolicyOnlyReplacesResourcePolicy() {
+        ResidencyPolicyDraft original = customDraft();
+        ResourcePolicy replacement = ResourcePolicy.followSystem();
+
+        ResidencyPolicyDraft updated = original.withResourcePolicy(replacement);
+
+        assertSame(replacement, updated.customResourcePolicy());
+        assertUnchangedExcept(original, updated, PolicyFamily.RESOURCE);
+    }
+
+    @Test
+    public void withRefreezePolicyOnlyReplacesRefreezePolicy() {
+        ResidencyPolicyDraft original = customDraft();
+        RefreezePolicy replacement = RefreezePolicy.followSystem();
+
+        ResidencyPolicyDraft updated = original.withRefreezePolicy(replacement);
+
+        assertSame(replacement, updated.customRefreezePolicy());
+        assertUnchangedExcept(original, updated, PolicyFamily.REFREEZE);
+    }
+
+    private static ResidencyPolicyDraft customDraft() {
+        return new ResidencyPolicyDraft(
+                true,
+                ResidencyMode.CUSTOM,
+                new KillPolicy(true, false, true, false, true, false, true, false),
+                new FreezePolicy(
+                        false, true, false, true, true, 2_000L, 3_000L, false, false, true),
+                new WakePolicy(
+                        new WakeChannelPolicy(WakeMode.THROTTLE, 4_000L),
+                        new WakeChannelPolicy(WakeMode.BLOCK, 0L),
+                        EnumSet.of(WakeSource.SERVICE, WakeSource.BROADCAST)),
+                new ResourcePolicy(true, EnumSet.of(ResourceType.AUDIO, ResourceType.GPS)),
+                new RefreezePolicy(
+                        RefreezeMode.AFTER_WAKE,
+                        5_000L,
+                        6_000L,
+                        7_000L,
+                        8_000L,
+                        9_000L,
+                        10_000L,
+                        11_000L));
+    }
+
+    private static void assertUnchangedExcept(
+            ResidencyPolicyDraft expected,
+            ResidencyPolicyDraft actual,
+            PolicyFamily replaced) {
+        assertEquals(expected.enabled(), actual.enabled());
+        assertEquals(expected.mode(), actual.mode());
+        if (replaced != PolicyFamily.KILL) {
+            assertSame(expected.customKillPolicy(), actual.customKillPolicy());
+        }
+        if (replaced != PolicyFamily.FREEZE) {
+            assertSame(expected.customFreezePolicy(), actual.customFreezePolicy());
+        }
+        if (replaced != PolicyFamily.WAKE) {
+            assertSame(expected.customWakePolicy(), actual.customWakePolicy());
+        }
+        if (replaced != PolicyFamily.RESOURCE) {
+            assertSame(expected.customResourcePolicy(), actual.customResourcePolicy());
+        }
+        if (replaced != PolicyFamily.REFREEZE) {
+            assertSame(expected.customRefreezePolicy(), actual.customRefreezePolicy());
+        }
+    }
+
+    private enum PolicyFamily {
+        KILL,
+        FREEZE,
+        WAKE,
+        RESOURCE,
+        REFREEZE
     }
 }
