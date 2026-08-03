@@ -1,6 +1,7 @@
 package com.frostwork.bgenhance.ui;
 
 import android.content.Context;
+import android.content.res.TypedArray;
 import android.graphics.drawable.GradientDrawable;
 import android.text.TextUtils;
 import android.view.Gravity;
@@ -31,8 +32,13 @@ public final class SettingSwitchRow extends LinearLayout {
         setMinimumHeight(UiUtils.dp(context, 92));
         setPadding(UiUtils.dp(context, 20), UiUtils.dp(context, 14),
                 UiUtils.dp(context, 16), UiUtils.dp(context, 14));
-        setForeground(context.obtainStyledAttributes(new int[]{android.R.attr.selectableItemBackground})
-                .getDrawable(0));
+        TypedArray selectable = context.obtainStyledAttributes(
+                new int[]{android.R.attr.selectableItemBackground});
+        try {
+            setForeground(selectable.getDrawable(0));
+        } finally {
+            selectable.recycle();
+        }
 
         LinearLayout textColumn = new LinearLayout(context);
         textColumn.setOrientation(VERTICAL);
