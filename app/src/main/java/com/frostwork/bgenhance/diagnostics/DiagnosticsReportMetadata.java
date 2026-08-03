@@ -89,8 +89,7 @@ public final class DiagnosticsReportMetadata {
             try {
                 PackageInfo info = application.getPackageManager().getPackageInfo(packageName, 0);
                 versionName = info.versionName == null ? "" : info.versionName;
-                versionCode = Build.VERSION.SDK_INT >= 28
-                        ? info.getLongVersionCode() : info.versionCode;
+                versionCode = info.getLongVersionCode();
             } catch (Throwable ignored) {}
         }
 
