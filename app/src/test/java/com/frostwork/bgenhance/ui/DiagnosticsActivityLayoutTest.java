@@ -1,6 +1,7 @@
 package com.frostwork.bgenhance.ui;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -26,6 +27,7 @@ import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.materialswitch.MaterialSwitch;
 import com.google.android.material.tabs.TabLayout;
 import org.junit.Test;
+import org.json.JSONObject;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
@@ -150,6 +152,16 @@ public final class DiagnosticsActivityLayoutTest {
         assertTrue(exported.contains("bgenhance-residency-diagnostics"));
         assertTrue(!exported.contains(privatePackage));
         assertTrue(!exported.contains("\"uid\":10123"));
+        JSONObject report = new JSONObject(exported);
+        assertEquals(2, report.getInt("formatVersion"));
+        assertEquals("modern", report.getJSONObject("protocols")
+                .getJSONObject("xposed").getString("mode"));
+        assertEquals(102, report.getJSONObject("protocols")
+                .getJSONObject("xposed").getInt("targetApi"));
+        assertFalse(report.getJSONObject("privacy").getBoolean("deviceDetailsIncluded"));
+        assertFalse(report.getJSONObject("system").has("model"));
+        assertFalse(report.getJSONObject("currentBoot").has("id"));
+        assertTrue(report.getJSONObject("exportStatus").has("collections"));
         activity.finish();
     }
 

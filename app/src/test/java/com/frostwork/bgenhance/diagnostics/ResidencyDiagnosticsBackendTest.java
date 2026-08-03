@@ -8,6 +8,8 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import android.database.sqlite.SQLiteFullException;
+import com.frostwork.bgenhance.BridgeContract;
+import com.frostwork.bgenhance.DiagnosticsTargetIds;
 import com.frostwork.bgenhance.FeatureIds;
 import com.frostwork.bgenhance.HookTargetIds;
 import java.util.ArrayList;
@@ -780,6 +782,96 @@ public final class ResidencyDiagnosticsBackendTest {
     }
 
     @Test
+    public void exportReportsPaginationTruncationAndCurrentBootCoverage() throws Exception {
+        FakeStorage storage = new FakeStorage();
+        for (int index = 0; index < 450; index++) {
+            storage.events.add(event("event-" + index, "pkg." + index, index)
+                    .copyBuilder()
+                    .id(index + 1L)
+                    .timestampMillis(1_700_000_000_000L + index)
+                    .build());
+            storage.aggregates.add(new DiagnosticsQuery.AggregateRow(
+                    "pkg." + index, index, FeatureIds.HANS,
+                    HookTargetIds.HANS_FREEZE_DISPATCH, "FREEZE", "FAST",
+                    "BLOCK_ACTION", "blocked", 1L, 1L, 1L, 0L, 1L,
+                    1L, 1L, index + 1L, index + 1L));
+        }
+        for (int index = 0; index < 3; index++) {
+            storage.rawHooks.add(new DiagnosticsQuery.RawHookSummary(
+                    "system_server", FeatureIds.HANS,
+                    "raw-target-" + index, 1L, 1L, 1L, 1L, ""));
+            storage.hookStates.add(DiagnosticsHookState.builder()
+                    .processId(index == 1
+                            ? BridgeContract.PROCESS_ATHENA
+                            : BridgeContract.PROCESS_SYSTEM_SERVER)
+                    .featureId(FeatureIds.HANS)
+                    .hookTargetId(index < 2
+                            ? DiagnosticsTargetIds.RUNTIME_PROCESS
+                            : "hook-target-" + index)
+                    .installStatus(index < 2 ? "FEATURES_INSTALLED" : "INSTALLED")
+                    .bootId(index < 2 ? "boot" : "old-boot")
+                    .updatedAt(index + 1L)
+                    .build());
+        }
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 2, 60_000L));
+
+        DiagnosticsQuery.ExportSnapshot snapshot = backend.exportAsync(
+                DiagnosticsQuery.ExportOptions.builder()
+                        .recentEventLimit(350)
+                        .aggregateLimit(350)
+                        .rawHookLimit(2)
+                        .hookStateLimit(2)
+                        .build(),
+                FeatureIds.all()).get(5, TimeUnit.SECONDS);
+
+        assertEquals(ResidencyDiagnosticsBackend.EXPORT_FORMAT_VERSION,
+                snapshot.formatVersion);
+        assertEquals(350, snapshot.recentEvents.size());
+        assertEquals(2, snapshot.exportStatus.recentEvents.pagesRead);
+        assertTrue(snapshot.exportStatus.recentEvents.truncated);
+        assertEquals(350, snapshot.aggregates.size());
+        assertEquals(2, snapshot.exportStatus.aggregates.pagesRead);
+        assertTrue(snapshot.exportStatus.aggregates.truncated);
+        assertEquals(2, snapshot.rawHooks.size());
+        assertTrue(snapshot.exportStatus.rawHooks.truncated);
+        assertEquals(2, snapshot.hookStates.size());
+        assertTrue(snapshot.exportStatus.hookStates.truncated);
+        assertTrue(snapshot.exportStatus.truncated);
+        assertTrue(snapshot.exportStatus.currentBoot.identityAvailable);
+        assertFalse(snapshot.exportStatus.currentBoot.identityIncluded);
+        assertEquals("", snapshot.exportStatus.currentBoot.currentBootId);
+        assertEquals(2, snapshot.exportStatus.currentBoot.currentBootHookStateCount);
+        assertTrue(snapshot.exportStatus.currentBoot.systemServerReported);
+        assertTrue(snapshot.exportStatus.currentBoot.athenaReported);
+        assertFalse(snapshot.exportStatus.currentBoot.hookStateCoverageComplete);
+        assertEquals("FEATURES_INSTALLED", snapshot.hookStates.get(0).installStatus);
+        assertEquals("FEATURES_INSTALLED", snapshot.hookStates.get(1).installStatus);
+        assertEquals("", snapshot.hookStates.get(0).processId);
+    }
+
+    @Test
+    public void fullExportIncludesExactCurrentBootIdentity() throws Exception {
+        FakeStorage storage = new FakeStorage();
+        storage.hookStates.add(DiagnosticsHookState.builder()
+                .processId("system_server")
+                .featureId(FeatureIds.HANS)
+                .hookTargetId(HookTargetIds.HANS_FREEZE_DISPATCH)
+                .installStatus("INSTALLED")
+                .bootId("boot")
+                .updatedAt(1L)
+                .build());
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 2, 60_000L));
+
+        DiagnosticsQuery.ExportSnapshot snapshot = backend.exportAsync(
+                DiagnosticsQuery.ExportOptions.fullReport(),
+                FeatureIds.all()).get(5, TimeUnit.SECONDS);
+
+        assertTrue(snapshot.exportStatus.currentBoot.identityIncluded);
+        assertEquals("boot", snapshot.exportStatus.currentBoot.currentBootId);
+        assertEquals(1, snapshot.exportStatus.currentBoot.currentBootHookStateCount);
+    }
+
+    @Test
     public void explicitFullExportPreservesRequestedIdentity() throws Exception {
         FakeStorage storage = new FakeStorage();
         storage.events.add(event("private-token", "com.private.target", 10123)
@@ -915,6 +1007,7 @@ public final class ResidencyDiagnosticsBackendTest {
 
     private static final class FakeStorage implements ResidencyDiagnosticsStorage {
         final List<NormalizedDiagnosticsEvent> events = new ArrayList<>();
+        final List<DiagnosticsQuery.AggregateRow> aggregates = new ArrayList<>();
         final List<DiagnosticsQuery.RawHookSummary> rawHooks = new ArrayList<>();
         final List<DiagnosticsHookState> hookStates = new ArrayList<>();
         volatile int written;
@@ -1026,9 +1119,31 @@ public final class ResidencyDiagnosticsBackendTest {
             synchronized (this) {
                 queryCalls++;
                 int limit = filter == null ? 50 : filter.limit;
+                DiagnosticsQuery.EventCursor before = filter == null ? null : filter.before;
+                List<NormalizedDiagnosticsEvent> ordered = new ArrayList<>(events);
+                ordered.sort((first, second) -> {
+                    int timestamp = Long.compare(
+                            second.timestampMillis, first.timestampMillis);
+                    return timestamp != 0 ? timestamp : Long.compare(second.id, first.id);
+                });
+                ArrayList<NormalizedDiagnosticsEvent> eligible = new ArrayList<>();
+                for (NormalizedDiagnosticsEvent value : ordered) {
+                    if (before == null
+                            || value.timestampMillis < before.timestampMillis
+                            || (value.timestampMillis == before.timestampMillis
+                            && value.id < before.id)) {
+                        eligible.add(value);
+                    }
+                }
+                int count = Math.min(limit, eligible.size());
                 List<NormalizedDiagnosticsEvent> copy = new ArrayList<>(
-                        events.subList(0, Math.min(limit, events.size())));
-                return new DiagnosticsQuery.EventPage(copy, null, "");
+                        eligible.subList(0, count));
+                DiagnosticsQuery.EventCursor next = null;
+                if (eligible.size() > count && !copy.isEmpty()) {
+                    NormalizedDiagnosticsEvent last = copy.get(copy.size() - 1);
+                    next = new DiagnosticsQuery.EventCursor(last.timestampMillis, last.id);
+                }
+                return new DiagnosticsQuery.EventPage(copy, next, "");
             }
         }
 
@@ -1036,7 +1151,14 @@ public final class ResidencyDiagnosticsBackendTest {
         public DiagnosticsQuery.AggregatePage queryAggregates(
                 DiagnosticsQuery.AggregateQuery query) {
             if (failQueries) throw new IllegalStateException("query failed");
-            return DiagnosticsQuery.AggregatePage.empty("");
+            int offset = query == null ? 0 : query.offset;
+            int limit = query == null ? 50 : query.limit;
+            int start = Math.min(offset, aggregates.size());
+            int end = Math.min(start + limit, aggregates.size());
+            boolean hasMore = end < aggregates.size();
+            return new DiagnosticsQuery.AggregatePage(
+                    new ArrayList<>(aggregates.subList(start, end)),
+                    hasMore ? end : 0, hasMore, "");
         }
 
         @Override

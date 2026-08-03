@@ -1,5 +1,6 @@
 package com.frostwork.bgenhance.diagnostics;
 
+import java.time.Instant;
 import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -10,19 +11,35 @@ public final class DiagnosticsExportCodec {
     private DiagnosticsExportCodec() {}
 
     public static EncodeResult encode(DiagnosticsQuery.ExportSnapshot snapshot) {
+        return encode(snapshot, DiagnosticsReportMetadata.empty());
+    }
+
+    public static EncodeResult encode(
+            DiagnosticsQuery.ExportSnapshot snapshot,
+            DiagnosticsReportMetadata requestedMetadata) {
         if (snapshot == null) return EncodeResult.failed("missing_snapshot");
+        DiagnosticsReportMetadata metadata = requestedMetadata == null
+                ? DiagnosticsReportMetadata.empty() : requestedMetadata;
         try {
             JSONObject root = new JSONObject();
             root.put("format", "bgenhance-residency-diagnostics");
             root.put("formatVersion", snapshot.formatVersion);
             root.put("databaseSchemaVersion", snapshot.databaseSchemaVersion);
             root.put("generatedAt", snapshot.generatedAt);
+            root.put("generatedAtUtc", Instant.ofEpochMilli(snapshot.generatedAt).toString());
             root.put("retentionMillis", snapshot.retentionMillis);
             JSONObject privacy = new JSONObject();
             privacy.put("packageNamesIncluded", snapshot.packageNamesIncluded);
             privacy.put("uidsIncluded", snapshot.uidsIncluded);
             privacy.put("sensitiveDetailsIncluded", snapshot.sensitiveDetailsIncluded);
+            privacy.put("deviceDetailsIncluded", metadata.deviceDetailsIncluded);
             root.put("privacy", privacy);
+            root.put("module", module(metadata));
+            root.put("protocols", protocols(snapshot, metadata));
+            root.put("system", system(metadata));
+            root.put("runtime", runtime(metadata));
+            root.put("currentBoot", currentBoot(snapshot.exportStatus.currentBoot));
+            root.put("exportStatus", exportStatus(snapshot.exportStatus));
             root.put("homeStats", homeStats(snapshot.homeStats));
             root.put("rawHooks", rawHooks(snapshot));
             root.put("hookStates", hookStates(snapshot));
@@ -33,6 +50,115 @@ public final class DiagnosticsExportCodec {
         } catch (Throwable error) {
             return EncodeResult.failed("export_encoding_failed");
         }
+    }
+
+    private static JSONObject module(DiagnosticsReportMetadata metadata) throws JSONException {
+        JSONObject out = new JSONObject();
+        out.put("packageName", metadata.modulePackageName);
+        out.put("versionName", metadata.moduleVersionName);
+        out.put("versionCode", metadata.moduleVersionCode);
+        return out;
+    }
+
+    private static JSONObject protocols(
+            DiagnosticsQuery.ExportSnapshot snapshot,
+            DiagnosticsReportMetadata metadata) throws JSONException {
+        JSONObject out = new JSONObject();
+        out.put("exportFormatVersion", snapshot.formatVersion);
+        out.put("databaseSchemaVersion", snapshot.databaseSchemaVersion);
+        out.put("diagnosticsBridgeVersion", metadata.bridgeVersion);
+        out.put("diagnosticsWireVersion", metadata.wireVersion);
+        JSONObject xposed = new JSONObject();
+        xposed.put("mode", DiagnosticsReportMetadata.XPOSED_API_MODE);
+        xposed.put("minimumApi", DiagnosticsReportMetadata.XPOSED_MIN_API);
+        xposed.put("targetApi", DiagnosticsReportMetadata.XPOSED_TARGET_API);
+        out.put("xposed", xposed);
+        return out;
+    }
+
+    private static JSONObject system(DiagnosticsReportMetadata metadata) throws JSONException {
+        JSONObject out = new JSONObject();
+        out.put("androidSdk", metadata.androidSdk);
+        if (metadata.deviceDetailsIncluded) {
+            out.put("manufacturer", metadata.deviceManufacturer);
+            out.put("model", metadata.deviceModel);
+            out.put("product", metadata.deviceProduct);
+        }
+        out.put("bootCountAvailable", metadata.bootCountAvailable);
+        if (metadata.bootCountAvailable) out.put("bootCount", metadata.bootCount);
+        return out;
+    }
+
+    private static JSONObject runtime(DiagnosticsReportMetadata metadata) throws JSONException {
+        JSONObject out = new JSONObject();
+        out.put("xposedServiceConnected", metadata.xposedServiceConnected);
+        out.put("xposedServiceApiVersion", metadata.xposedServiceApiVersion);
+        out.put("localConfigRevision", metadata.localConfigRevision);
+        out.put("syncedConfigRevision", metadata.syncedConfigRevision);
+        out.put("configSynced", metadata.configSynced);
+        out.put("configSyncErrorCode", metadata.configSyncErrorCode);
+        if (!metadata.configSyncErrorDetails.isEmpty()) {
+            out.put("configSyncErrorDetails", metadata.configSyncErrorDetails);
+        }
+        JSONObject configuration = new JSONObject();
+        configuration.put("source", "remote_preferences");
+        configuration.put("group", "config");
+        configuration.put("hookReloadLatencyAvailable", false);
+        out.put("configuration", configuration);
+        return out;
+    }
+
+    private static JSONObject currentBoot(DiagnosticsQuery.ExportBootStatus status)
+            throws JSONException {
+        JSONObject out = new JSONObject();
+        out.put("identityAvailable", status.identityAvailable);
+        out.put("identityIncluded", status.identityIncluded);
+        if (status.identityIncluded) out.put("id", status.currentBootId);
+        out.put("stateAvailable", status.currentBootStateAvailable);
+        out.put("hookStateCount", status.currentBootHookStateCount);
+        out.put("otherBootHookStateCount", status.otherBootHookStateCount);
+        out.put("expectedStateCount", status.expectedCurrentBootStateCount);
+        out.put("systemServerReported", status.systemServerReported);
+        out.put("athenaReported", status.athenaReported);
+        out.put("hookStateCoverageComplete", status.hookStateCoverageComplete);
+        return out;
+    }
+
+    private static JSONObject exportStatus(DiagnosticsQuery.ExportStatus status)
+            throws JSONException {
+        JSONObject out = new JSONObject();
+        out.put("complete", !status.truncated && !status.hasErrors);
+        out.put("truncated", status.truncated);
+        out.put("hasErrors", status.hasErrors);
+        out.put("featureStatsCount", status.featureStatsCount);
+        JSONObject collections = new JSONObject();
+        collections.put("recentEvents", collection(status.recentEvents));
+        collections.put("aggregates", collection(status.aggregates));
+        collections.put("rawHooks", collection(status.rawHooks));
+        collections.put("hookStates", collection(status.hookStates));
+        out.put("collections", collections);
+        DiagnosticsQuery.BackendHealth health = status.backendHealth;
+        JSONObject backend = new JSONObject();
+        backend.put("acceptedWrites", health.acceptedWrites);
+        backend.put("droppedWrites", health.droppedWrites);
+        backend.put("committedWrites", health.committedWrites);
+        backend.put("failedBatches", health.failedBatches);
+        backend.put("queuedWrites", health.queuedWrites);
+        backend.put("closed", health.closed);
+        out.put("backend", backend);
+        return out;
+    }
+
+    private static JSONObject collection(DiagnosticsQuery.ExportCollectionStatus status)
+            throws JSONException {
+        JSONObject out = new JSONObject();
+        out.put("requestedLimit", status.requestedLimit);
+        out.put("returnedCount", status.returnedCount);
+        out.put("pagesRead", status.pagesRead);
+        out.put("hasMore", status.hasMore);
+        out.put("truncated", status.truncated);
+        if (!status.errorCode.isEmpty()) out.put("errorCode", status.errorCode);
+        return out;
     }
 
     private static JSONObject homeStats(DiagnosticsQuery.HomeStatsSnapshot snapshot)
@@ -173,7 +299,7 @@ public final class DiagnosticsExportCodec {
 
         static EncodeResult failed(String errorCode) {
             return new EncodeResult("{\"format\":\"bgenhance-residency-diagnostics\","
-                    + "\"formatVersion\":1,\"errorCode\":\""
+                    + "\"formatVersion\":2,\"errorCode\":\""
                     + DiagnosticsValues.id(errorCode) + "\"}", errorCode);
         }
 

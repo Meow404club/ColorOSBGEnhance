@@ -2,6 +2,7 @@ package com.frostwork.bgenhance.diagnostics;
 
 import android.content.Context;
 import android.database.sqlite.SQLiteFullException;
+import com.frostwork.bgenhance.BridgeContract;
 import com.frostwork.bgenhance.DiagnosticsResult;
 import com.frostwork.bgenhance.DiagnosticsTargetIds;
 import com.frostwork.bgenhance.FeatureIds;
@@ -32,7 +33,7 @@ import java.util.function.Supplier;
  * Enqueue methods only touch bounded memory; every database call runs on one worker.
  */
 public final class ResidencyDiagnosticsBackend implements AutoCloseable {
-    public static final int EXPORT_FORMAT_VERSION = 1;
+    public static final int EXPORT_FORMAT_VERSION = 2;
     private static final String UNKNOWN_EXPORTED_VALUE = "unknown";
     private static final int MAX_PENDING_COMMANDS = 64;
 
@@ -782,27 +783,59 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
 
     private DiagnosticsQuery.ExportSnapshot buildExport(
             DiagnosticsQuery.ExportOptions options, List<String> featureIds) {
-        DiagnosticsQuery.EventPage eventPage = storage().queryEvents(
-                DiagnosticsQuery.EventFilter.builder()
-                        .limit(options.recentEventLimit)
-                        .build());
-        DiagnosticsQuery.AggregateQuery.Builder aggregateBuilder =
-                DiagnosticsQuery.AggregateQuery.builder()
-                        .dimension(DiagnosticsQuery.AggregateDimension.APPLICATION)
-                        .dimension(DiagnosticsQuery.AggregateDimension.FEATURE)
-                        .dimension(DiagnosticsQuery.AggregateDimension.HOOK_TARGET)
-                        .dimension(DiagnosticsQuery.AggregateDimension.BEHAVIOR)
-                        .dimension(DiagnosticsQuery.AggregateDimension.SOURCE)
-                        .dimension(DiagnosticsQuery.AggregateDimension.DECISION)
-                        .dimension(DiagnosticsQuery.AggregateDimension.RESULT)
-                        .limit(options.aggregateLimit);
-        DiagnosticsQuery.AggregatePage aggregates =
-                storage().queryAggregates(aggregateBuilder.build());
-        List<DiagnosticsQuery.RawHookSummary> rawHooks = storage().queryRawHooks(
-                0L, Long.MAX_VALUE, options.rawHookLimit);
-        List<DiagnosticsHookState> hookStates =
-                storage().queryHookStates(options.hookStateLimit);
-        DiagnosticsQuery.HomeStatsSnapshot homeStats = storage().queryHomeStats(featureIds);
+        EventExportResult eventResult = readEventsForExport(options.recentEventLimit);
+        AggregateExportResult aggregateResult =
+                readAggregatesForExport(options.aggregateLimit);
+
+        int rawProbeLimit = Math.min(
+                policy.rawAggregateRowLimit, safeIncrement(options.rawHookLimit));
+        List<DiagnosticsQuery.RawHookSummary> rawProbe = storage().queryRawHooks(
+                0L, Long.MAX_VALUE, rawProbeLimit);
+        boolean rawHasMore = rawProbe.size() > options.rawHookLimit;
+        List<DiagnosticsQuery.RawHookSummary> rawHooks = copyAtMost(
+                rawProbe, options.rawHookLimit);
+
+        int hookProbeLimit = Math.min(
+                policy.hookStateLimit, safeIncrement(options.hookStateLimit));
+        List<DiagnosticsHookState> hookProbe = storage().queryHookStates(hookProbeLimit);
+        boolean hookHasMore = hookProbe.size() > options.hookStateLimit;
+        List<DiagnosticsHookState> hookStates = copyAtMost(
+                hookProbe, options.hookStateLimit);
+
+        DiagnosticsQuery.HomeStatsSnapshot storedStats = storage().queryHomeStats(null);
+        DiagnosticsQuery.HomeStatsSnapshot requestedStats =
+                storage().queryHomeStats(featureIds);
+        LinkedHashMap<String, DiagnosticsQuery.FeatureStats> combinedStats =
+                new LinkedHashMap<>(storedStats.features);
+        combinedStats.putAll(requestedStats.features);
+        String homeError = firstError(storedStats.errorCode, requestedStats.errorCode);
+        DiagnosticsQuery.HomeStatsSnapshot homeStats =
+                new DiagnosticsQuery.HomeStatsSnapshot(combinedStats, homeError);
+
+        DiagnosticsQuery.ExportCollectionStatus eventStatus =
+                new DiagnosticsQuery.ExportCollectionStatus(
+                        options.recentEventLimit, eventResult.items.size(),
+                        eventResult.pagesRead, eventResult.hasMore, eventResult.errorCode);
+        DiagnosticsQuery.ExportCollectionStatus aggregateStatus =
+                new DiagnosticsQuery.ExportCollectionStatus(
+                        options.aggregateLimit, aggregateResult.items.size(),
+                        aggregateResult.pagesRead, aggregateResult.hasMore,
+                        aggregateResult.errorCode);
+        DiagnosticsQuery.ExportCollectionStatus rawStatus =
+                new DiagnosticsQuery.ExportCollectionStatus(
+                        options.rawHookLimit, rawHooks.size(), rawProbe.isEmpty() ? 0 : 1,
+                        rawHasMore, "");
+        DiagnosticsQuery.ExportCollectionStatus hookStatus =
+                new DiagnosticsQuery.ExportCollectionStatus(
+                        options.hookStateLimit, hookStates.size(), hookProbe.isEmpty() ? 0 : 1,
+                        hookHasMore, "");
+        DiagnosticsQuery.ExportBootStatus bootStatus = bootStatus(
+                hookStates, hookStatus, options.includeSensitiveDetails);
+        DiagnosticsQuery.ExportStatus exportStatus = new DiagnosticsQuery.ExportStatus(
+                eventStatus, aggregateStatus, rawStatus, hookStatus,
+                homeStats.features.size(), bootStatus, health());
+        String exportError = firstError(
+                eventResult.errorCode, aggregateResult.errorCode, homeError);
         return redactExport(new DiagnosticsQuery.ExportSnapshot(
                 EXPORT_FORMAT_VERSION,
                 storage().schemaVersion(),
@@ -811,12 +844,169 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 options.includePackageNames,
                 options.includeUids,
                 options.includeSensitiveDetails,
-                eventPage.items,
-                aggregates.items,
+                eventResult.items,
+                aggregateResult.items,
                 rawHooks,
                 hookStates,
                 homeStats,
-                ""), options);
+                exportStatus,
+                exportError), options);
+    }
+
+    private EventExportResult readEventsForExport(int requestedLimit) {
+        ArrayList<NormalizedDiagnosticsEvent> items = new ArrayList<>();
+        DiagnosticsQuery.EventCursor cursor = null;
+        int pagesRead = 0;
+        boolean hasMore = false;
+        String errorCode = "";
+        while (items.size() < requestedLimit) {
+            DiagnosticsQuery.EventPage page = storage().queryEvents(
+                    DiagnosticsQuery.EventFilter.builder()
+                            .limit(requestedLimit - items.size())
+                            .before(cursor)
+                            .build());
+            pagesRead++;
+            errorCode = page.errorCode;
+            int before = items.size();
+            for (NormalizedDiagnosticsEvent item : page.items) {
+                if (items.size() >= requestedLimit) break;
+                items.add(item);
+            }
+            hasMore = page.nextCursor != null;
+            if (!errorCode.isEmpty() || !hasMore) break;
+            if (items.size() == before) {
+                errorCode = "invalid_event_pagination";
+                break;
+            }
+            cursor = page.nextCursor;
+        }
+        return new EventExportResult(items, pagesRead, hasMore, errorCode);
+    }
+
+    private AggregateExportResult readAggregatesForExport(int requestedLimit) {
+        ArrayList<DiagnosticsQuery.AggregateRow> items = new ArrayList<>();
+        int offset = 0;
+        int pagesRead = 0;
+        boolean hasMore = false;
+        String errorCode = "";
+        while (items.size() < requestedLimit) {
+            DiagnosticsQuery.AggregateQuery query = DiagnosticsQuery.AggregateQuery.builder()
+                    .dimension(DiagnosticsQuery.AggregateDimension.APPLICATION)
+                    .dimension(DiagnosticsQuery.AggregateDimension.FEATURE)
+                    .dimension(DiagnosticsQuery.AggregateDimension.HOOK_TARGET)
+                    .dimension(DiagnosticsQuery.AggregateDimension.BEHAVIOR)
+                    .dimension(DiagnosticsQuery.AggregateDimension.SOURCE)
+                    .dimension(DiagnosticsQuery.AggregateDimension.DECISION)
+                    .dimension(DiagnosticsQuery.AggregateDimension.RESULT)
+                    .limit(requestedLimit - items.size())
+                    .offset(offset)
+                    .build();
+            DiagnosticsQuery.AggregatePage page = storage().queryAggregates(query);
+            pagesRead++;
+            errorCode = page.errorCode;
+            int before = items.size();
+            for (DiagnosticsQuery.AggregateRow item : page.items) {
+                if (items.size() >= requestedLimit) break;
+                items.add(item);
+            }
+            hasMore = page.hasMore;
+            if (!errorCode.isEmpty() || !hasMore) break;
+            if (items.size() == before || page.nextOffset <= offset) {
+                errorCode = "invalid_aggregate_pagination";
+                break;
+            }
+            offset = page.nextOffset;
+        }
+        return new AggregateExportResult(items, pagesRead, hasMore, errorCode);
+    }
+
+    private DiagnosticsQuery.ExportBootStatus bootStatus(
+            List<DiagnosticsHookState> hookStates,
+            DiagnosticsQuery.ExportCollectionStatus hookStatus,
+            boolean includeSensitiveDetails) {
+        boolean identityAvailable = !currentBootId.isEmpty();
+        int currentRows = 0;
+        int otherRows = 0;
+        boolean systemServerReported = false;
+        boolean athenaReported = false;
+        for (DiagnosticsHookState state : hookStates) {
+            if (identityAvailable && currentBootId.equals(state.bootId)) {
+                currentRows++;
+                if (DiagnosticsTargetIds.RUNTIME_PROCESS.equals(state.hookTargetId)) {
+                    systemServerReported |= BridgeContract.PROCESS_SYSTEM_SERVER.equals(
+                            state.processId);
+                    athenaReported |= BridgeContract.PROCESS_ATHENA.equals(state.processId);
+                }
+            } else {
+                otherRows++;
+            }
+        }
+        int expectedRows = HookTargetIds.all().size() + 4;
+        return new DiagnosticsQuery.ExportBootStatus(
+                identityAvailable,
+                includeSensitiveDetails,
+                currentBootId,
+                currentRows,
+                otherRows,
+                expectedRows,
+                systemServerReported,
+                athenaReported,
+                !hookStatus.truncated && hookStatus.errorCode.isEmpty());
+    }
+
+    private static int safeIncrement(int value) {
+        return value == Integer.MAX_VALUE ? value : value + 1;
+    }
+
+    private static <T> List<T> copyAtMost(List<T> source, int limit) {
+        if (source == null || source.isEmpty()) return Collections.emptyList();
+        int size = Math.min(Math.max(0, limit), source.size());
+        return Collections.unmodifiableList(new ArrayList<>(source.subList(0, size)));
+    }
+
+    private static String firstError(String... values) {
+        if (values == null) return "";
+        for (String value : values) {
+            String normalized = DiagnosticsValues.id(value);
+            if (!normalized.isEmpty()) return normalized;
+        }
+        return "";
+    }
+
+    private static final class EventExportResult {
+        final List<NormalizedDiagnosticsEvent> items;
+        final int pagesRead;
+        final boolean hasMore;
+        final String errorCode;
+
+        EventExportResult(
+                List<NormalizedDiagnosticsEvent> items,
+                int pagesRead,
+                boolean hasMore,
+                String errorCode) {
+            this.items = items;
+            this.pagesRead = pagesRead;
+            this.hasMore = hasMore;
+            this.errorCode = DiagnosticsValues.id(errorCode);
+        }
+    }
+
+    private static final class AggregateExportResult {
+        final List<DiagnosticsQuery.AggregateRow> items;
+        final int pagesRead;
+        final boolean hasMore;
+        final String errorCode;
+
+        AggregateExportResult(
+                List<DiagnosticsQuery.AggregateRow> items,
+                int pagesRead,
+                boolean hasMore,
+                String errorCode) {
+            this.items = items;
+            this.pagesRead = pagesRead;
+            this.hasMore = hasMore;
+            this.errorCode = DiagnosticsValues.id(errorCode);
+        }
     }
 
     private static DiagnosticsQuery.ExportSnapshot redactExport(
@@ -908,6 +1098,8 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 options.includeSensitiveDetails,
                 events, aggregates, rawHooks, hookStates,
                 new DiagnosticsQuery.HomeStatsSnapshot(featureStats, source.homeStats.errorCode),
+                options.includeSensitiveDetails
+                        ? source.exportStatus : source.exportStatus.redacted(),
                 source.errorCode);
     }
 
@@ -947,6 +1139,11 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
 
     private static String stableInstallStatus(String value) {
         String normalized = DiagnosticsValues.id(value);
+        if ("ENTRY_LOADED".equals(normalized)
+                || "FEATURES_INSTALLED".equals(normalized)
+                || "BOOTSTRAP_FAILED".equals(normalized)
+                || "CONFIG_READY".equals(normalized)
+                || "CONFIG_ERROR".equals(normalized)) return normalized;
         if (normalized.startsWith("INSTALLED")) return "INSTALLED";
         if (normalized.startsWith("FAILED")) return "FAILED";
         if (normalized.startsWith("UNSUPPORTED")) return "UNSUPPORTED";

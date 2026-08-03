@@ -16,6 +16,7 @@ import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsExportCodec;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
+import com.frostwork.bgenhance.diagnostics.DiagnosticsReportMetadata;
 import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
 import com.frostwork.bgenhance.ui.diagnostics.DiagnosticsViewModel;
 import com.google.android.material.appbar.MaterialToolbar;
@@ -254,13 +255,15 @@ public final class DiagnosticsActivity extends AppCompatActivity {
     private void exportDiagnostics() {
         if (exportInFlight) return;
         exportInFlight = true;
+        DiagnosticsReportMetadata metadata =
+                DiagnosticsReportMetadata.capture(this, false);
         Toast.makeText(this, R.string.diagnostics_export_preparing, Toast.LENGTH_SHORT).show();
         backend.exportAsync(
                         DiagnosticsQuery.ExportOptions.redactedDefaults(),
                         FeatureIds.all())
                 .thenApply(snapshot -> {
                     if (snapshot == null || !snapshot.errorCode.isEmpty()) return null;
-                    return DiagnosticsExportCodec.encode(snapshot);
+                    return DiagnosticsExportCodec.encode(snapshot, metadata);
                 })
                 .whenComplete((encoded, error) -> runOnUiThread(() -> {
                     exportInFlight = false;

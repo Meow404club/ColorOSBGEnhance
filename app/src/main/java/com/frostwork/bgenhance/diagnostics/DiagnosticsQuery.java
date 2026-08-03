@@ -438,13 +438,32 @@ public final class DiagnosticsQuery {
             includePackageNames = builder.includePackageNames;
             includeUids = builder.includeUids;
             includeSensitiveDetails = builder.includeSensitiveDetails;
-            recentEventLimit = bounded(builder.recentEventLimit, 1, 2_000);
-            aggregateLimit = bounded(builder.aggregateLimit, 1, 2_000);
-            rawHookLimit = bounded(builder.rawHookLimit, 1, 512);
-            hookStateLimit = bounded(builder.hookStateLimit, 1, 512);
+            recentEventLimit = bounded(
+                    builder.recentEventLimit, 1,
+                    DiagnosticsRetentionPolicy.DEFAULT_RECENT_EVENT_LIMIT);
+            aggregateLimit = bounded(
+                    builder.aggregateLimit, 1,
+                    DiagnosticsRetentionPolicy.DEFAULT_AGGREGATE_ROW_LIMIT);
+            rawHookLimit = bounded(
+                    builder.rawHookLimit, 1,
+                    DiagnosticsRetentionPolicy.DEFAULT_RAW_AGGREGATE_ROW_LIMIT);
+            hookStateLimit = bounded(
+                    builder.hookStateLimit, 1,
+                    DiagnosticsRetentionPolicy.DEFAULT_HOOK_STATE_LIMIT);
         }
 
         public static ExportOptions redactedDefaults() { return builder().build(); }
+        public static ExportOptions fullReport() {
+            return builder()
+                    .includePackageNames(true)
+                    .includeUids(true)
+                    .includeSensitiveDetails(true)
+                    .recentEventLimit(DiagnosticsRetentionPolicy.DEFAULT_RECENT_EVENT_LIMIT)
+                    .aggregateLimit(DiagnosticsRetentionPolicy.DEFAULT_AGGREGATE_ROW_LIMIT)
+                    .rawHookLimit(DiagnosticsRetentionPolicy.DEFAULT_RAW_AGGREGATE_ROW_LIMIT)
+                    .hookStateLimit(DiagnosticsRetentionPolicy.DEFAULT_HOOK_STATE_LIMIT)
+                    .build();
+        }
         public static Builder builder() { return new Builder(); }
 
         public static final class Builder {
@@ -473,6 +492,138 @@ public final class DiagnosticsQuery {
         }
     }
 
+    public static final class ExportCollectionStatus {
+        public final int requestedLimit;
+        public final int returnedCount;
+        public final int pagesRead;
+        public final boolean hasMore;
+        public final boolean truncated;
+        public final String errorCode;
+
+        public ExportCollectionStatus(
+                int requestedLimit,
+                int returnedCount,
+                int pagesRead,
+                boolean hasMore,
+                String errorCode) {
+            this.requestedLimit = Math.max(0, requestedLimit);
+            this.returnedCount = Math.max(0, returnedCount);
+            this.pagesRead = Math.max(0, pagesRead);
+            this.hasMore = hasMore;
+            truncated = hasMore;
+            this.errorCode = DiagnosticsValues.id(errorCode);
+        }
+
+        public static ExportCollectionStatus empty(int requestedLimit, String errorCode) {
+            return new ExportCollectionStatus(requestedLimit, 0, 0, false, errorCode);
+        }
+    }
+
+    public static final class ExportBootStatus {
+        public final boolean identityAvailable;
+        public final boolean identityIncluded;
+        public final String currentBootId;
+        public final int currentBootHookStateCount;
+        public final int otherBootHookStateCount;
+        public final int expectedCurrentBootStateCount;
+        public final boolean currentBootStateAvailable;
+        public final boolean systemServerReported;
+        public final boolean athenaReported;
+        public final boolean hookStateCoverageComplete;
+
+        public ExportBootStatus(
+                boolean identityAvailable,
+                boolean identityIncluded,
+                String currentBootId,
+                int currentBootHookStateCount,
+                int otherBootHookStateCount,
+                int expectedCurrentBootStateCount,
+                boolean systemServerReported,
+                boolean athenaReported,
+                boolean hookStateCoverageComplete) {
+            this.identityAvailable = identityAvailable;
+            this.identityIncluded = identityIncluded && identityAvailable;
+            this.currentBootId = this.identityIncluded
+                    ? DiagnosticsValues.id(currentBootId) : "";
+            this.currentBootHookStateCount = Math.max(0, currentBootHookStateCount);
+            this.otherBootHookStateCount = Math.max(0, otherBootHookStateCount);
+            this.expectedCurrentBootStateCount = Math.max(0, expectedCurrentBootStateCount);
+            currentBootStateAvailable = identityAvailable && currentBootHookStateCount > 0;
+            this.systemServerReported = systemServerReported;
+            this.athenaReported = athenaReported;
+            this.hookStateCoverageComplete = hookStateCoverageComplete;
+        }
+
+        public ExportBootStatus redacted() {
+            return new ExportBootStatus(
+                    identityAvailable, false, "", currentBootHookStateCount,
+                    otherBootHookStateCount, expectedCurrentBootStateCount,
+                    systemServerReported, athenaReported,
+                    hookStateCoverageComplete);
+        }
+
+        public static ExportBootStatus unavailable() {
+            return new ExportBootStatus(
+                    false, false, "", 0, 0, 0, false, false, false);
+        }
+    }
+
+    public static final class ExportStatus {
+        public final ExportCollectionStatus recentEvents;
+        public final ExportCollectionStatus aggregates;
+        public final ExportCollectionStatus rawHooks;
+        public final ExportCollectionStatus hookStates;
+        public final int featureStatsCount;
+        public final ExportBootStatus currentBoot;
+        public final BackendHealth backendHealth;
+        public final boolean truncated;
+        public final boolean hasErrors;
+
+        public ExportStatus(
+                ExportCollectionStatus recentEvents,
+                ExportCollectionStatus aggregates,
+                ExportCollectionStatus rawHooks,
+                ExportCollectionStatus hookStates,
+                int featureStatsCount,
+                ExportBootStatus currentBoot,
+                BackendHealth backendHealth) {
+            this.recentEvents = nonNull(recentEvents);
+            this.aggregates = nonNull(aggregates);
+            this.rawHooks = nonNull(rawHooks);
+            this.hookStates = nonNull(hookStates);
+            this.featureStatsCount = Math.max(0, featureStatsCount);
+            this.currentBoot = currentBoot == null
+                    ? ExportBootStatus.unavailable() : currentBoot;
+            this.backendHealth = backendHealth == null
+                    ? new BackendHealth(0L, 0L, 0L, 0L, 0, false)
+                    : backendHealth;
+            truncated = this.recentEvents.truncated || this.aggregates.truncated
+                    || this.rawHooks.truncated || this.hookStates.truncated;
+            hasErrors = !this.recentEvents.errorCode.isEmpty()
+                    || !this.aggregates.errorCode.isEmpty()
+                    || !this.rawHooks.errorCode.isEmpty()
+                    || !this.hookStates.errorCode.isEmpty();
+        }
+
+        public ExportStatus redacted() {
+            return new ExportStatus(
+                    recentEvents, aggregates, rawHooks, hookStates, featureStatsCount,
+                    currentBoot.redacted(), backendHealth);
+        }
+
+        public static ExportStatus empty(String errorCode) {
+            ExportCollectionStatus unavailable =
+                    ExportCollectionStatus.empty(0, errorCode);
+            return new ExportStatus(
+                    unavailable, unavailable, unavailable, unavailable,
+                    0, ExportBootStatus.unavailable(), null);
+        }
+
+        private static ExportCollectionStatus nonNull(ExportCollectionStatus value) {
+            return value == null ? ExportCollectionStatus.empty(0, "") : value;
+        }
+    }
+
     public static final class ExportSnapshot {
         public final int formatVersion;
         public final int databaseSchemaVersion;
@@ -486,6 +637,7 @@ public final class DiagnosticsQuery {
         public final List<RawHookSummary> rawHooks;
         public final List<DiagnosticsHookState> hookStates;
         public final HomeStatsSnapshot homeStats;
+        public final ExportStatus exportStatus;
         public final String errorCode;
 
         public ExportSnapshot(
@@ -496,6 +648,20 @@ public final class DiagnosticsQuery {
                 List<AggregateRow> aggregates, List<RawHookSummary> rawHooks,
                 List<DiagnosticsHookState> hookStates, HomeStatsSnapshot homeStats,
                 String errorCode) {
+            this(formatVersion, databaseSchemaVersion, generatedAt, retentionMillis,
+                    packageNamesIncluded, uidsIncluded, sensitiveDetailsIncluded,
+                    recentEvents, aggregates, rawHooks, hookStates, homeStats,
+                    null, errorCode);
+        }
+
+        public ExportSnapshot(
+                int formatVersion, int databaseSchemaVersion, long generatedAt,
+                long retentionMillis, boolean packageNamesIncluded, boolean uidsIncluded,
+                boolean sensitiveDetailsIncluded,
+                List<NormalizedDiagnosticsEvent> recentEvents,
+                List<AggregateRow> aggregates, List<RawHookSummary> rawHooks,
+                List<DiagnosticsHookState> hookStates, HomeStatsSnapshot homeStats,
+                ExportStatus exportStatus, String errorCode) {
             this.formatVersion = Math.max(1, formatVersion);
             this.databaseSchemaVersion = Math.max(1, databaseSchemaVersion);
             this.generatedAt = DiagnosticsValues.nonNegative(generatedAt);
@@ -509,14 +675,31 @@ public final class DiagnosticsQuery {
             this.hookStates = immutable(hookStates);
             this.homeStats = homeStats == null
                     ? HomeStatsSnapshot.empty("") : homeStats;
+            this.exportStatus = exportStatus == null
+                    ? new ExportStatus(
+                            new ExportCollectionStatus(
+                                    this.recentEvents.size(), this.recentEvents.size(),
+                                    this.recentEvents.isEmpty() ? 0 : 1, false, ""),
+                            new ExportCollectionStatus(
+                                    this.aggregates.size(), this.aggregates.size(),
+                                    this.aggregates.isEmpty() ? 0 : 1, false, ""),
+                            new ExportCollectionStatus(
+                                    this.rawHooks.size(), this.rawHooks.size(),
+                                    this.rawHooks.isEmpty() ? 0 : 1, false, ""),
+                            new ExportCollectionStatus(
+                                    this.hookStates.size(), this.hookStates.size(),
+                                    this.hookStates.isEmpty() ? 0 : 1, false, ""),
+                            this.homeStats.features.size(),
+                            ExportBootStatus.unavailable(), null)
+                    : exportStatus;
             this.errorCode = DiagnosticsValues.id(errorCode);
         }
 
         public static ExportSnapshot empty(String errorCode) {
-            return new ExportSnapshot(1, 1, System.currentTimeMillis(), 0L,
+            return new ExportSnapshot(2, 1, System.currentTimeMillis(), 0L,
                     false, false, false, Collections.emptyList(), Collections.emptyList(),
                     Collections.emptyList(), Collections.emptyList(),
-                    HomeStatsSnapshot.empty(errorCode), errorCode);
+                    HomeStatsSnapshot.empty(errorCode), ExportStatus.empty(errorCode), errorCode);
         }
     }
 

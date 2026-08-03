@@ -263,7 +263,7 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
     public List<DiagnosticsQuery.RawHookSummary> queryRawHooks(
             long fromInclusive, long toExclusive, int requestedLimit) {
         int limit = Math.max(1, Math.min(
-                Math.min(512, policy.rawAggregateRowLimit), requestedLimit));
+                policy.rawAggregateRowLimit, requestedLimit));
         long fromBucket = DiagnosticsValues.dayBucket(Math.max(0L, fromInclusive));
         long to = toExclusive <= 0L ? Long.MAX_VALUE : toExclusive;
         long toBucket = to == Long.MAX_VALUE

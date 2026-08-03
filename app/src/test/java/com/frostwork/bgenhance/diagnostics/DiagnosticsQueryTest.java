@@ -50,4 +50,21 @@ public final class DiagnosticsQueryTest {
         assertFalse(options.includeUids);
         assertTrue(options.recentEventLimit <= 2_000);
     }
+
+    @Test
+    public void fullReportUsesRetentionBoundsAndExplicitlyIncludesIdentifiers() {
+        DiagnosticsQuery.ExportOptions options = DiagnosticsQuery.ExportOptions.fullReport();
+
+        assertTrue(options.includePackageNames);
+        assertTrue(options.includeUids);
+        assertTrue(options.includeSensitiveDetails);
+        assertEquals(DiagnosticsRetentionPolicy.DEFAULT_RECENT_EVENT_LIMIT,
+                options.recentEventLimit);
+        assertEquals(DiagnosticsRetentionPolicy.DEFAULT_AGGREGATE_ROW_LIMIT,
+                options.aggregateLimit);
+        assertEquals(DiagnosticsRetentionPolicy.DEFAULT_RAW_AGGREGATE_ROW_LIMIT,
+                options.rawHookLimit);
+        assertEquals(DiagnosticsRetentionPolicy.DEFAULT_HOOK_STATE_LIMIT,
+                options.hookStateLimit);
+    }
 }
