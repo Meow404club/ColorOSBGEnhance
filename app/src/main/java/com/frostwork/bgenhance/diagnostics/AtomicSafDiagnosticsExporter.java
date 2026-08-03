@@ -17,6 +17,7 @@ public final class AtomicSafDiagnosticsExporter {
     static final int MAX_REPORT_BYTES = 32 * 1_024 * 1_024;
     private static final int BUFFER_BYTES = 32 * 1_024;
     public static final String PARTIAL_SUFFIX = ".partial";
+    public static final String PICKER_PARTIAL_SUFFIX = ".partial.json";
 
     private AtomicSafDiagnosticsExporter() {}
 
@@ -139,11 +140,18 @@ public final class AtomicSafDiagnosticsExporter {
             return null;
         }
         String lower = partialName.toLowerCase(Locale.ROOT);
-        int marker = lower.lastIndexOf(PARTIAL_SUFFIX);
-        if (marker <= 0 || marker + PARTIAL_SUFFIX.length() != partialName.length()) {
-            return null;
+        String value;
+        if (lower.endsWith(PICKER_PARTIAL_SUFFIX)) {
+            int marker = partialName.length() - PICKER_PARTIAL_SUFFIX.length();
+            if (marker <= 0) return null;
+            value = partialName.substring(0, marker) + ".json";
+        } else {
+            int marker = lower.lastIndexOf(PARTIAL_SUFFIX);
+            if (marker <= 0 || marker + PARTIAL_SUFFIX.length() != partialName.length()) {
+                return null;
+            }
+            value = partialName.substring(0, marker);
         }
-        String value = partialName.substring(0, marker);
         if (!value.toLowerCase(Locale.ROOT).endsWith(".json")) return null;
         for (int index = 0; index < value.length(); index++) {
             char current = value.charAt(index);

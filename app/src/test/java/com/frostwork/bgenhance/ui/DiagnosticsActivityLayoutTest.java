@@ -205,7 +205,7 @@ public final class DiagnosticsActivityLayoutTest {
         String displayName = request.intent.getStringExtra(Intent.EXTRA_TITLE);
         assertNotNull(displayName);
         assertTrue(displayName.startsWith("BgEnhance-diagnostics-"));
-        assertTrue(displayName.endsWith(".json.partial"));
+        assertTrue(displayName.endsWith(".partial.json"));
         activity.finish();
     }
 

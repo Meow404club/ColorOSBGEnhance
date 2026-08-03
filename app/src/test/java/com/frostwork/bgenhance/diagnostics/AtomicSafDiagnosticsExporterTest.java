@@ -21,7 +21,7 @@ public final class AtomicSafDiagnosticsExporterTest {
             Uri.parse("content://documents/document/diagnostics.partial");
     private static final Uri COMMITTED =
             Uri.parse("content://documents/document/diagnostics.json");
-    private static final String PARTIAL_NAME = "BgEnhance-diagnostics.json.partial";
+    private static final String PARTIAL_NAME = "BgEnhance-diagnostics.partial.json";
     private static final String FINAL_NAME = "BgEnhance-diagnostics.json";
     private static final byte[] REPORT = "{\"message\":\"\u5b8c\u6574\u8bca\u65ad\u62a5\u544a\"}\n"
             .getBytes(StandardCharsets.UTF_8);
@@ -42,6 +42,20 @@ public final class AtomicSafDiagnosticsExporterTest {
                 store.operations.toString());
         assertEquals(FINAL_NAME, store.renamedTo);
         assertFalse(store.deleted);
+    }
+
+    @Test
+    public void legacyTrailingPartialNameRemainsSupported() {
+        FakeStore store = new FakeStore();
+        String legacyName = "BgEnhance-diagnostics.json.partial";
+        store.displayName = legacyName;
+
+        AtomicSafDiagnosticsExporter.Result result =
+                AtomicSafDiagnosticsExporter.export(
+                        store, DESTINATION, legacyName, REPORT);
+
+        assertTrue(result.successful());
+        assertEquals(FINAL_NAME, store.renamedTo);
     }
 
     @Test
@@ -239,7 +253,8 @@ public final class AtomicSafDiagnosticsExporterTest {
 
         assertEquals("commit_failed", result.errorCode);
         assertFalse(result.incompleteDocumentDeleted);
-        assertTrue(store.displayName.endsWith(AtomicSafDiagnosticsExporter.PARTIAL_SUFFIX));
+        assertTrue(store.displayName.endsWith(
+                AtomicSafDiagnosticsExporter.PICKER_PARTIAL_SUFFIX));
         assertEquals("name,flags,open:rwt,write,flush,sync,close,verify,rename,delete",
                 store.operations.toString());
         assertNull(store.renamedTo);
