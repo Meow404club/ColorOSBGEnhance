@@ -83,6 +83,26 @@ public final class LegacyHansPolicyImporterTest {
     }
 
     @Test
+    public void versionsThreeAndFourUseTheVerifiedModernLegacyShape() throws Exception {
+        for (int version = 3; version <= 4; version++) {
+            LegacyHansImportResult result = LegacyHansPolicyImporter.importJson("{"
+                    + "\"version\":" + version + ",\"enabled\":true,\"revision\":7,"
+                    + "\"rules\":[{\"package\":\"com.example.residency.v" + version + "\","
+                    + "\"blockedFreezeSources\":2,\"keepNetwork\":true,"
+                    + "\"packetWakeMode\":1,\"packetWakeCooldownMs\":60000}]}");
+
+            assertEquals(version, result.sourceVersion());
+            assertTrue(result.sourceEnabled());
+            assertEquals(7L, result.sourceRevision());
+            AppResidencyPolicy policy = result.policies().get(0);
+            assertFalse(policy.freezePolicy().allows(FreezeSource.FAST));
+            assertTrue(policy.resourcePolicy().keepNetwork());
+            assertEquals(WakeMode.THROTTLE,
+                    policy.wakePolicy().modeFor(WakeSource.PACKET));
+        }
+    }
+
+    @Test
     public void fullExemptionOverridesFreezeAndWakeRestrictions() throws Exception {
         String json = "{\"version\":5,\"rules\":[{"
                 + "\"package\":\"com.example.residency.managed\",\"fullExempt\":true,"
@@ -125,6 +145,24 @@ public final class LegacyHansPolicyImporterTest {
         assertImportError("{\"version\":5,\"rules\":[{"
                         + "\"package\":\"com.example.valid\",\"rToMMs\":999}]}",
                 "invalid_r_to_m");
+    }
+
+    @Test
+    public void documentAndRuleCountLimitsFailBeforeProducingPartialResults() {
+        String oversized = "{\"version\":5,\"padding\":\""
+                + "x".repeat(LegacyHansPolicyCodec.MAX_JSON_BYTES)
+                + "\"}";
+        assertImportError(oversized, "document_too_large");
+
+        StringBuilder excessiveRules = new StringBuilder("{\"version\":5,\"rules\":[");
+        for (int index = 0; index <= LegacyHansPolicyCodec.MAX_RULES; index++) {
+            if (index > 0) excessiveRules.append(',');
+            excessiveRules.append("{\"package\":\"com.example.residency.app")
+                    .append(index)
+                    .append("\"}");
+        }
+        excessiveRules.append("]}");
+        assertImportError(excessiveRules.toString(), "too_many_rules");
     }
 
     private static void assertImportError(String json, String expectedCode) {
