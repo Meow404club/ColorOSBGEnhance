@@ -702,6 +702,84 @@ public final class ResidencyDiagnosticsBackendTest {
     }
 
     @Test
+    public void defaultExportMergesUnknownFeatureStatsWithoutLosingTotals() throws Exception {
+        FakeStorage storage = new FakeStorage();
+        LinkedHashMap<String, DiagnosticsQuery.FeatureStats> home = new LinkedHashMap<>();
+        home.put("private_feature_one", new DiagnosticsQuery.FeatureStats(
+                "private_feature_one", 3L, 1L, 1L, 100L,
+                "pkg.one", "process.one", "scene one", "reason one", "blocked"));
+        home.put("private_feature_two", new DiagnosticsQuery.FeatureStats(
+                "private_feature_two", 5L, 2L, 0L, 200L,
+                "pkg.two", "process.two", "scene two", "reason two", "passed"));
+        storage.homeStats = new DiagnosticsQuery.HomeStatsSnapshot(home, "");
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 2, 60_000L));
+
+        DiagnosticsQuery.ExportSnapshot snapshot = backend.exportAsync(
+                DiagnosticsQuery.ExportOptions.redactedDefaults(),
+                home.keySet()).get(5, TimeUnit.SECONDS);
+
+        assertEquals(1, snapshot.homeStats.features.size());
+        DiagnosticsQuery.FeatureStats unknown = snapshot.homeStats.features.get("unknown");
+        assertEquals(8L, unknown.observed);
+        assertEquals(3L, unknown.blocked);
+        assertEquals(1L, unknown.failOpen);
+        assertEquals(200L, unknown.lastAt);
+        assertEquals("passed", unknown.lastResult);
+        assertEquals("", unknown.lastPackage);
+        assertEquals("", unknown.lastProcess);
+        assertEquals(8L, snapshot.homeStats.observed);
+        assertEquals(3L, snapshot.homeStats.blocked);
+        assertEquals(1L, snapshot.homeStats.failOpen);
+    }
+
+    @Test
+    public void defaultExportSaturatesCollidingUnknownFeatureTotals() throws Exception {
+        FakeStorage storage = new FakeStorage();
+        LinkedHashMap<String, DiagnosticsQuery.FeatureStats> home = new LinkedHashMap<>();
+        home.put("private_feature_one", new DiagnosticsQuery.FeatureStats(
+                "private_feature_one", Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE,
+                1L, "", "", "", "", "passed"));
+        home.put("private_feature_two", new DiagnosticsQuery.FeatureStats(
+                "private_feature_two", 1L, 1L, 1L,
+                2L, "", "", "", "", "blocked"));
+        storage.homeStats = new DiagnosticsQuery.HomeStatsSnapshot(home, "");
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 2, 60_000L));
+
+        DiagnosticsQuery.ExportSnapshot snapshot = backend.exportAsync(
+                DiagnosticsQuery.ExportOptions.redactedDefaults(),
+                home.keySet()).get(5, TimeUnit.SECONDS);
+
+        DiagnosticsQuery.FeatureStats unknown = snapshot.homeStats.features.get("unknown");
+        assertEquals(Long.MAX_VALUE, unknown.observed);
+        assertEquals(Long.MAX_VALUE, unknown.blocked);
+        assertEquals(Long.MAX_VALUE, unknown.failOpen);
+    }
+
+    @Test
+    public void fullExportKeepsUnknownFeatureStatsSeparate() throws Exception {
+        FakeStorage storage = new FakeStorage();
+        LinkedHashMap<String, DiagnosticsQuery.FeatureStats> home = new LinkedHashMap<>();
+        home.put("private_feature_one", DiagnosticsQuery.FeatureStats.empty(
+                "private_feature_one"));
+        home.put("private_feature_two", DiagnosticsQuery.FeatureStats.empty(
+                "private_feature_two"));
+        storage.homeStats = new DiagnosticsQuery.HomeStatsSnapshot(home, "");
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 2, 60_000L));
+
+        DiagnosticsQuery.ExportSnapshot snapshot = backend.exportAsync(
+                DiagnosticsQuery.ExportOptions.builder()
+                        .includePackageNames(true)
+                        .includeUids(true)
+                        .includeSensitiveDetails(true)
+                        .build(),
+                home.keySet()).get(5, TimeUnit.SECONDS);
+
+        assertEquals(2, snapshot.homeStats.features.size());
+        assertTrue(snapshot.homeStats.features.containsKey("private_feature_one"));
+        assertTrue(snapshot.homeStats.features.containsKey("private_feature_two"));
+    }
+
+    @Test
     public void explicitFullExportPreservesRequestedIdentity() throws Exception {
         FakeStorage storage = new FakeStorage();
         storage.events.add(event("private-token", "com.private.target", 10123)

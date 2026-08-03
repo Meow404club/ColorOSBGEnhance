@@ -861,7 +861,7 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 : source.homeStats.features.entrySet()) {
             DiagnosticsQuery.FeatureStats value = entry.getValue();
             String featureId = exportFeatureId(value.featureId, options);
-            featureStats.put(featureId, new DiagnosticsQuery.FeatureStats(
+            mergeExportedFeatureStats(featureStats, new DiagnosticsQuery.FeatureStats(
                     featureId, value.observed, value.blocked, value.failOpen,
                     value.lastAt,
                     exportPackage(value.lastPackage, options),
@@ -909,6 +909,34 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 events, aggregates, rawHooks, hookStates,
                 new DiagnosticsQuery.HomeStatsSnapshot(featureStats, source.homeStats.errorCode),
                 source.errorCode);
+    }
+
+    private static void mergeExportedFeatureStats(
+            Map<String, DiagnosticsQuery.FeatureStats> destination,
+            DiagnosticsQuery.FeatureStats incoming) {
+        DiagnosticsQuery.FeatureStats existing = destination.get(incoming.featureId);
+        if (existing == null) {
+            destination.put(incoming.featureId, incoming);
+            return;
+        }
+        DiagnosticsQuery.FeatureStats latest = incoming.lastAt >= existing.lastAt
+                ? incoming : existing;
+        destination.put(incoming.featureId, new DiagnosticsQuery.FeatureStats(
+                incoming.featureId,
+                saturatedAdd(existing.observed, incoming.observed),
+                saturatedAdd(existing.blocked, incoming.blocked),
+                saturatedAdd(existing.failOpen, incoming.failOpen),
+                Math.max(existing.lastAt, incoming.lastAt),
+                latest.lastPackage,
+                latest.lastProcess,
+                latest.lastScene,
+                latest.lastReason,
+                latest.lastResult));
+    }
+
+    private static long saturatedAdd(long first, long second) {
+        if (Long.MAX_VALUE - first < second) return Long.MAX_VALUE;
+        return first + second;
     }
 
     private static String exportPackage(
