@@ -34,6 +34,7 @@ public final class ResidencyUiNavigationTest {
                 ResidencyAppsActivity.class,
                 ResidencyAppPickerActivity.class,
                 ResidencyPolicyActivity.class,
+                ResidencyPolicyDetailActivity.class,
                 ResidencyImportActivity.class)) {
             assertNotNull(packageManager.getActivityInfo(
                     new ComponentName(application, activity), 0));

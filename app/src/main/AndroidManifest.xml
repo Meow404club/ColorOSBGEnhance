@@ -39,6 +39,10 @@
             android:exported="false" />
 
         <activity
+            android:name=".ui.residency.ResidencyPolicyDetailActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".ui.residency.ResidencyImportActivity"
             android:exported="false" />
 

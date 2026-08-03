@@ -223,35 +223,275 @@
                         android:text="@string/residency_custom_summary"
                         android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
 
-                    <include
-                        layout="@layout/view_residency_kill_policy"
+                    <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="@dimen/card_spacing" />
+                        android:layout_marginTop="@dimen/card_spacing">
 
-                    <include
-                        layout="@layout/view_residency_freeze_policy"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="@dimen/card_spacing" />
+                        <LinearLayout
+                            android:id="@+id/residency_kill_section_row"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:foreground="?attr/selectableItemBackground"
+                            android:gravity="center_vertical"
+                            android:minHeight="112dp"
+                            android:orientation="horizontal"
+                            android:padding="18dp">
 
-                    <include
-                        layout="@layout/view_residency_wake_policy"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="@dimen/card_spacing" />
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical"
+                                android:paddingEnd="12dp">
 
-                    <include
-                        layout="@layout/view_residency_resource_policy"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="@dimen/card_spacing" />
+                                <TextView
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/residency_kill_title"
+                                    android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" />
 
-                    <include
-                        layout="@layout/view_residency_refreeze_policy"
+                                <TextView
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="4dp"
+                                    android:text="@string/residency_kill_summary"
+                                    android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
+
+                                <TextView
+                                    android:id="@+id/residency_kill_preset_value"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="8dp"
+                                    android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Option"
+                                    android:textColor="@color/brand" />
+                            </LinearLayout>
+
+                            <ImageView
+                                android:layout_width="24dp"
+                                android:layout_height="24dp"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_chevron_right" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="@dimen/card_spacing" />
+                        android:layout_marginTop="@dimen/card_spacing">
+
+                        <LinearLayout
+                            android:id="@+id/residency_freeze_section_row"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:foreground="?attr/selectableItemBackground"
+                            android:gravity="center_vertical"
+                            android:minHeight="112dp"
+                            android:orientation="horizontal"
+                            android:padding="18dp">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical"
+                                android:paddingEnd="12dp">
+
+                                <TextView
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/residency_freeze_title"
+                                    android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" />
+
+                                <TextView
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="4dp"
+                                    android:text="@string/residency_freeze_summary"
+                                    android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
+
+                                <TextView
+                                    android:id="@+id/residency_freeze_preset_value"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="8dp"
+                                    android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Option"
+                                    android:textColor="@color/brand" />
+                            </LinearLayout>
+
+                            <ImageView
+                                android:layout_width="24dp"
+                                android:layout_height="24dp"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_chevron_right" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/card_spacing">
+
+                        <LinearLayout
+                            android:id="@+id/residency_wake_section_row"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:foreground="?attr/selectableItemBackground"
+                            android:gravity="center_vertical"
+                            android:minHeight="112dp"
+                            android:orientation="horizontal"
+                            android:padding="18dp">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical"
+                                android:paddingEnd="12dp">
+
+                                <TextView
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/residency_wake_title"
+                                    android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" />
+
+                                <TextView
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="4dp"
+                                    android:text="@string/residency_wake_summary"
+                                    android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
+
+                                <TextView
+                                    android:id="@+id/residency_wake_preset_value"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="8dp"
+                                    android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Option"
+                                    android:textColor="@color/brand" />
+                            </LinearLayout>
+
+                            <ImageView
+                                android:layout_width="24dp"
+                                android:layout_height="24dp"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_chevron_right" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/card_spacing">
+
+                        <LinearLayout
+                            android:id="@+id/residency_resource_section_row"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:foreground="?attr/selectableItemBackground"
+                            android:gravity="center_vertical"
+                            android:minHeight="112dp"
+                            android:orientation="horizontal"
+                            android:padding="18dp">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical"
+                                android:paddingEnd="12dp">
+
+                                <TextView
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/residency_resource_title"
+                                    android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" />
+
+                                <TextView
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="4dp"
+                                    android:text="@string/residency_resource_summary"
+                                    android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
+
+                                <TextView
+                                    android:id="@+id/residency_resource_preset_value"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="8dp"
+                                    android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Option"
+                                    android:textColor="@color/brand" />
+                            </LinearLayout>
+
+                            <ImageView
+                                android:layout_width="24dp"
+                                android:layout_height="24dp"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_chevron_right" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/card_spacing">
+
+                        <LinearLayout
+                            android:id="@+id/residency_refreeze_section_row"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:foreground="?attr/selectableItemBackground"
+                            android:gravity="center_vertical"
+                            android:minHeight="112dp"
+                            android:orientation="horizontal"
+                            android:padding="18dp">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical"
+                                android:paddingEnd="12dp">
+
+                                <TextView
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/residency_refreeze_title"
+                                    android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" />
+
+                                <TextView
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="4dp"
+                                    android:text="@string/residency_refreeze_summary"
+                                    android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
+
+                                <TextView
+                                    android:id="@+id/residency_refreeze_preset_value"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="8dp"
+                                    android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Option"
+                                    android:textColor="@color/brand" />
+                            </LinearLayout>
+
+                            <ImageView
+                                android:layout_width="24dp"
+                                android:layout_height="24dp"
+                                android:contentDescription="@null"
+                                android:src="@drawable/ic_chevron_right" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
                 </LinearLayout>
 
                 <TextView

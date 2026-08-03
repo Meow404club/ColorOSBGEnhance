@@ -36,10 +36,11 @@ import org.robolectric.annotation.Config;
 public final class ResidencyUiLayoutTest {
     @Test
     public void unavailableCoreExemptionIsHiddenAndRiskNoticePrecedesCustomControls() {
-        View root = inflate(R.layout.activity_residency_policy);
+        View detail = inflate(R.layout.activity_residency_policy_detail);
         assertEquals(View.GONE,
-                root.findViewById(R.id.residency_freeze_core_exemption).getVisibility());
+                detail.findViewById(R.id.residency_freeze_core_exemption).getVisibility());
 
+        View root = inflate(R.layout.activity_residency_policy);
         View risk = root.findViewById(R.id.residency_risk_notices);
         View custom = root.findViewById(R.id.residency_custom_section);
         assertNotNull(risk);
@@ -252,7 +253,7 @@ public final class ResidencyUiLayoutTest {
     @Test
     public void wakeChoicesReuseHomepageSegmentedControlMetrics() {
         View home = inflate(R.layout.activity_settings);
-        View policy = inflate(R.layout.activity_residency_policy);
+        View policy = inflate(R.layout.activity_residency_policy_detail);
         assertSameSegmentStyle(
                 home.findViewById(R.id.button_preset_balanced),
                 policy.findViewById(R.id.residency_packet_allow));
@@ -264,7 +265,7 @@ public final class ResidencyUiLayoutTest {
     @Test
     public void doubleFontScaleKeepsWakeSegmentsHorizontalAndComplete() {
         ContextThemeWrapper context = portraitContext(2f);
-        View policy = inflate(context, R.layout.activity_residency_policy);
+        View policy = inflate(context, R.layout.activity_residency_policy_detail);
         MaterialButtonToggleGroup packet = policy.findViewById(R.id.residency_packet_group);
         packet.measure(
                 View.MeasureSpec.makeMeasureSpec(dp(context, 324), View.MeasureSpec.EXACTLY),
@@ -275,6 +276,22 @@ public final class ResidencyUiLayoutTest {
         assertCompleteSegment(packet.findViewById(R.id.residency_packet_allow));
         assertCompleteSegment(packet.findViewById(R.id.residency_packet_throttle));
         assertCompleteSegment(packet.findViewById(R.id.residency_packet_block));
+    }
+
+    @Test
+    public void primaryCustomSectionContainsOnlyFiveCompactPresetRows() {
+        View policy = inflate(R.layout.activity_residency_policy);
+        View custom = policy.findViewById(R.id.residency_custom_section);
+
+        assertTrue(custom.findViewById(R.id.residency_kill_section_row).isClickable());
+        assertTrue(custom.findViewById(R.id.residency_freeze_section_row).isClickable());
+        assertTrue(custom.findViewById(R.id.residency_wake_section_row).isClickable());
+        assertTrue(custom.findViewById(R.id.residency_resource_section_row).isClickable());
+        assertTrue(custom.findViewById(R.id.residency_refreeze_section_row).isClickable());
+        assertEquals(0, countViewsOfType(
+                custom, com.google.android.material.materialswitch.MaterialSwitch.class));
+        assertEquals(0, countViewsOfType(
+                custom, com.google.android.material.textfield.TextInputEditText.class));
     }
 
     @Test
@@ -438,6 +455,16 @@ public final class ResidencyUiLayoutTest {
             parent = parent.getParent();
         }
         return false;
+    }
+
+    private static int countViewsOfType(View view, Class<?> type) {
+        int count = type.isInstance(view) ? 1 : 0;
+        if (!(view instanceof ViewGroup)) return count;
+        ViewGroup group = (ViewGroup) view;
+        for (int index = 0; index < group.getChildCount(); index++) {
+            count += countViewsOfType(group.getChildAt(index), type);
+        }
+        return count;
     }
 
     private static View inflate(int layout) {
