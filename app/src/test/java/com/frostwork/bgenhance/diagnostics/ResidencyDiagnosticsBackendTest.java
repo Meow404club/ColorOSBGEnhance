@@ -869,6 +869,52 @@ public final class ResidencyDiagnosticsBackendTest {
         assertTrue(snapshot.exportStatus.currentBoot.identityIncluded);
         assertEquals("boot", snapshot.exportStatus.currentBoot.currentBootId);
         assertEquals(1, snapshot.exportStatus.currentBoot.currentBootHookStateCount);
+        assertFalse(snapshot.exportStatus.currentBoot.hookStateCoverageComplete);
+    }
+
+    @Test
+    public void currentBootCoverageRequiresAllExpectedRowsAndBothProcesses()
+            throws Exception {
+        FakeStorage storage = new FakeStorage();
+        for (String target : HookTargetIds.all()) {
+            storage.hookStates.add(DiagnosticsHookState.builder()
+                    .processId(BridgeContract.PROCESS_SYSTEM_SERVER)
+                    .featureId(FeatureIds.HANS)
+                    .hookTargetId(target)
+                    .installStatus("INSTALLED")
+                    .bootId("boot")
+                    .updatedAt(1L)
+                    .build());
+        }
+        for (String processId : Arrays.asList(
+                BridgeContract.PROCESS_SYSTEM_SERVER,
+                BridgeContract.PROCESS_ATHENA)) {
+            storage.hookStates.add(DiagnosticsHookState.builder()
+                    .processId(processId)
+                    .hookTargetId(DiagnosticsTargetIds.RUNTIME_PROCESS)
+                    .installStatus("FEATURES_INSTALLED")
+                    .bootId("boot")
+                    .updatedAt(2L)
+                    .build());
+            storage.hookStates.add(DiagnosticsHookState.builder()
+                    .processId(processId)
+                    .hookTargetId(DiagnosticsTargetIds.RUNTIME_CONFIG)
+                    .installStatus("CONFIG_READY")
+                    .bootId("boot")
+                    .updatedAt(3L)
+                    .build());
+        }
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 2, 60_000L));
+
+        DiagnosticsQuery.ExportSnapshot snapshot = backend.exportAsync(
+                DiagnosticsQuery.ExportOptions.fullReport(),
+                FeatureIds.all()).get(5, TimeUnit.SECONDS);
+
+        assertEquals(22, snapshot.exportStatus.currentBoot.expectedCurrentBootStateCount);
+        assertEquals(22, snapshot.exportStatus.currentBoot.currentBootHookStateCount);
+        assertTrue(snapshot.exportStatus.currentBoot.systemServerReported);
+        assertTrue(snapshot.exportStatus.currentBoot.athenaReported);
+        assertTrue(snapshot.exportStatus.currentBoot.hookStateCoverageComplete);
     }
 
     @Test

@@ -942,6 +942,11 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
             }
         }
         int expectedRows = HookTargetIds.all().size() + 4;
+        boolean coverageComplete = !hookStatus.truncated
+                && hookStatus.errorCode.isEmpty()
+                && currentRows >= expectedRows
+                && systemServerReported
+                && athenaReported;
         return new DiagnosticsQuery.ExportBootStatus(
                 identityAvailable,
                 includeSensitiveDetails,
@@ -951,7 +956,7 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 expectedRows,
                 systemServerReported,
                 athenaReported,
-                !hookStatus.truncated && hookStatus.errorCode.isEmpty());
+                coverageComplete);
     }
 
     private static int safeIncrement(int value) {
