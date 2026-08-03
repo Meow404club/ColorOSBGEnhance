@@ -128,6 +128,16 @@ public final class DiagnosticsActivityLayoutTest {
         assertNotNull(activity.<MaterialSwitch>findViewById(
                 R.id.diagnostics_verbose_switch));
         assertNotNull(activity.<RecyclerView>findViewById(R.id.diagnostics_list));
+        LinearLayout emptyState = activity.findViewById(R.id.diagnostics_empty_state);
+        assertEquals(LinearLayout.HORIZONTAL, emptyState.getOrientation());
+        LinearLayout.LayoutParams summaryParams = (LinearLayout.LayoutParams)
+                activity.findViewById(R.id.diagnostics_empty_summary).getLayoutParams();
+        assertEquals(0, summaryParams.width);
+        assertEquals(1f, summaryParams.weight, 0.01f);
+        TextView emptySummary = activity.findViewById(R.id.diagnostics_empty_summary);
+        assertEquals(2, emptySummary.getMaxLines());
+        assertEquals(TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM,
+                emptySummary.getAutoSizeTextType());
         activity.finish();
     }
 

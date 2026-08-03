@@ -100,13 +100,13 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:gravity="center"
-            android:orientation="vertical"
+            android:orientation="horizontal"
             android:padding="16dp"
             android:visibility="gone">
 
             <TextView
                 android:id="@+id/diagnostics_empty_title"
-                android:layout_width="match_parent"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:gravity="center"
                 android:text="@string/diagnostics_empty_title"
@@ -114,10 +114,17 @@
 
             <TextView
                 android:id="@+id/diagnostics_empty_summary"
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginStart="24dp"
+                android:layout_weight="1"
+                android:autoSizeMaxTextSize="14sp"
+                android:autoSizeMinTextSize="9sp"
+                android:autoSizeStepGranularity="1sp"
+                android:autoSizeTextType="uniform"
+                android:ellipsize="none"
                 android:gravity="center"
+                android:maxLines="2"
                 android:text="@string/diagnostics_empty_summary"
                 android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
         </LinearLayout>
