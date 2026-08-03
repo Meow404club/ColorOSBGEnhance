@@ -57,7 +57,8 @@ public final class MainHook extends XposedModule {
                 FeatureRegistry.install(hook, loader);
             }
             HookConfig.ensureDiagnosticsContext();
-            HookDiagnostics.reportProcess("FEATURES_INSTALLED", null);
+            HookDiagnostics.reportProcess(
+                    ModuleRuntimeStatus.featuresInstalled(BuildConfig.VERSION_CODE), null);
         } catch (Throwable t) {
             HookDiagnostics.reportProcess("BOOTSTRAP_FAILED", t);
             ModuleLog.e("system_server bootstrap failed", t);
@@ -77,7 +78,8 @@ public final class MainHook extends XposedModule {
                 FeatureRegistry.install(hook, loader);
             }
             HookConfig.ensureDiagnosticsContext();
-            HookDiagnostics.reportProcess("FEATURES_INSTALLED", null);
+            HookDiagnostics.reportProcess(
+                    ModuleRuntimeStatus.featuresInstalled(BuildConfig.VERSION_CODE), null);
         } catch (Throwable t) {
             HookDiagnostics.reportProcess("BOOTSTRAP_FAILED", t);
             ModuleLog.e("Athena bootstrap failed", t);

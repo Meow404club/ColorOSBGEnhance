@@ -5,8 +5,10 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import com.frostwork.bgenhance.BridgeContract;
+import com.frostwork.bgenhance.BuildConfig;
 import com.frostwork.bgenhance.DiagnosticsTargetIds;
 import com.frostwork.bgenhance.HookTargetIds;
+import com.frostwork.bgenhance.ModuleRuntimeStatus;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
 import java.util.Arrays;
 import java.util.Collections;
@@ -20,10 +22,11 @@ public final class HomeDiagnosticsStatusTest {
         HomeDiagnosticsStatus status = HomeDiagnosticsStatus.evaluate(
                 Collections.singletonList(process(
                         BridgeContract.PROCESS_SYSTEM_SERVER,
-                        "FEATURES_INSTALLED",
+                        currentStage(),
                         "older-boot")),
                 CURRENT_BOOT,
-                7);
+                7,
+                BuildConfig.VERSION_CODE);
 
         assertEquals(HomeDiagnosticsStatus.Activation.INACTIVE, status.activation);
         assertFalse(status.systemProcessReady);
@@ -34,9 +37,9 @@ public final class HomeDiagnosticsStatusTest {
         HomeDiagnosticsStatus status = HomeDiagnosticsStatus.evaluate(
                 Arrays.asList(
                         process(BridgeContract.PROCESS_SYSTEM_SERVER,
-                                "FEATURES_INSTALLED", CURRENT_BOOT),
+                                currentStage(), CURRENT_BOOT),
                         process(BridgeContract.PROCESS_ATHENA,
-                                "FEATURES_INSTALLED", CURRENT_BOOT),
+                                currentStage(), CURRENT_BOOT),
                         config(BridgeContract.PROCESS_SYSTEM_SERVER, 8),
                         config(BridgeContract.PROCESS_ATHENA, 8),
                         hook(HookTargetIds.OGUARD_KILL, "INSTALLED:1"),
@@ -44,7 +47,8 @@ public final class HomeDiagnosticsStatusTest {
                         hook(HookTargetIds.ATHENA_PERIODIC, "INSTALLED:1"),
                         hook(HookTargetIds.ATHENA_PERIODIC, "INSTALLED:duplicate")),
                 CURRENT_BOOT,
-                8);
+                8,
+                BuildConfig.VERSION_CODE);
 
         assertEquals(HomeDiagnosticsStatus.Activation.ACTIVE, status.activation);
         assertEquals(3, status.installedPrimaryHooks);
@@ -60,7 +64,8 @@ public final class HomeDiagnosticsStatusTest {
                         "ENTRY_LOADED",
                         CURRENT_BOOT)),
                 CURRENT_BOOT,
-                1);
+                1,
+                BuildConfig.VERSION_CODE);
 
         assertEquals(HomeDiagnosticsStatus.Activation.PARTIAL, status.activation);
         assertFalse(status.systemProcessReady);
@@ -79,10 +84,41 @@ public final class HomeDiagnosticsStatusTest {
                                 .bootId(CURRENT_BOOT)
                                 .build()),
                 CURRENT_BOOT,
-                7);
+                7,
+                BuildConfig.VERSION_CODE);
 
         assertFalse(status.systemConfigSynced);
         assertFalse(status.athenaConfigSynced);
+    }
+
+    @Test
+    public void legacyOrDifferentModuleVersionRequiresRestart() {
+        HomeDiagnosticsStatus legacy = HomeDiagnosticsStatus.evaluate(
+                Collections.singletonList(process(
+                        BridgeContract.PROCESS_SYSTEM_SERVER,
+                        "FEATURES_INSTALLED",
+                        CURRENT_BOOT)),
+                CURRENT_BOOT,
+                1,
+                BuildConfig.VERSION_CODE);
+        HomeDiagnosticsStatus differentVersion = HomeDiagnosticsStatus.evaluate(
+                Collections.singletonList(process(
+                        BridgeContract.PROCESS_SYSTEM_SERVER,
+                        ModuleRuntimeStatus.featuresInstalled(BuildConfig.VERSION_CODE + 1),
+                        CURRENT_BOOT)),
+                CURRENT_BOOT,
+                1,
+                BuildConfig.VERSION_CODE);
+
+        assertEquals(HomeDiagnosticsStatus.Activation.PARTIAL, legacy.activation);
+        assertFalse(legacy.systemProcessReady);
+        assertEquals(HomeDiagnosticsStatus.Activation.PARTIAL,
+                differentVersion.activation);
+        assertFalse(differentVersion.systemProcessReady);
+    }
+
+    private static String currentStage() {
+        return ModuleRuntimeStatus.featuresInstalled(BuildConfig.VERSION_CODE);
     }
 
     private static DiagnosticsHookState process(

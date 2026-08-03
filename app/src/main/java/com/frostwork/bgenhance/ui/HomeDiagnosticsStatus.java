@@ -3,6 +3,7 @@ package com.frostwork.bgenhance.ui;
 import com.frostwork.bgenhance.BridgeContract;
 import com.frostwork.bgenhance.DiagnosticsTargetIds;
 import com.frostwork.bgenhance.HookTargetIds;
+import com.frostwork.bgenhance.ModuleRuntimeStatus;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
 import java.util.HashSet;
 import java.util.List;
@@ -43,7 +44,8 @@ final class HomeDiagnosticsStatus {
     static HomeDiagnosticsStatus evaluate(
             List<DiagnosticsHookState> rows,
             String currentBootId,
-            int localConfigRevision) {
+            int localConfigRevision,
+            int localModuleVersionCode) {
         boolean hasCurrentRows = false;
         boolean systemReady = false;
         boolean athenaReady = false;
@@ -56,7 +58,8 @@ final class HomeDiagnosticsStatus {
                 if (row == null || !currentBootId.equals(row.bootId)) continue;
                 hasCurrentRows = true;
                 if (DiagnosticsTargetIds.RUNTIME_PROCESS.equals(row.hookTargetId)) {
-                    boolean ready = "FEATURES_INSTALLED".equals(row.installStatus);
+                    boolean ready = ModuleRuntimeStatus.isCurrentVersion(
+                            row.installStatus, localModuleVersionCode);
                     if (BridgeContract.PROCESS_SYSTEM_SERVER.equals(row.processId)) {
                         systemReady |= ready;
                     } else if (BridgeContract.PROCESS_ATHENA.equals(row.processId)) {

@@ -1,6 +1,7 @@
 package com.frostwork.bgenhance.ui.residency;
 
 import com.frostwork.bgenhance.BridgeContract;
+import com.frostwork.bgenhance.BuildConfig;
 import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.R;
 import com.frostwork.bgenhance.ui.HookStatusViewModel;
@@ -43,9 +44,14 @@ final class ResidencyApplyStatus {
             return R.string.effect_runtime_unavailable;
         }
 
-        boolean systemReported = state.hasProcessReport(BridgeContract.PROCESS_SYSTEM_SERVER);
-        boolean athenaReported = state.hasProcessReport(BridgeContract.PROCESS_ATHENA);
-        if (!serviceConnected && !systemReported && !athenaReported) {
+        boolean anySystemReport = state.hasProcessReport(
+                BridgeContract.PROCESS_SYSTEM_SERVER);
+        boolean anyAthenaReport = state.hasProcessReport(BridgeContract.PROCESS_ATHENA);
+        boolean systemReported = state.hasCurrentProcess(
+                BridgeContract.PROCESS_SYSTEM_SERVER, BuildConfig.VERSION_CODE);
+        boolean athenaReported = state.hasCurrentProcess(
+                BridgeContract.PROCESS_ATHENA, BuildConfig.VERSION_CODE);
+        if (!serviceConnected && !anySystemReport && !anyAthenaReport) {
             return R.string.residency_apply_after_activation;
         }
         if (!systemReported || !athenaReported) {

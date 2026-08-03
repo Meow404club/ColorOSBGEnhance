@@ -37,6 +37,10 @@ android {
         unitTests.isIncludeAndroidResources = true
     }
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     packaging {
         resources {
             merges += "META-INF/xposed/*"

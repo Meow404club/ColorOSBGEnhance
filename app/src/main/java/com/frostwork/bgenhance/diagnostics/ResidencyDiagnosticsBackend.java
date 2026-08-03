@@ -7,6 +7,7 @@ import com.frostwork.bgenhance.DiagnosticsResult;
 import com.frostwork.bgenhance.DiagnosticsTargetIds;
 import com.frostwork.bgenhance.FeatureIds;
 import com.frostwork.bgenhance.HookTargetIds;
+import com.frostwork.bgenhance.ModuleRuntimeStatus;
 import com.frostwork.bgenhance.residency.decision.DecisionReason;
 import com.frostwork.bgenhance.residency.model.FreezeSource;
 import com.frostwork.bgenhance.residency.model.ResidencyMode;
@@ -1183,6 +1184,9 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 || "BOOTSTRAP_FAILED".equals(normalized)
                 || "CONFIG_READY".equals(normalized)
                 || "CONFIG_ERROR".equals(normalized)) return normalized;
+        if (ModuleRuntimeStatus.isFeaturesInstalled(normalized)) {
+            return "FEATURES_INSTALLED";
+        }
         if (normalized.startsWith("INSTALLED")) return "INSTALLED";
         if (normalized.startsWith("FAILED")) return "FAILED";
         if (normalized.startsWith("UNSUPPORTED")) return "UNSUPPORTED";

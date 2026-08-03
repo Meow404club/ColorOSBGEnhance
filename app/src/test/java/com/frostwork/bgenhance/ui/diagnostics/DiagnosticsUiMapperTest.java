@@ -1,5 +1,6 @@
 package com.frostwork.bgenhance.ui.diagnostics;
 
+import com.frostwork.bgenhance.BuildConfig;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -7,6 +8,7 @@ import static org.junit.Assert.assertTrue;
 import com.frostwork.bgenhance.DiagnosticsResult;
 import com.frostwork.bgenhance.DiagnosticsTargetIds;
 import com.frostwork.bgenhance.HookTargetIds;
+import com.frostwork.bgenhance.ModuleRuntimeStatus;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
 import java.util.Arrays;
@@ -142,13 +144,13 @@ public final class DiagnosticsUiMapperTest {
                         "old_boot", "INSTALLED:old", 200L),
                 hookState(DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
                         DiagnosticsTargetIds.RUNTIME_PROCESS,
-                        "current_boot", "FEATURES_INSTALLED", 7L),
+                        "current_boot", currentStage(), 7L),
                 hookState(DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
                         DiagnosticsTargetIds.RUNTIME_CONFIG,
                         "current_boot", "CONFIG_READY", 8L),
                 hookState(DiagnosticsHookCatalog.PROCESS_ATHENA,
                         DiagnosticsTargetIds.RUNTIME_PROCESS,
-                        "current_boot", "FEATURES_INSTALLED", 9L),
+                        "current_boot", currentStage(), 9L),
                 hookState(DiagnosticsHookCatalog.PROCESS_ATHENA,
                         DiagnosticsTargetIds.RUNTIME_CONFIG,
                         "current_boot", "CONFIG_READY", 10L));
@@ -193,6 +195,30 @@ public final class DiagnosticsUiMapperTest {
                 DiagnosticsTargetIds.RUNTIME_PROCESS);
 
         assertEquals(DiagnosticsUiMapper.HookStatus.PENDING, row.status);
+    }
+
+    @Test
+    public void runtimeFromAnotherModuleVersionRemainsPending() {
+        DiagnosticsHookState stale = hookState(
+                DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                DiagnosticsTargetIds.RUNTIME_PROCESS,
+                "current_boot",
+                ModuleRuntimeStatus.featuresInstalled(BuildConfig.VERSION_CODE + 1),
+                0L);
+
+        DiagnosticsUiMapper.HookTargetRow row = findHook(
+                mapper.mapHookTargets(
+                        DiagnosticsDataSource.HookStatePage.success(
+                                Collections.singletonList(stale)),
+                        "current_boot"),
+                DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                DiagnosticsTargetIds.RUNTIME_PROCESS);
+
+        assertEquals(DiagnosticsUiMapper.HookStatus.PENDING, row.status);
+    }
+
+    private static String currentStage() {
+        return ModuleRuntimeStatus.featuresInstalled(BuildConfig.VERSION_CODE);
     }
 
     private static DiagnosticsUiMapper.HookTargetRow findHook(

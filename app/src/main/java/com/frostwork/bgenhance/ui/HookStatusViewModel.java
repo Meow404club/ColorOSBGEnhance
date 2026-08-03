@@ -3,6 +3,7 @@ package com.frostwork.bgenhance.ui;
 import android.content.Context;
 import com.frostwork.bgenhance.DiagnosticsTargetIds;
 import com.frostwork.bgenhance.ModuleApplication;
+import com.frostwork.bgenhance.ModuleRuntimeStatus;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
 import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
@@ -92,6 +93,19 @@ public final class HookStatusViewModel implements AutoCloseable {
             for (DiagnosticsHookState row : rows) {
                 if (same(processId, row.processId)
                         && DiagnosticsTargetIds.RUNTIME_PROCESS.equals(row.hookTargetId)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public boolean hasCurrentProcess(String processId, int localModuleVersionCode) {
+            if (status != Status.READY) return false;
+            for (DiagnosticsHookState row : rows) {
+                if (same(processId, row.processId)
+                        && DiagnosticsTargetIds.RUNTIME_PROCESS.equals(row.hookTargetId)
+                        && ModuleRuntimeStatus.isCurrentVersion(
+                                row.installStatus, localModuleVersionCode)) {
                     return true;
                 }
             }

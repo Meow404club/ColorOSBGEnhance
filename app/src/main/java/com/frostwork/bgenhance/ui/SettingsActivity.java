@@ -5,6 +5,7 @@ import android.os.Bundle;
 import android.view.View;
 import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
+import com.frostwork.bgenhance.BuildConfig;
 import com.frostwork.bgenhance.ModuleApplication;
 import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
@@ -236,7 +237,8 @@ public final class SettingsActivity extends AppCompatActivity {
         HomeDiagnosticsStatus status = HomeDiagnosticsStatus.evaluate(
                 state.hookStates.items,
                 ModuleApplication.diagnosticsBootId(),
-                localRevision);
+                localRevision,
+                BuildConfig.VERSION_CODE);
         if (status.activation == HomeDiagnosticsStatus.Activation.ACTIVE) {
             statusTitle.setText(R.string.status_active);
             statusSummary.setText(status.installedPrimaryHooks == 4

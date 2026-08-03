@@ -1,6 +1,8 @@
 package com.frostwork.bgenhance.ui.diagnostics;
 
+import com.frostwork.bgenhance.BuildConfig;
 import com.frostwork.bgenhance.DiagnosticsResult;
+import com.frostwork.bgenhance.ModuleRuntimeStatus;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
 import java.util.ArrayList;
@@ -301,8 +303,9 @@ public final class DiagnosticsUiMapper {
 
     private static HookStatus hookStatus(String installStatus) {
         String value = installStatus == null ? "" : installStatus;
-        if (value.startsWith("FEATURES_INSTALLED")
+        if (ModuleRuntimeStatus.isCurrentVersion(value, BuildConfig.VERSION_CODE)
                 || value.startsWith("CONFIG_READY")) return HookStatus.READY;
+        if (value.startsWith("FEATURES_INSTALLED")) return HookStatus.PENDING;
         if (value.startsWith("ENTRY_LOADED")) return HookStatus.PENDING;
         if (value.startsWith("INSTALLED")) return HookStatus.INSTALLED;
         if (value.startsWith("FAILED")

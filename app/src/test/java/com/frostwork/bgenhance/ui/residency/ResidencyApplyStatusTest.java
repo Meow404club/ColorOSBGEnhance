@@ -4,7 +4,9 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 
 import com.frostwork.bgenhance.BridgeContract;
+import com.frostwork.bgenhance.BuildConfig;
 import com.frostwork.bgenhance.DiagnosticsTargetIds;
+import com.frostwork.bgenhance.ModuleRuntimeStatus;
 import com.frostwork.bgenhance.R;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
@@ -71,6 +73,19 @@ public final class ResidencyApplyStatusTest {
                 ResidencyApplyStatus.message(ready(oneProcess), true, 7));
     }
 
+    @Test
+    public void processLoadedFromAnOlderModuleVersionRequiresRestart() {
+        List<DiagnosticsHookState> rows = completeRows(7);
+        rows.removeIf(row -> BridgeContract.PROCESS_SYSTEM_SERVER.equals(row.processId)
+                && DiagnosticsTargetIds.RUNTIME_PROCESS.equals(row.hookTargetId));
+        rows.add(process(
+                BridgeContract.PROCESS_SYSTEM_SERVER,
+                ModuleRuntimeStatus.featuresInstalled(BuildConfig.VERSION_CODE + 1)));
+
+        assertEquals(R.string.residency_apply_after_restart,
+                ResidencyApplyStatus.message(ready(rows), true, 7));
+    }
+
     private static List<DiagnosticsHookState> completeRows(int revision) {
         ArrayList<DiagnosticsHookState> rows = new ArrayList<>();
         rows.add(process(BridgeContract.PROCESS_SYSTEM_SERVER));
@@ -96,10 +111,15 @@ public final class ResidencyApplyStatusTest {
     }
 
     private static DiagnosticsHookState process(String processId) {
+        return process(processId,
+                ModuleRuntimeStatus.featuresInstalled(BuildConfig.VERSION_CODE));
+    }
+
+    private static DiagnosticsHookState process(String processId, String installStatus) {
         return DiagnosticsHookState.builder()
                 .processId(processId)
                 .hookTargetId(DiagnosticsTargetIds.RUNTIME_PROCESS)
-                .installStatus("FEATURES_INSTALLED")
+                .installStatus(installStatus)
                 .bootId(CURRENT_BOOT)
                 .build();
     }

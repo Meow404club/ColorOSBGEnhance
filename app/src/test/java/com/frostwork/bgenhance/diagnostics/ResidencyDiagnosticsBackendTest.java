@@ -12,6 +12,7 @@ import com.frostwork.bgenhance.BridgeContract;
 import com.frostwork.bgenhance.DiagnosticsTargetIds;
 import com.frostwork.bgenhance.FeatureIds;
 import com.frostwork.bgenhance.HookTargetIds;
+import com.frostwork.bgenhance.ModuleRuntimeStatus;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -808,7 +809,9 @@ public final class ResidencyDiagnosticsBackendTest {
                     .hookTargetId(index < 2
                             ? DiagnosticsTargetIds.RUNTIME_PROCESS
                             : "hook-target-" + index)
-                    .installStatus(index < 2 ? "FEATURES_INSTALLED" : "INSTALLED")
+                    .installStatus(index < 2
+                            ? ModuleRuntimeStatus.featuresInstalled(5)
+                            : "INSTALLED")
                     .bootId(index < 2 ? "boot" : "old-boot")
                     .updatedAt(index + 1L)
                     .build());
