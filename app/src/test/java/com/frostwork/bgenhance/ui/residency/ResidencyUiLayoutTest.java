@@ -72,6 +72,17 @@ public final class ResidencyUiLayoutTest {
     }
 
     @Test
+    public void applyNoticeDoesNotPromiseImmediateApplicationBeforeStatusLoads() {
+        ContextThemeWrapper context = themedContext();
+        View root = inflate(context, R.layout.activity_residency_policy);
+        android.widget.TextView notice = root.findViewById(
+                R.id.residency_policy_apply_notice);
+
+        assertEquals(context.getString(R.string.status_checking_summary),
+                notice.getText().toString());
+    }
+
+    @Test
     public void landscapeLayoutsKeepListsAndImportActionsVisibleAtDoubleFontScale() {
         ContextThemeWrapper context = landscapeContext(2f);
         assertListHasSpace(context, R.layout.activity_residency_apps, R.id.residency_app_list);

@@ -6,7 +6,6 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
-import com.frostwork.bgenhance.DiagnosticsStore;
 import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
 import com.google.android.material.card.MaterialCardView;
@@ -22,6 +21,8 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
     private String group;
     private LinearLayout container;
     private boolean masterEnabled;
+    private HookStatusViewModel hookStatusViewModel;
+    private HookStatusViewModel.State hookStatus;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -36,6 +37,11 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
         ((TextView) findViewById(R.id.page_title)).setText(FeatureCatalog.titleForGroup(group));
         ((TextView) findViewById(R.id.page_subtitle)).setText(FeatureCatalog.subtitleForGroup(group));
         container = findViewById(R.id.card_container);
+        hookStatusViewModel = HookStatusViewModel.create(this);
+        hookStatusViewModel.setListener(state -> {
+            hookStatus = state;
+            buildRows();
+        });
         buildRows();
     }
 
@@ -44,7 +50,17 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
         super.onResume();
         if (!ensureCustomMode()) return;
         ModuleSettings.notifyConfigChanged(this);
+        if (hookStatusViewModel != null) {
+            hookStatusViewModel.refresh();
+            hookStatus = hookStatusViewModel.state();
+        }
         buildRows();
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (hookStatusViewModel != null) hookStatusViewModel.close();
+        super.onDestroy();
     }
 
     private void buildRows() {
@@ -103,8 +119,9 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
             FeatureCatalog.FeatureSpec spec = specs.get(i);
             SettingSwitchRow row = new SettingSwitchRow(this);
             row.bind(spec, ModuleSettings.getLocalBoolean(this, spec.prefKey));
-            String status = DiagnosticsStore.getSupportStatus(this, spec.hookTargetId);
-            boolean unsupported = status.startsWith("UNSUPPORTED") || status.startsWith("FAILED");
+            boolean unsupported = hookStatus != null
+                    && hookStatus.status() == HookStatusViewModel.Status.READY
+                    && hookStatus.isExplicitlyUnavailable(spec.hookTargetId);
             if (spec.diagnosticOnly) row.showDiagnosticOnly();
             else if (unsupported) row.showUnsupported();
             else row.setRowEnabled(masterEnabled);

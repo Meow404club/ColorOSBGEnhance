@@ -8,9 +8,6 @@ import android.widget.RadioGroup;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
-import com.frostwork.bgenhance.BridgeContract;
-import com.frostwork.bgenhance.DiagnosticsStore;
-import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.ModuleApplication;
 import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
@@ -25,6 +22,7 @@ import com.frostwork.bgenhance.residency.model.WakeChannelPolicy;
 import com.frostwork.bgenhance.residency.model.WakeMode;
 import com.frostwork.bgenhance.residency.model.WakePolicy;
 import com.frostwork.bgenhance.residency.model.WakeSource;
+import com.frostwork.bgenhance.ui.HookStatusViewModel;
 import com.frostwork.bgenhance.ui.UiUtils;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.button.MaterialButtonToggleGroup;
@@ -42,27 +40,10 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
     public static final String EXTRA_PACKAGE_NAME = "package_name";
     private static final String STATE_SELECTED_MODE = "selected_mode";
     private static final String STATE_FORM_READY = "form_ready";
-    private static final String[] REQUIRED_RESIDENCY_HOOKS = {
-            HookTargetIds.ATHENA_PERIODIC,
-            HookTargetIds.OGUARD_KILL,
-            HookTargetIds.OGUARD_FORCE_STOP,
-            HookTargetIds.FAST_CLEAR_DISPATCH,
-            HookTargetIds.TOURNAMENT,
-            HookTargetIds.MEMORY_GUARD_DISPATCH,
-            HookTargetIds.OSENSE_PROCESS_KILL,
-            HookTargetIds.HANS_FREEZE_DISPATCH,
-            HookTargetIds.HANS_FAST_FREEZE_DISPATCH,
-            HookTargetIds.HANS_WAKE_DISPATCH,
-            HookTargetIds.ALARM_WAKE_DELIVERY,
-            HookTargetIds.HANS_RESOURCE_DISPATCH,
-            HookTargetIds.HANS_R_TO_M_TIMING,
-            HookTargetIds.HANS_M_TO_F_TIMING,
-            HookTargetIds.HANS_LCD_ON_EXEMPTION,
-            HookTargetIds.HANS_ACTIVE_RECOVERY
-    };
-
     private String packageName;
     private ResidencyPolicyViewModel viewModel;
+    private HookStatusViewModel hookStatusViewModel;
+    private HookStatusViewModel.State hookStatus;
     private ResidencyAppIconLoader iconLoader;
     private ResidencyPolicyDraft loadedDraft;
     private ResidencyAppItem app;
@@ -108,6 +89,13 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
         UiUtils.applyWindowStyle(this);
         iconLoader = new ResidencyAppIconLoader(this);
         bindViews();
+        hookStatusViewModel = HookStatusViewModel.create(this);
+        hookStatusViewModel.setListener(state -> {
+            hookStatus = state;
+            updateApplyNotice();
+        });
+        hookStatus = hookStatusViewModel.state();
+        updateApplyNotice();
         viewModel = new ResidencyPolicyViewModel(getApplicationContext(), packageName);
         viewModel.setListener(this::render);
         bindInteractions();
@@ -117,6 +105,7 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         if (viewModel != null) viewModel.close();
+        if (hookStatusViewModel != null) hookStatusViewModel.close();
         if (iconLoader != null) iconLoader.close();
         super.onDestroy();
     }
@@ -124,6 +113,10 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (hookStatusViewModel != null) {
+            hookStatusViewModel.refresh();
+            hookStatus = hookStatusViewModel.state();
+        }
         updateApplyNotice();
     }
 
@@ -433,39 +426,10 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
 
     private void updateApplyNotice() {
         if (applyNotice == null) return;
-        DiagnosticsStore.ProcessSnapshot system = DiagnosticsStore.getProcess(
-                this, BridgeContract.PROCESS_SYSTEM_SERVER);
-        DiagnosticsStore.ProcessSnapshot athena = DiagnosticsStore.getProcess(
-                this, BridgeContract.PROCESS_ATHENA);
-        boolean systemCurrent = system.isCurrentBoot(this);
-        boolean athenaCurrent = athena.isCurrentBoot(this);
-        int message;
-        if (!ModuleApplication.isServiceConnected() && !systemCurrent && !athenaCurrent) {
-            message = R.string.residency_apply_after_activation;
-        } else if (!systemCurrent || !athenaCurrent) {
-            message = R.string.residency_apply_after_restart;
-        } else if (!ModuleApplication.isServiceConnected()) {
-            message = R.string.residency_apply_sync_unavailable;
-        } else {
-            int revision = ModuleSettings.getConfigRevision(this);
-            if (system.configRevision < revision || athena.configRevision < revision) {
-                message = R.string.residency_apply_sync_pending;
-            } else if (!allResidencyHooksInstalled()) {
-                message = R.string.residency_apply_partial;
-            } else {
-                message = R.string.residency_apply_without_restart;
-            }
-        }
-        applyNotice.setText(message);
-    }
-
-    private boolean allResidencyHooksInstalled() {
-        for (String target : REQUIRED_RESIDENCY_HOOKS) {
-            if (!DiagnosticsStore.getSupportStatus(this, target).startsWith("INSTALLED")) {
-                return false;
-            }
-        }
-        return true;
+        applyNotice.setText(ResidencyApplyStatus.message(
+                hookStatus,
+                ModuleApplication.isServiceConnected(),
+                ModuleSettings.getConfigRevision(this)));
     }
 
     private void save() {

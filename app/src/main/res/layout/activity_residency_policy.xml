@@ -357,7 +357,7 @@
                     android:layout_marginTop="@dimen/card_spacing"
                     android:background="@color/brand_soft"
                     android:padding="14dp"
-                    android:text="@string/residency_apply_without_restart"
+                    android:text="@string/status_checking_summary"
                     android:textColor="@color/item_title"
                     android:textSize="14sp" />
 
