@@ -51,4 +51,16 @@ public final class HookTargetIds {
     public static List<String> all() {
         return ALL;
     }
+
+    /** Process that owns the physical Hook target, or an empty value for an unknown target. */
+    public static String expectedProcessId(String hookTargetId) {
+        if (!ALL.contains(hookTargetId)) return "";
+        if (ATHENA_PERIODIC.equals(hookTargetId)
+                || FAST_CLEAR_DISPATCH.equals(hookTargetId)
+                || TOURNAMENT.equals(hookTargetId)
+                || MEMORY_GUARD_DISPATCH.equals(hookTargetId)) {
+            return BridgeContract.PROCESS_ATHENA;
+        }
+        return BridgeContract.PROCESS_SYSTEM_SERVER;
+    }
 }

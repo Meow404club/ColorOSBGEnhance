@@ -50,7 +50,10 @@ public final class DiagnosticsHookCatalogTest {
                     ? DiagnosticsHookCatalog.PROCESS_ATHENA
                     : DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER;
             assertEquals(expectedProcess, entry.expectedProcessId);
+            assertEquals(expectedProcess,
+                    HookTargetIds.expectedProcessId(entry.hookTargetId));
         }
+        assertEquals("", HookTargetIds.expectedProcessId("unknown_target"));
     }
 
     @Test

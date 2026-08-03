@@ -17,8 +17,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -36,6 +38,8 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
     public static final int EXPORT_FORMAT_VERSION = 2;
     private static final String UNKNOWN_EXPORTED_VALUE = "unknown";
     private static final int MAX_PENDING_COMMANDS = 64;
+    private static final Set<String> EXPECTED_CURRENT_BOOT_STATE_IDENTITIES =
+            expectedCurrentBootStateIdentities();
 
     private final DiagnosticsRetentionPolicy policy;
     private final StorageFactory storageFactory;
@@ -929,9 +933,12 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
         int otherRows = 0;
         boolean systemServerReported = false;
         boolean athenaReported = false;
+        LinkedHashSet<String> currentIdentities = new LinkedHashSet<>();
         for (DiagnosticsHookState state : hookStates) {
             if (identityAvailable && currentBootId.equals(state.bootId)) {
                 currentRows++;
+                currentIdentities.add(hookStateIdentity(
+                        state.processId, state.hookTargetId));
                 if (DiagnosticsTargetIds.RUNTIME_PROCESS.equals(state.hookTargetId)) {
                     systemServerReported |= BridgeContract.PROCESS_SYSTEM_SERVER.equals(
                             state.processId);
@@ -941,12 +948,14 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 otherRows++;
             }
         }
-        int expectedRows = HookTargetIds.all().size() + 4;
+        int expectedRows = EXPECTED_CURRENT_BOOT_STATE_IDENTITIES.size();
         boolean coverageComplete = !hookStatus.truncated
                 && hookStatus.errorCode.isEmpty()
                 && currentRows >= expectedRows
                 && systemServerReported
-                && athenaReported;
+                && athenaReported
+                && currentIdentities.containsAll(
+                        EXPECTED_CURRENT_BOOT_STATE_IDENTITIES);
         return new DiagnosticsQuery.ExportBootStatus(
                 identityAvailable,
                 includeSensitiveDetails,
@@ -957,6 +966,31 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 systemServerReported,
                 athenaReported,
                 coverageComplete);
+    }
+
+    private static Set<String> expectedCurrentBootStateIdentities() {
+        LinkedHashSet<String> identities = new LinkedHashSet<>();
+        for (String target : HookTargetIds.all()) {
+            String processId = HookTargetIds.expectedProcessId(target);
+            if (processId.isEmpty()) {
+                throw new IllegalStateException("Hook target process is unavailable");
+            }
+            identities.add(hookStateIdentity(processId, target));
+        }
+        for (String processId : new String[] {
+                BridgeContract.PROCESS_SYSTEM_SERVER,
+                BridgeContract.PROCESS_ATHENA }) {
+            identities.add(hookStateIdentity(
+                    processId, DiagnosticsTargetIds.RUNTIME_PROCESS));
+            identities.add(hookStateIdentity(
+                    processId, DiagnosticsTargetIds.RUNTIME_CONFIG));
+        }
+        return Collections.unmodifiableSet(identities);
+    }
+
+    private static String hookStateIdentity(String processId, String hookTargetId) {
+        return DiagnosticsValues.id(processId) + '\n'
+                + DiagnosticsValues.id(hookTargetId);
     }
 
     private static int safeIncrement(int value) {

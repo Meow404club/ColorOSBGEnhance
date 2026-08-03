@@ -876,34 +876,7 @@ public final class ResidencyDiagnosticsBackendTest {
     public void currentBootCoverageRequiresAllExpectedRowsAndBothProcesses()
             throws Exception {
         FakeStorage storage = new FakeStorage();
-        for (String target : HookTargetIds.all()) {
-            storage.hookStates.add(DiagnosticsHookState.builder()
-                    .processId(BridgeContract.PROCESS_SYSTEM_SERVER)
-                    .featureId(FeatureIds.HANS)
-                    .hookTargetId(target)
-                    .installStatus("INSTALLED")
-                    .bootId("boot")
-                    .updatedAt(1L)
-                    .build());
-        }
-        for (String processId : Arrays.asList(
-                BridgeContract.PROCESS_SYSTEM_SERVER,
-                BridgeContract.PROCESS_ATHENA)) {
-            storage.hookStates.add(DiagnosticsHookState.builder()
-                    .processId(processId)
-                    .hookTargetId(DiagnosticsTargetIds.RUNTIME_PROCESS)
-                    .installStatus("FEATURES_INSTALLED")
-                    .bootId("boot")
-                    .updatedAt(2L)
-                    .build());
-            storage.hookStates.add(DiagnosticsHookState.builder()
-                    .processId(processId)
-                    .hookTargetId(DiagnosticsTargetIds.RUNTIME_CONFIG)
-                    .installStatus("CONFIG_READY")
-                    .bootId("boot")
-                    .updatedAt(3L)
-                    .build());
-        }
+        addExpectedCurrentBootRows(storage);
         ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 2, 60_000L));
 
         DiagnosticsQuery.ExportSnapshot snapshot = backend.exportAsync(
@@ -915,6 +888,57 @@ public final class ResidencyDiagnosticsBackendTest {
         assertTrue(snapshot.exportStatus.currentBoot.systemServerReported);
         assertTrue(snapshot.exportStatus.currentBoot.athenaReported);
         assertTrue(snapshot.exportStatus.currentBoot.hookStateCoverageComplete);
+    }
+
+    @Test
+    public void unknownTargetCannotReplaceMissingExpectedCurrentBootTarget()
+            throws Exception {
+        FakeStorage storage = new FakeStorage();
+        addExpectedCurrentBootRows(storage);
+        removeExpectedTarget(storage, HookTargetIds.HANS_ACTIVE_RECOVERY);
+        storage.hookStates.add(DiagnosticsHookState.builder()
+                .processId(BridgeContract.PROCESS_SYSTEM_SERVER)
+                .featureId(FeatureIds.HANS)
+                .hookTargetId("unknown_replacement")
+                .installStatus("INSTALLED")
+                .bootId("boot")
+                .updatedAt(4L)
+                .build());
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 2, 60_000L));
+
+        DiagnosticsQuery.ExportSnapshot snapshot = backend.exportAsync(
+                DiagnosticsQuery.ExportOptions.fullReport(),
+                FeatureIds.all()).get(5, TimeUnit.SECONDS);
+
+        assertEquals(22, snapshot.exportStatus.currentBoot.currentBootHookStateCount);
+        assertTrue(snapshot.exportStatus.currentBoot.systemServerReported);
+        assertTrue(snapshot.exportStatus.currentBoot.athenaReported);
+        assertFalse(snapshot.exportStatus.currentBoot.hookStateCoverageComplete);
+    }
+
+    @Test
+    public void duplicateIdentityCannotReplaceMissingExpectedCurrentBootTarget()
+            throws Exception {
+        FakeStorage storage = new FakeStorage();
+        addExpectedCurrentBootRows(storage);
+        removeExpectedTarget(storage, HookTargetIds.HANS_ACTIVE_RECOVERY);
+        storage.hookStates.add(DiagnosticsHookState.builder()
+                .processId(HookTargetIds.expectedProcessId(
+                        HookTargetIds.HANS_FREEZE_DISPATCH))
+                .featureId(FeatureIds.HANS)
+                .hookTargetId(HookTargetIds.HANS_FREEZE_DISPATCH)
+                .installStatus("INSTALLED")
+                .bootId("boot")
+                .updatedAt(4L)
+                .build());
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 2, 60_000L));
+
+        DiagnosticsQuery.ExportSnapshot snapshot = backend.exportAsync(
+                DiagnosticsQuery.ExportOptions.fullReport(),
+                FeatureIds.all()).get(5, TimeUnit.SECONDS);
+
+        assertEquals(22, snapshot.exportStatus.currentBoot.currentBootHookStateCount);
+        assertFalse(snapshot.exportStatus.currentBoot.hookStateCoverageComplete);
     }
 
     @Test
@@ -990,6 +1014,44 @@ public final class ResidencyDiagnosticsBackendTest {
         close.get(5, TimeUnit.SECONDS);
         assertTrue(storage.closed);
         assertSame(close, backend.closeAsync());
+    }
+
+    private static void addExpectedCurrentBootRows(FakeStorage storage) {
+        for (String target : HookTargetIds.all()) {
+            storage.hookStates.add(DiagnosticsHookState.builder()
+                    .processId(HookTargetIds.expectedProcessId(target))
+                    .featureId(FeatureIds.HANS)
+                    .hookTargetId(target)
+                    .installStatus("INSTALLED")
+                    .bootId("boot")
+                    .updatedAt(1L)
+                    .build());
+        }
+        for (String processId : Arrays.asList(
+                BridgeContract.PROCESS_SYSTEM_SERVER,
+                BridgeContract.PROCESS_ATHENA)) {
+            storage.hookStates.add(DiagnosticsHookState.builder()
+                    .processId(processId)
+                    .hookTargetId(DiagnosticsTargetIds.RUNTIME_PROCESS)
+                    .installStatus("FEATURES_INSTALLED")
+                    .bootId("boot")
+                    .updatedAt(2L)
+                    .build());
+            storage.hookStates.add(DiagnosticsHookState.builder()
+                    .processId(processId)
+                    .hookTargetId(DiagnosticsTargetIds.RUNTIME_CONFIG)
+                    .installStatus("CONFIG_READY")
+                    .bootId("boot")
+                    .updatedAt(3L)
+                    .build());
+        }
+    }
+
+    private static void removeExpectedTarget(FakeStorage storage, String target) {
+        String processId = HookTargetIds.expectedProcessId(target);
+        assertTrue(storage.hookStates.removeIf(state ->
+                processId.equals(state.processId)
+                        && target.equals(state.hookTargetId)));
     }
 
     private ResidencyDiagnosticsBackend backend(
