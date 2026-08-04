@@ -5,7 +5,6 @@ import static org.junit.Assert.assertNull;
 
 import com.frostwork.bgenhance.DiagnosticsResult;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
-import com.frostwork.bgenhance.diagnostics.RecentBehaviorStats;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -20,9 +19,8 @@ public final class HomeDiagnosticsViewModelTest {
         HomeDiagnosticsViewModel viewModel = viewModel(source, states);
 
         viewModel.load();
-        source.stats.complete(stats(3_000_000_000L, 2_500_000_000L, 2_000_000_000L));
-        source.hooks.complete(new DiagnosticsQuery.HookStatePage(
-                Collections.emptyList(), ""));
+        source.snapshot.complete(snapshot(
+                3_000_000_000L, 2_500_000_000L, 2_000_000_000L));
 
         HomeDiagnosticsViewModel.State state = states.get(states.size() - 1);
         assertEquals(HomeDiagnosticsViewModel.Status.CONTENT, state.status);
@@ -43,14 +41,24 @@ public final class HomeDiagnosticsViewModelTest {
         source.current = second;
         viewModel.load();
 
-        second.stats.complete(stats(9L, 8L, 7L));
-        second.hooks.complete(new DiagnosticsQuery.HookStatePage(
-                Collections.emptyList(), ""));
-        first.stats.complete(stats(1L, 1L, 1L));
-        first.hooks.complete(new DiagnosticsQuery.HookStatePage(
-                Collections.emptyList(), ""));
+        second.snapshot.complete(snapshot(9L, 8L, 7L));
+        first.snapshot.complete(snapshot(1L, 1L, 1L));
 
         assertEquals(9L, states.get(states.size() - 1).stats.observed);
+    }
+
+    @Test
+    public void loadIssuesOneCompositeSnapshotRequest() {
+        Source source = new Source();
+        List<HomeDiagnosticsViewModel.State> states = new ArrayList<>();
+        HomeDiagnosticsViewModel viewModel = viewModel(source, states);
+
+        viewModel.load();
+
+        assertEquals(1, source.requests);
+        source.snapshot.complete(snapshot(1L, 0L, 0L));
+        assertEquals(HomeDiagnosticsViewModel.Status.CONTENT,
+                states.get(states.size() - 1).status);
     }
 
     @Test
@@ -60,10 +68,9 @@ public final class HomeDiagnosticsViewModelTest {
         HomeDiagnosticsViewModel viewModel = viewModel(source, states);
         viewModel.load();
 
-        source.stats.complete(RecentBehaviorStats.empty(
-                "database_unavailable"));
-        source.hooks.complete(new DiagnosticsQuery.HookStatePage(
-                Collections.emptyList(), ""));
+        source.snapshot.complete(new DiagnosticsQuery.HomeDiagnosticsSnapshot(
+                DiagnosticsQuery.AggregatePage.empty("database_unavailable"),
+                new DiagnosticsQuery.HookStatePage(Collections.emptyList(), "")));
 
         HomeDiagnosticsViewModel.State state = states.get(states.size() - 1);
         assertEquals(HomeDiagnosticsViewModel.Status.ERROR, state.status);
@@ -79,9 +86,7 @@ public final class HomeDiagnosticsViewModelTest {
         int beforeClose = states.size();
         viewModel.close();
 
-        source.stats.complete(stats(1L, 0L, 0L));
-        source.hooks.complete(new DiagnosticsQuery.HookStatePage(
-                Collections.emptyList(), ""));
+        source.snapshot.complete(snapshot(1L, 0L, 0L));
 
         assertEquals(beforeClose, states.size());
     }
@@ -94,7 +99,7 @@ public final class HomeDiagnosticsViewModelTest {
         return viewModel;
     }
 
-    private static RecentBehaviorStats stats(
+    private static DiagnosticsQuery.HomeDiagnosticsSnapshot snapshot(
             long observed, long blocked, long failOpen) {
         DiagnosticsQuery.AggregateRow row = new DiagnosticsQuery.AggregateRow(
                 "",
@@ -114,32 +119,31 @@ public final class HomeDiagnosticsViewModelTest {
                 0L,
                 1L,
                 1L);
-        return RecentBehaviorStats.fromAggregateRows(Collections.singletonList(row));
+        DiagnosticsQuery.AggregatePage stats = new DiagnosticsQuery.AggregatePage(
+                Collections.singletonList(row), 0, false, "");
+        DiagnosticsQuery.HookStatePage hooks = new DiagnosticsQuery.HookStatePage(
+                Collections.emptyList(), "");
+        return new DiagnosticsQuery.HomeDiagnosticsSnapshot(stats, hooks);
     }
 
     private static class Source implements HomeDiagnosticsViewModel.Source {
-        final CompletableFuture<RecentBehaviorStats> stats =
+        final CompletableFuture<DiagnosticsQuery.HomeDiagnosticsSnapshot> snapshot =
                 new CompletableFuture<>();
-        final CompletableFuture<DiagnosticsQuery.HookStatePage> hooks =
-                new CompletableFuture<>();
+        int requests;
 
-        @Override public CompletableFuture<RecentBehaviorStats> loadStats() {
-            return stats;
-        }
-
-        @Override public CompletableFuture<DiagnosticsQuery.HookStatePage> loadHookStates() {
-            return hooks;
+        @Override
+        public CompletableFuture<DiagnosticsQuery.HomeDiagnosticsSnapshot> loadSnapshot() {
+            requests++;
+            return snapshot;
         }
     }
 
     private static final class SwitchingSource implements HomeDiagnosticsViewModel.Source {
         volatile Source current;
         SwitchingSource(Source current) { this.current = current; }
-        @Override public CompletableFuture<RecentBehaviorStats> loadStats() {
-            return current.loadStats();
-        }
-        @Override public CompletableFuture<DiagnosticsQuery.HookStatePage> loadHookStates() {
-            return current.loadHookStates();
+        @Override
+        public CompletableFuture<DiagnosticsQuery.HomeDiagnosticsSnapshot> loadSnapshot() {
+            return current.loadSnapshot();
         }
     }
 }

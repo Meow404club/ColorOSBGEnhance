@@ -282,6 +282,21 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 () -> DiagnosticsQuery.HookStatePage.empty("database_unavailable"));
     }
 
+    public CompletableFuture<DiagnosticsQuery.HomeDiagnosticsSnapshot>
+            queryHomeDiagnosticsSnapshotAsync(
+                    DiagnosticsQuery.AggregateQuery statsQuery,
+                    int maxStatsRows,
+                    int hookStateLimit) {
+        int boundedStatsRows = Math.max(1, Math.min(
+                DiagnosticsRetentionPolicy.MAX_AGGREGATE_SNAPSHOT_ROWS, maxStatsRows));
+        int boundedHookStates = Math.max(1, Math.min(512, hookStateLimit));
+        return submitQuery(
+                () -> storage().queryHomeDiagnosticsSnapshot(
+                        statsQuery, boundedStatsRows, boundedHookStates),
+                () -> DiagnosticsQuery.HomeDiagnosticsSnapshot.empty(
+                        "database_unavailable"));
+    }
+
     public CompletableFuture<Long> currentEpochAsync() {
         CompletableFuture<Long> result = new CompletableFuture<>();
         long requestedGeneration;

@@ -48,6 +48,17 @@ interface ResidencyDiagnosticsStorage extends AutoCloseable {
 
     List<DiagnosticsHookState> queryHookStates(int limit);
 
+    default DiagnosticsQuery.HomeDiagnosticsSnapshot queryHomeDiagnosticsSnapshot(
+            DiagnosticsQuery.AggregateQuery statsQuery,
+            int maxStatsRows,
+            int hookStateLimit) {
+        DiagnosticsQuery.AggregatePage behaviorStats =
+                queryAggregateSnapshot(statsQuery, maxStatsRows);
+        DiagnosticsQuery.HookStatePage hookStates = new DiagnosticsQuery.HookStatePage(
+                queryHookStates(hookStateLimit), "");
+        return new DiagnosticsQuery.HomeDiagnosticsSnapshot(behaviorStats, hookStates);
+    }
+
     DiagnosticsQuery.ClearResult clear(DiagnosticsQuery.ClearScope scope);
 
     long currentEpoch();

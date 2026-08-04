@@ -9,6 +9,7 @@ import static org.junit.Assert.assertTrue;
 
 import android.database.sqlite.SQLiteFullException;
 import com.frostwork.bgenhance.BridgeContract;
+import com.frostwork.bgenhance.DiagnosticsResult;
 import com.frostwork.bgenhance.DiagnosticsTargetIds;
 import com.frostwork.bgenhance.FeatureIds;
 import com.frostwork.bgenhance.HookTargetIds;
@@ -581,6 +582,40 @@ public final class ResidencyDiagnosticsBackendTest {
         assertEquals("database_unavailable", hookStates.errorCode);
         assertTrue(backend.health().failedBatches >= 3L);
         assertTrue(backend.health().droppedWrites >= 1L);
+    }
+
+    @Test
+    public void homeDiagnosticsSnapshotCannotBeSplitByAcceptedWrite() throws Exception {
+        FakeStorage storage = new FakeStorage();
+        storage.aggregates.add(aggregate(
+                "freeze", 5L, 3L, 0L, 10L, "pkg", DiagnosticsResult.BLOCKED));
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 4, 60_000L));
+        storage.blockHomeStatsQuery();
+        DiagnosticsQuery.AggregateQuery statsQuery = DiagnosticsQuery.AggregateQuery.builder()
+                .dimension(DiagnosticsQuery.AggregateDimension.BEHAVIOR)
+                .dimension(DiagnosticsQuery.AggregateDimension.RESULT)
+                .build();
+
+        CompletableFuture<DiagnosticsQuery.HomeDiagnosticsSnapshot> pending =
+                backend.queryHomeDiagnosticsSnapshotAsync(statsQuery, 32, 32);
+        assertTrue(storage.homeStatsQueryStarted.await(5, TimeUnit.SECONDS));
+        assertTrue(backend.recordEvent(event("during-snapshot", "pkg", 1)));
+        storage.releaseHomeStatsQueries.countDown();
+
+        DiagnosticsQuery.HomeDiagnosticsSnapshot snapshot =
+                pending.get(5, TimeUnit.SECONDS);
+        backend.flushAsync().get(5, TimeUnit.SECONDS);
+
+        assertEquals(1, snapshot.behaviorStats.items.size());
+        assertEquals(1, storage.homeStatsQueryCalls);
+        assertEquals(1, storage.hookStateQueryCalls);
+        List<String> operations = storage.operationSnapshot();
+        int statsRead = operations.indexOf("home_stats");
+        int hookStatesRead = operations.indexOf("hook_states");
+        int write = operations.indexOf("write");
+        assertTrue(statsRead >= 0);
+        assertTrue(statsRead < hookStatesRead);
+        assertTrue(hookStatesRead < write);
     }
 
     @Test
@@ -1225,6 +1260,8 @@ public final class ResidencyDiagnosticsBackendTest {
         volatile int regularMaintenanceCalls;
         volatile int pressureMaintenanceCalls;
         volatile int queryCalls;
+        volatile int homeStatsQueryCalls;
+        volatile int hookStateQueryCalls;
         volatile String writeThread = "";
         volatile String maintenanceThread = "";
         volatile String migrationReadThread = "";
@@ -1244,6 +1281,8 @@ public final class ResidencyDiagnosticsBackendTest {
         volatile CountDownLatch releaseWrites;
         volatile CountDownLatch queryStarted;
         volatile CountDownLatch releaseQueries;
+        volatile CountDownLatch homeStatsQueryStarted;
+        volatile CountDownLatch releaseHomeStatsQueries;
         volatile CountDownLatch clearStarted;
         volatile CountDownLatch releaseClears;
         volatile DiagnosticsWriteBatch.BatchIdentity lastBatchIdentity;
@@ -1373,6 +1412,23 @@ public final class ResidencyDiagnosticsBackendTest {
         public DiagnosticsQuery.AggregatePage queryAggregateSnapshot(
                 DiagnosticsQuery.AggregateQuery query, int maxRows) {
             if (failQueries) throw new IllegalStateException("query failed");
+            synchronized (this) {
+                homeStatsQueryCalls++;
+                operations.add("home_stats");
+            }
+            CountDownLatch started = homeStatsQueryStarted;
+            CountDownLatch release = releaseHomeStatsQueries;
+            if (started != null && release != null) {
+                started.countDown();
+                try {
+                    if (!release.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("home stats release timed out");
+                    }
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("home stats query interrupted", interrupted);
+                }
+            }
             int limit = Math.max(1, maxRows);
             int end = Math.min(limit, aggregates.size());
             return new DiagnosticsQuery.AggregatePage(
@@ -1400,6 +1456,10 @@ public final class ResidencyDiagnosticsBackendTest {
         @Override
         public List<DiagnosticsHookState> queryHookStates(int limit) {
             if (failQueries) throw new IllegalStateException("query failed");
+            synchronized (this) {
+                hookStateQueryCalls++;
+                operations.add("hook_states");
+            }
             return new ArrayList<>(hookStates.subList(0, Math.min(limit, hookStates.size())));
         }
 
@@ -1445,6 +1505,11 @@ public final class ResidencyDiagnosticsBackendTest {
         void blockQueries() {
             queryStarted = new CountDownLatch(1);
             releaseQueries = new CountDownLatch(1);
+        }
+
+        void blockHomeStatsQuery() {
+            homeStatsQueryStarted = new CountDownLatch(1);
+            releaseHomeStatsQueries = new CountDownLatch(1);
         }
 
         void blockWrites() {

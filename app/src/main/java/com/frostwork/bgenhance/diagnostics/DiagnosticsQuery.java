@@ -340,6 +340,25 @@ public final class DiagnosticsQuery {
         }
     }
 
+    /** Behavior counters and Hook/configuration states read by one backend command. */
+    public static final class HomeDiagnosticsSnapshot {
+        public final AggregatePage behaviorStats;
+        public final HookStatePage hookStates;
+
+        public HomeDiagnosticsSnapshot(
+                AggregatePage behaviorStats, HookStatePage hookStates) {
+            this.behaviorStats = behaviorStats == null
+                    ? AggregatePage.empty("database_unavailable") : behaviorStats;
+            this.hookStates = hookStates == null
+                    ? HookStatePage.empty("database_unavailable") : hookStates;
+        }
+
+        public static HomeDiagnosticsSnapshot empty(String errorCode) {
+            return new HomeDiagnosticsSnapshot(
+                    AggregatePage.empty(errorCode), HookStatePage.empty(errorCode));
+        }
+    }
+
     public static final class FeatureStats {
         public final String featureId;
         public final long observed;

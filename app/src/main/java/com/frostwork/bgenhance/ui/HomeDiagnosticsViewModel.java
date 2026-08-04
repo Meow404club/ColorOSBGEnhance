@@ -2,19 +2,27 @@ package com.frostwork.bgenhance.ui;
 
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
 import com.frostwork.bgenhance.diagnostics.RecentBehaviorStats;
+import com.frostwork.bgenhance.diagnostics.RecentBehaviorStatsLoader;
 import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
-import com.frostwork.bgenhance.ui.diagnostics.DiagnosticsDataSource;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
 /** Generation-aware owner for the homepage diagnostics summary and activation state. */
 public final class HomeDiagnosticsViewModel implements AutoCloseable {
+    private static final int MAX_HOOK_STATES = 256;
+    private static final int MAX_STATS_ROWS = RecentBehaviorStatsLoader.QUERY_PAGE_SIZE;
+    private static final DiagnosticsQuery.AggregateQuery STATS_QUERY =
+            DiagnosticsQuery.AggregateQuery.builder()
+                    .dimension(DiagnosticsQuery.AggregateDimension.BEHAVIOR)
+                    .dimension(DiagnosticsQuery.AggregateDimension.RESULT)
+                    .limit(MAX_STATS_ROWS)
+                    .build();
+
     public enum Status { LOADING, CONTENT, ERROR }
 
     public interface Source {
-        CompletableFuture<RecentBehaviorStats> loadStats();
-        CompletableFuture<DiagnosticsQuery.HookStatePage> loadHookStates();
+        CompletableFuture<DiagnosticsQuery.HomeDiagnosticsSnapshot> loadSnapshot();
     }
 
     public interface Listener {
@@ -68,18 +76,8 @@ public final class HomeDiagnosticsViewModel implements AutoCloseable {
 
     public static Source backendSource(ResidencyDiagnosticsBackend backend) {
         Objects.requireNonNull(backend, "backend");
-        DiagnosticsDataSource dataSource = DiagnosticsDataSource.fromBackend(backend);
-        return new Source() {
-            @Override
-            public CompletableFuture<RecentBehaviorStats> loadStats() {
-                return dataSource.queryRecentBehaviorStatsAsync();
-            }
-
-            @Override
-            public CompletableFuture<DiagnosticsQuery.HookStatePage> loadHookStates() {
-                return backend.queryHookStatesAsync(256);
-            }
-        };
+        return () -> backend.queryHomeDiagnosticsSnapshotAsync(
+                STATS_QUERY, MAX_STATS_ROWS, MAX_HOOK_STATES);
     }
 
     public synchronized void setListener(Listener listener) {
@@ -93,30 +91,34 @@ public final class HomeDiagnosticsViewModel implements AutoCloseable {
             requestGeneration = ++generation;
         }
         publish(requestGeneration, State.loading());
-        CompletableFuture<RecentBehaviorStats> stats;
-        CompletableFuture<DiagnosticsQuery.HookStatePage> hookStates;
+        CompletableFuture<DiagnosticsQuery.HomeDiagnosticsSnapshot> snapshot;
         try {
-            stats = source.loadStats();
-            hookStates = source.loadHookStates();
+            snapshot = source.loadSnapshot();
         } catch (Throwable error) {
             publish(requestGeneration, State.error("database_unavailable"));
             return;
         }
-        if (stats == null || hookStates == null) {
+        if (snapshot == null) {
             publish(requestGeneration, State.error("database_unavailable"));
             return;
         }
-        stats.thenCombine(hookStates, Result::new).whenComplete((result, error) -> {
+        snapshot.whenComplete((result, error) -> {
             State state;
             if (error != null || result == null
-                    || result.stats == null || result.hookStates == null) {
+                    || result.behaviorStats == null || result.hookStates == null) {
                 state = State.error("database_unavailable");
-            } else if (!result.stats.errorCode.isEmpty()) {
-                state = State.error(result.stats.errorCode);
+            } else if (!result.behaviorStats.errorCode.isEmpty()) {
+                state = State.error(result.behaviorStats.errorCode);
+            } else if (result.behaviorStats.items.size() > MAX_STATS_ROWS
+                    || result.behaviorStats.hasMore) {
+                state = State.error("result_limit_exceeded");
             } else if (!result.hookStates.errorCode.isEmpty()) {
                 state = State.error(result.hookStates.errorCode);
             } else {
-                state = State.content(result.stats, result.hookStates);
+                RecentBehaviorStats stats = RecentBehaviorStats.fromAggregateRows(
+                        result.behaviorStats.items,
+                        result.behaviorStats.historyTruncated);
+                state = State.content(stats, result.hookStates);
             }
             publish(requestGeneration, state);
         });
@@ -142,17 +144,5 @@ public final class HomeDiagnosticsViewModel implements AutoCloseable {
         closed = true;
         generation++;
         listener = null;
-    }
-
-    private static final class Result {
-        final RecentBehaviorStats stats;
-        final DiagnosticsQuery.HookStatePage hookStates;
-
-        Result(
-                RecentBehaviorStats stats,
-                DiagnosticsQuery.HookStatePage hookStates) {
-            this.stats = stats;
-            this.hookStates = hookStates;
-        }
     }
 }
