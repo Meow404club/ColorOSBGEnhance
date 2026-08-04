@@ -10,15 +10,21 @@
     <color name="brand_soft">#FF243956</color>
     <color name="field_bg">#FF292A31</color>
     <color name="dropdown_ripple">#339EC1FF</color>
-    <color name="success">#FF72D69C</color>
     <color name="warning">#FFFFC267</color>
     <color name="error">#FFFF8A8A</color>
+    <color name="risk_badge_recommended">#FF1D6F46</color>
+    <color name="risk_badge_medium">#FF875700</color>
     <color name="risk_badge_high">#FFB3261E</color>
-    <color name="risk_badge_very_high">#FFD84349</color>
+    <color name="risk_badge_very_high">#FFC9343A</color>
     <color name="risk_badge_experimental">#FF1557B0</color>
     <color name="experimental">#FFBDA8FF</color>
     <color name="chip_neutral">#FF303139</color>
     <color name="chip_text">#FFD3D2DA</color>
     <color name="banner_warning">#FF4B3616</color>
     <color name="banner_warning_text">#FFFFD28A</color>
+    <color name="status_success_bg">#FF233B2F</color>
+    <color name="status_success_text">#FF8DDEAE</color>
+    <color name="status_warning_bg">#FF4B3616</color>
+    <color name="status_error_bg">#FF472629</color>
+    <color name="status_error_text">#FFFFB4AB</color>
 </resources>

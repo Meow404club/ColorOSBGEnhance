@@ -12,7 +12,8 @@
         android:paddingStart="@dimen/screen_horizontal"
         android:paddingEnd="@dimen/screen_horizontal">
 
-        <ScrollView
+        <androidx.core.widget.NestedScrollView
+            android:id="@+id/residency_page_scroll"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="2"
@@ -88,6 +89,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
+                        android:labelFor="@id/residency_mode_filter"
                         android:text="@string/residency_filter_mode_hint"
                         android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" />
 
@@ -109,6 +111,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="12dp"
+                        android:labelFor="@id/residency_status_filter"
                         android:text="@string/residency_filter_status_hint"
                         android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" />
 
@@ -126,7 +129,7 @@
                     </com.google.android.material.textfield.TextInputLayout>
                 </LinearLayout>
             </LinearLayout>
-        </ScrollView>
+        </androidx.core.widget.NestedScrollView>
 
         <View
             android:layout_width="1dp"
@@ -174,6 +177,7 @@
                     android:id="@+id/residency_loading_state"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
+                    android:accessibilityLiveRegion="polite"
                     android:gravity="center"
                     android:orientation="vertical"
                     android:padding="16dp">
@@ -193,6 +197,7 @@
 
                 <ScrollView
                     android:id="@+id/residency_empty_state"
+                    android:accessibilityLiveRegion="polite"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:fillViewport="true"
@@ -235,6 +240,7 @@
 
                 <ScrollView
                     android:id="@+id/residency_error_state"
+                    android:accessibilityLiveRegion="polite"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:fillViewport="true"

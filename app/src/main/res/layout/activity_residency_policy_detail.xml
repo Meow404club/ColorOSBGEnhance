@@ -28,6 +28,19 @@
                 app:navigationContentDescription="@string/back"
                 app:navigationIcon="@drawable/ic_arrow_back" />
 
+            <TextView
+                android:id="@+id/residency_detail_support_notice"
+                android:accessibilityLiveRegion="polite"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_notice_warning"
+                android:padding="12dp"
+                android:text="@string/residency_section_partial_support"
+                android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary"
+                android:textColor="@color/banner_warning_text"
+                android:visibility="gone" />
+
             <include
                 android:id="@+id/residency_detail_kill"
                 layout="@layout/view_residency_kill_policy"

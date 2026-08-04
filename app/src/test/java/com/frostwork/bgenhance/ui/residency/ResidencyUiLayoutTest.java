@@ -64,6 +64,76 @@ public final class ResidencyUiLayoutTest {
     }
 
     @Test
+    public void asynchronousResidencyStatesArePoliteLiveRegions() {
+        View policy = inflate(R.layout.activity_residency_policy);
+        assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE,
+                policy.findViewById(R.id.residency_policy_apply_notice)
+                        .getAccessibilityLiveRegion());
+        assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE,
+                policy.findViewById(R.id.residency_policy_error_state)
+                        .getAccessibilityLiveRegion());
+
+        View portrait = inflate(portraitContext(1f), R.layout.activity_residency_apps);
+        View landscape = inflate(landscapeContext(1f), R.layout.activity_residency_apps);
+        assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE,
+                portrait.findViewById(R.id.residency_loading_state)
+                        .getAccessibilityLiveRegion());
+        assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE,
+                landscape.findViewById(R.id.residency_loading_state)
+                        .getAccessibilityLiveRegion());
+    }
+
+    @Test
+    public void homepageSwitchRowsExposeOneNamedAccessibilityAction() {
+        View home = inflate(R.layout.activity_settings);
+        assertSingleSwitchAction(home, R.id.row_master, R.id.switch_master);
+        assertSingleSwitchAction(home, R.id.row_periodic, R.id.switch_periodic);
+        assertSingleSwitchAction(home, R.id.row_oguard_kill, R.id.switch_oguard_kill);
+        assertSingleSwitchAction(home, R.id.row_oguard_stop, R.id.switch_oguard_stop);
+        assertSingleSwitchAction(home, R.id.row_dry_run, R.id.switch_dry_run);
+
+        View policy = inflate(R.layout.activity_residency_policy);
+        assertSingleSwitchAction(
+                policy, R.id.residency_policy_enabled_row, R.id.residency_policy_enabled);
+        assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS,
+                policy.findViewById(R.id.residency_policy_enabled_text)
+                        .getImportantForAccessibility());
+    }
+
+    @Test
+    public void residencyFiltersExposeTheirVisibleLabelsToAccessibilityServices() {
+        View portrait = inflate(portraitContext(1f), R.layout.activity_residency_apps);
+        assertEquals(R.id.residency_mode_filter,
+                portrait.findViewById(R.id.residency_mode_filter_label).getLabelFor());
+        assertEquals(R.id.residency_status_filter,
+                portrait.findViewById(R.id.residency_status_filter_label).getLabelFor());
+
+        View landscape = inflate(landscapeContext(1f), R.layout.activity_residency_apps);
+        assertEquals(R.id.residency_mode_filter,
+                landscape.findViewById(R.id.residency_mode_filter_label).getLabelFor());
+        assertEquals(R.id.residency_status_filter,
+                landscape.findViewById(R.id.residency_status_filter_label).getLabelFor());
+    }
+
+    @Test
+    public void enlargedTextStacksRiskDescriptionsBelowAdaptiveBadges() {
+        ContextThemeWrapper context = portraitContext(2f);
+        View root = inflate(context, R.layout.view_residency_risk_notices);
+        assertStackedRiskRow(
+                context,
+                root,
+                R.id.residency_risk_high_row,
+                R.id.residency_risk_high_badge,
+                R.id.residency_risk_high_summary);
+        assertStackedRiskRow(
+                context,
+                root,
+                R.id.residency_risk_experimental_row,
+                R.id.residency_risk_experimental_badge,
+                R.id.residency_risk_experimental_summary);
+    }
+
+    @Test
     public void whiteRiskBadgeTextMeetsNormalTextContrast() {
         ContextThemeWrapper context = themedContext();
         int high = context.getColor(R.color.risk_badge_high);
@@ -223,6 +293,41 @@ public final class ResidencyUiLayoutTest {
     }
 
     @Test
+    public void asynchronousResidencyStatesUsePoliteLiveRegions() {
+        View portraitApps = inflate(portraitContext(1f), R.layout.activity_residency_apps);
+        View landscapeApps = inflate(landscapeContext(1f), R.layout.activity_residency_apps);
+        View policy = inflate(R.layout.activity_residency_policy);
+        View detail = inflate(R.layout.activity_residency_policy_detail);
+
+        assertPolite(portraitApps, R.id.residency_empty_state);
+        assertPolite(portraitApps, R.id.residency_error_state);
+        assertPolite(landscapeApps, R.id.residency_empty_state);
+        assertPolite(landscapeApps, R.id.residency_error_state);
+        assertPolite(policy, R.id.residency_policy_apply_notice);
+        assertPolite(detail, R.id.residency_detail_support_notice);
+    }
+
+    @Test
+    public void policyDetailCardsDoNotRepeatTheirToolbarTitles() {
+        Context context = themedContext();
+        assertEquals(0, countText(
+                inflate(R.layout.view_residency_kill_policy),
+                context.getString(R.string.residency_kill_title)));
+        assertEquals(0, countText(
+                inflate(R.layout.view_residency_freeze_policy),
+                context.getString(R.string.residency_freeze_title)));
+        assertEquals(0, countText(
+                inflate(R.layout.view_residency_wake_policy),
+                context.getString(R.string.residency_wake_title)));
+        assertEquals(0, countText(
+                inflate(R.layout.view_residency_resource_policy),
+                context.getString(R.string.residency_resource_title)));
+        assertEquals(0, countText(
+                inflate(R.layout.view_residency_refreeze_policy),
+                context.getString(R.string.residency_refreeze_title)));
+    }
+
+    @Test
     public void pickerUsesOneListAndItsHeaderOwnsEveryFilterControl() {
         View picker = inflate(R.layout.activity_residency_app_picker);
         View surface = picker.findViewById(R.id.residency_list_surface);
@@ -373,6 +478,36 @@ public final class ResidencyUiLayoutTest {
         assertTrue(description.length() > 0);
     }
 
+    private static void assertPolite(View root, int id) {
+        assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE,
+                root.findViewById(id).getAccessibilityLiveRegion());
+    }
+
+    private static void assertSingleSwitchAction(View root, int rowId, int switchId) {
+        View row = root.findViewById(rowId);
+        View switchView = root.findViewById(switchId);
+        assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO,
+                row.getImportantForAccessibility());
+        assertNotNull(switchView.getContentDescription());
+        assertTrue(switchView.getContentDescription().length() > 0);
+    }
+
+    private static void assertStackedRiskRow(
+            Context context, View root, int rowId, int badgeId, int summaryId) {
+        LinearLayout row = root.findViewById(rowId);
+        View badge = root.findViewById(badgeId);
+        TextView summary = root.findViewById(summaryId);
+        ResidencyPolicyActivity.adaptRiskNoticeRow(
+                context, row, badge, summary, 2f);
+        assertEquals(LinearLayout.VERTICAL, row.getOrientation());
+        LinearLayout.LayoutParams summaryParams =
+                (LinearLayout.LayoutParams) summary.getLayoutParams();
+        assertEquals(ViewGroup.LayoutParams.MATCH_PARENT, summaryParams.width);
+        assertEquals(0f, summaryParams.weight, 0f);
+        assertTrue(summaryParams.topMargin > 0);
+        assertTrue(badge.getMinimumWidth() >= dp(context, 96));
+    }
+
     private static void assertFilled(View root, int editTextId) {
         View editText = root.findViewById(editTextId);
         View parent = (View) editText.getParent();
@@ -463,6 +598,17 @@ public final class ResidencyUiLayoutTest {
         ViewGroup group = (ViewGroup) view;
         for (int index = 0; index < group.getChildCount(); index++) {
             count += countViewsOfType(group.getChildAt(index), type);
+        }
+        return count;
+    }
+
+    private static int countText(View view, String expected) {
+        int count = view instanceof TextView
+                && expected.contentEquals(((TextView) view).getText()) ? 1 : 0;
+        if (!(view instanceof ViewGroup)) return count;
+        ViewGroup group = (ViewGroup) view;
+        for (int index = 0; index < group.getChildCount(); index++) {
+            count += countText(group.getChildAt(index), expected);
         }
         return count;
     }

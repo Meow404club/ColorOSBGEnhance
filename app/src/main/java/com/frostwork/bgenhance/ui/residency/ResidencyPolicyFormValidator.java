@@ -61,6 +61,10 @@ public final class ResidencyPolicyFormValidator {
         }
     }
 
+    public static long parseSecondsWhenActive(String text, boolean active) {
+        return active ? parseSeconds(text, true) : 0L;
+    }
+
     public static boolean isValid(String packageName, ResidencyPolicyDraft draft) {
         Objects.requireNonNull(packageName, "packageName");
         Objects.requireNonNull(draft, "draft");

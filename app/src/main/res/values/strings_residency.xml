@@ -71,7 +71,7 @@
     <string name="residency_import_no_changes">当前设置无需更新</string>
 
     <string name="residency_mode_system">系统管理</string>
-    <string name="residency_mode_system_summary">不改变系统对该应用的后台管理方式</string>
+    <string name="residency_mode_system_summary">不增加单独保护，仍遵循主页的全局保护模式</string>
     <string name="residency_mode_balanced">均衡</string>
     <string name="residency_mode_balanced_summary">尽量保留应用进程，冻结和唤醒方式跟随系统</string>
     <string name="residency_mode_low_power">低功耗</string>
@@ -95,12 +95,14 @@
 
     <string name="residency_policy_enabled">启用此应用的策略</string>
     <string name="residency_policy_enabled_summary">关闭后暂时停用设置，规则仍会保留</string>
+    <string name="residency_policy_enabled_accessibility">启用此应用的策略。关闭后暂时停用设置，规则仍会保留</string>
     <string name="residency_mode_title">驻留模式</string>
     <string name="residency_mode_section_summary">选择预设模式，或使用自定义进行详细设置</string>
     <string name="residency_custom_title">自定义策略</string>
     <string name="residency_custom_summary">以下设置只在选择“自定义”时使用</string>
     <string name="residency_section_preset_value">预置：%1$s</string>
     <string name="residency_detail_done">完成</string>
+    <string name="residency_section_partial_support">部分设置在当前系统上不可用，已暂时禁用。可在“运行诊断”的“功能状态”中查看详情。</string>
     <string name="residency_preset_follow_system">跟随系统</string>
     <string name="residency_preset_full_protection">全面保护</string>
     <string name="residency_preset_power_saving_freeze">省电冻结</string>
@@ -116,15 +118,18 @@
     <string name="residency_preset_refreeze_disabled">暂不再次冻结</string>
     <string name="residency_preset_custom">自定义</string>
     <string name="residency_apply_without_restart">保存后会自动应用，无需重启</string>
+    <string name="residency_apply_master_disabled">后台保护当前已关闭；设置会保留，重新开启后生效</string>
+    <string name="residency_apply_disabled">驻留策略当前已关闭；设置会保留，重新开启后生效</string>
     <string name="residency_apply_after_restart">保存后请重启手机，使全部驻留策略生效</string>
     <string name="residency_apply_after_activation">设置会保留；请先在 LSPosed 启用模块、确认作用域并重启手机</string>
-    <string name="residency_apply_sync_unavailable">设置会保留；当前同步通道不可用，恢复连接或重启后生效</string>
+    <string name="residency_apply_sync_unavailable">设置会保存在本机；暂时无法提供给系统，请稍候或重启后再检查</string>
     <string name="residency_apply_sync_pending">设置会保存；系统正在读取最新设置，请稍候</string>
-    <string name="residency_apply_partial">设置会保存；部分驻留功能当前不可用，可在诊断页查看</string>
+    <string name="residency_apply_config_error">设置会保存；模块未能读取当前设置，请在运行诊断中查看详情</string>
+    <string name="residency_apply_partial">设置会保存；部分驻留功能当前不可用，可在运行诊断中查看</string>
     <string name="residency_save">保存</string>
     <string name="residency_delete">删除规则</string>
     <string name="residency_delete_title">删除“%1$s”的规则？</string>
-    <string name="residency_delete_message">删除后，该应用将恢复由系统管理。</string>
+    <string name="residency_delete_message">删除后将移除该应用的单独设置，应用仍会遵循主页的全局保护模式。</string>
     <string name="residency_saved">设置已保存</string>
     <string name="residency_deleted">规则已删除</string>
 

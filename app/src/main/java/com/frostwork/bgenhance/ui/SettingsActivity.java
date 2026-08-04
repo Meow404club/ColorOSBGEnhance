@@ -1,11 +1,13 @@
 package com.frostwork.bgenhance.ui;
 
+import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
 import com.frostwork.bgenhance.BuildConfig;
+import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.ModuleApplication;
 import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
@@ -33,6 +35,7 @@ public final class SettingsActivity extends AppCompatActivity {
     private View customAdvancedSection;
     private StatsOverviewView statsOverview;
     private HomeDiagnosticsViewModel homeDiagnostics;
+    private HomeDiagnosticsStatus lastHomeDiagnosticsStatus;
     private boolean binding;
     private final ModuleApplication.StateListener moduleStateListener =
             () -> runOnUiThread(this::refreshAll);
@@ -84,6 +87,13 @@ public final class SettingsActivity extends AppCompatActivity {
         oguardKillSwitch = findViewById(R.id.switch_oguard_kill);
         oguardStopSwitch = findViewById(R.id.switch_oguard_stop);
         dryRunSwitch = findViewById(R.id.switch_dry_run);
+        setSwitchAccessibility(masterSwitch, R.string.master_title, R.string.master_summary);
+        setSwitchAccessibility(periodicSwitch, R.string.periodic_title, R.string.periodic_summary);
+        setSwitchAccessibility(
+                oguardKillSwitch, R.string.oguard_kill_title, R.string.oguard_kill_summary);
+        setSwitchAccessibility(
+                oguardStopSwitch, R.string.oguard_stop_title, R.string.oguard_stop_summary);
+        setSwitchAccessibility(dryRunSwitch, R.string.dry_run_title, R.string.dry_run_summary);
         presetGroup = findViewById(R.id.preset_group);
         statusTitle = findViewById(R.id.text_module_status);
         statusSummary = findViewById(R.id.text_module_summary);
@@ -119,9 +129,17 @@ public final class SettingsActivity extends AppCompatActivity {
             if (checkedId == R.id.button_preset_balanced) applyPreset(ModuleSettings.PRESET_BALANCED);
             else if (checkedId == R.id.button_preset_strong) applyPreset(ModuleSettings.PRESET_STRONG);
             else if (checkedId == R.id.button_preset_custom) {
-                ModuleSettings.setString(this, ModuleSettings.KEY_ACTIVE_PRESET,
+                boolean saved = ModuleSettings.setString(
+                        this,
+                        ModuleSettings.KEY_ACTIVE_PRESET,
                         ModuleSettings.PRESET_CUSTOM);
                 refreshAll();
+                if (!saved) {
+                    Snackbar.make(
+                            findViewById(android.R.id.content),
+                            R.string.settings_save_failed,
+                            Snackbar.LENGTH_LONG).show();
+                }
             }
         });
 
@@ -164,6 +182,21 @@ public final class SettingsActivity extends AppCompatActivity {
     private void applyPreset(String preset) {
         binding = true;
         boolean strong = ModuleSettings.PRESET_STRONG.equals(preset);
+        Map<String, Boolean> values = presetValues(this, strong);
+        boolean saved = ModuleSettings.setValues(this, values, preset);
+        binding = false;
+        refreshAll();
+        int message = saved ? R.string.preset_applied : R.string.settings_save_failed;
+        String text = saved
+                ? getString(message, getString(strong ? R.string.preset_strong : R.string.preset_balanced))
+                : getString(message);
+        Snackbar.make(
+                findViewById(android.R.id.content),
+                text,
+                saved ? Snackbar.LENGTH_SHORT : Snackbar.LENGTH_LONG).show();
+    }
+
+    static Map<String, Boolean> presetValues(Context context, boolean strong) {
         Map<String, Boolean> values = new LinkedHashMap<>();
         for (String key : ModuleSettings.defaults().keySet()) {
             boolean value = ModuleSettings.defaultFor(key);
@@ -173,20 +206,14 @@ public final class SettingsActivity extends AppCompatActivity {
                     || ModuleSettings.KEY_MEMORY_FORCE.equals(key)) {
                 value = strong;
             }
-            if (ModuleSettings.KEY_DRY_RUN.equals(key)
+            if (ModuleSettings.KEY_MASTER_ENABLE.equals(key)
+                    || ModuleSettings.KEY_DRY_RUN.equals(key)
                     || ModuleSettings.KEY_VERBOSE_LOG.equals(key)) {
-                value = ModuleSettings.getLocalBoolean(this, key);
+                value = ModuleSettings.getLocalBoolean(context, key);
             }
             values.put(key, value);
         }
-        boolean saved = ModuleSettings.setValues(this, values, preset);
-        binding = false;
-        refreshAll();
-        int message = saved ? R.string.preset_applied : R.string.settings_save_failed;
-        String text = saved
-                ? getString(message, getString(strong ? R.string.preset_strong : R.string.preset_balanced))
-                : getString(message);
-        Snackbar.make(findViewById(android.R.id.content), text, Snackbar.LENGTH_SHORT).show();
+        return values;
     }
 
     private void refreshAll() {
@@ -207,12 +234,7 @@ public final class SettingsActivity extends AppCompatActivity {
         customAdvancedSection.setVisibility(custom ? View.VISIBLE : View.GONE);
 
         boolean master = masterSwitch.isChecked();
-        periodicSwitch.setEnabled(master);
-        oguardKillSwitch.setEnabled(master);
-        oguardStopSwitch.setEnabled(master);
-        findViewById(R.id.row_periodic).setAlpha(master ? 1f : 0.55f);
-        findViewById(R.id.row_oguard_kill).setAlpha(master ? 1f : 0.55f);
-        findViewById(R.id.row_oguard_stop).setAlpha(master ? 1f : 0.55f);
+        refreshBasicSwitchAvailability(master, lastHomeDiagnosticsStatus);
         dryRunBanner.setVisibility(dryRunSwitch.isChecked() ? View.VISIBLE : View.GONE);
 
         refreshNavigationCounts();
@@ -220,7 +242,8 @@ public final class SettingsActivity extends AppCompatActivity {
         homeDiagnostics.load();
     }
 
-    private void renderHomeDiagnostics(HomeDiagnosticsViewModel.State state) {
+    void renderHomeDiagnostics(HomeDiagnosticsViewModel.State state) {
+        statusSummary.setVisibility(View.VISIBLE);
         if (state.status == HomeDiagnosticsViewModel.Status.LOADING) {
             statusTitle.setText(R.string.status_checking);
             statusSummary.setText(R.string.status_checking_summary);
@@ -242,42 +265,81 @@ public final class SettingsActivity extends AppCompatActivity {
                 ModuleApplication.diagnosticsBootId(),
                 localRevision,
                 BuildConfig.VERSION_CODE);
-        if (status.activation == HomeDiagnosticsStatus.Activation.ACTIVE) {
+        applyHomeDiagnosticsStatus(status);
+        renderActivation(status.activation);
+        statsOverview.bind(
+                state.stats.observed,
+                state.stats.blocked,
+                state.stats.failOpen,
+                getString(R.string.home_stats_action),
+                true,
+                state.stats.historyTruncated);
+        refreshEffectNotice(status);
+    }
+
+    void renderActivation(HomeDiagnosticsStatus.Activation activation) {
+        statusSummary.setVisibility(View.VISIBLE);
+        if (activation == HomeDiagnosticsStatus.Activation.ACTIVE) {
             statusTitle.setText(R.string.status_active);
-            statusSummary.setText(status.installedPrimaryHooks == 4
-                    ? R.string.status_active_summary : R.string.status_partial_summary);
-        } else if (status.activation == HomeDiagnosticsStatus.Activation.PARTIAL) {
+            statusSummary.setVisibility(View.GONE);
+        } else if (activation == HomeDiagnosticsStatus.Activation.PARTIAL) {
             statusTitle.setText(R.string.status_partial);
             statusSummary.setText(R.string.status_partial_summary);
         } else {
             statusTitle.setText(R.string.status_inactive);
             statusSummary.setText(R.string.status_inactive_summary);
         }
-        statsOverview.bind(
-                state.stats.observed,
-                state.stats.blocked,
-                state.stats.failOpen,
-                getString(R.string.home_stats_action),
-                true);
-        refreshEffectNotice(status);
+    }
+
+    private void setSwitchAccessibility(
+            MaterialSwitch switchView, int titleRes, int summaryRes) {
+        switchView.setContentDescription(getString(
+                R.string.setting_switch_accessibility_summary,
+                getString(titleRes),
+                getString(summaryRes)));
     }
 
     private void refreshEffectNotice(HomeDiagnosticsStatus status) {
-        if (!ModuleApplication.isServiceConnected()) {
-            showEffectWarning(R.string.effect_config_service_waiting);
-        } else if (!ModuleApplication.isConfigSynced(this)) {
-            showEffectWarning(R.string.effect_config_pending);
-        } else if (status.systemProcessReady
-                && status.athenaProcessReady
-                && status.systemConfigSynced
-                && status.athenaConfigSynced
-                && status.installedPrimaryHooks >= 3) {
+        int message = status.effectNotice(
+                ModuleApplication.isServiceConnected(),
+                ModuleApplication.isConfigSynced(this),
+                ModuleApplication.hasConfigSyncError());
+        if (message == 0) {
             effectNotice.setVisibility(View.GONE);
-        } else if (status.systemProcessReady && status.athenaProcessReady) {
-            showEffectWarning(R.string.effect_config_pending);
         } else {
-            showEffectWarning(R.string.effect_restart_required);
+            showEffectWarning(message);
         }
+    }
+
+    void applyHomeDiagnosticsStatus(HomeDiagnosticsStatus status) {
+        lastHomeDiagnosticsStatus = status;
+        refreshBasicSwitchAvailability(masterSwitch.isChecked(), status);
+    }
+
+    private void refreshBasicSwitchAvailability(
+            boolean masterEnabled, HomeDiagnosticsStatus status) {
+        updateBasicSwitch(
+                periodicSwitch, R.id.row_periodic, HookTargetIds.ATHENA_PERIODIC,
+                masterEnabled, status);
+        updateBasicSwitch(
+                oguardKillSwitch, R.id.row_oguard_kill, HookTargetIds.OGUARD_KILL,
+                masterEnabled, status);
+        updateBasicSwitch(
+                oguardStopSwitch, R.id.row_oguard_stop, HookTargetIds.OGUARD_FORCE_STOP,
+                masterEnabled, status);
+    }
+
+    private void updateBasicSwitch(
+            MaterialSwitch switchView,
+            int rowId,
+            String hookTargetId,
+            boolean masterEnabled,
+            HomeDiagnosticsStatus status) {
+        boolean unavailable = status != null
+                && status.isPrimaryHookExplicitlyUnavailable(hookTargetId);
+        boolean editable = masterEnabled && (switchView.isChecked() || !unavailable);
+        switchView.setEnabled(editable);
+        findViewById(rowId).setAlpha(editable ? 1f : 0.55f);
     }
 
     private void showEffectWarning(int textRes) {
@@ -298,8 +360,7 @@ public final class SettingsActivity extends AppCompatActivity {
                 ModuleSettings.KEY_NIRVANA, ModuleSettings.KEY_CAMERA_LOW_FREE,
                 ModuleSettings.KEY_GAME_LOW_FREE));
         setCount(R.id.status_freeze, Arrays.asList(
-                ModuleSettings.KEY_HANS, ModuleSettings.KEY_SUPER_FREEZE,
-                ModuleSettings.KEY_ANDROID_FREEZE));
+                ModuleSettings.KEY_HANS, ModuleSettings.KEY_SUPER_FREEZE));
     }
 
     private void setCount(int textId, List<String> keys) {

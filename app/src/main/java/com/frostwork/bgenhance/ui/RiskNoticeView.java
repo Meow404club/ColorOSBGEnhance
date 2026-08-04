@@ -28,14 +28,14 @@ public final class RiskNoticeView extends LinearLayout {
                 UiUtils.dp(context, 20), UiUtils.dp(context, 14));
 
         badges = new LinearLayout(context);
-        badges.setOrientation(HORIZONTAL);
+        badges.setOrientation(usesStackedBadges(context) ? VERTICAL : HORIZONTAL);
         badges.setGravity(Gravity.CENTER_VERTICAL);
-        addView(badges, new LayoutParams(LayoutParams.MATCH_PARENT, UiUtils.dp(context, 28)));
+        badges.setBaselineAligned(false);
+        addView(badges, new LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
         summary = new TextView(context);
-        summary.setTextColor(context.getColor(R.color.item_summary));
-        summary.setTextSize(13f);
-        summary.setLineSpacing(0f, 1.08f);
+        summary.setTextAppearance(R.style.TextAppearance_ColorOSBgEnhance_Summary);
         LayoutParams summaryParams = new LayoutParams(
                 LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
         summaryParams.topMargin = UiUtils.dp(context, 9);
@@ -55,20 +55,36 @@ public final class RiskNoticeView extends LinearLayout {
         TextView badge = new TextView(getContext());
         badge.setText(textRes);
         badge.setTextColor(getContext().getColor(android.R.color.white));
-        badge.setTextSize(10.5f);
+        badge.setTextSize(12f);
+        badge.setTypeface(badge.getTypeface(), android.graphics.Typeface.BOLD);
         badge.setGravity(Gravity.CENTER);
         badge.setIncludeFontPadding(false);
+        badge.setMinHeight(UiUtils.dp(getContext(), 30));
+        badge.setMaxLines(2);
+        badge.setMinWidth(UiUtils.dp(getContext(), 96));
+        badge.setPadding(UiUtils.dp(getContext(), 10), UiUtils.dp(getContext(), 5),
+                UiUtils.dp(getContext(), 10), UiUtils.dp(getContext(), 5));
 
         GradientDrawable background = new GradientDrawable();
         background.setShape(GradientDrawable.RECTANGLE);
         background.setColor(getContext().getColor(colorRes));
-        background.setCornerRadius(UiUtils.dp(getContext(), 7));
+        background.setCornerRadius(UiUtils.dp(getContext(), 6));
         badge.setBackground(background);
 
         LayoutParams params = new LayoutParams(
-                UiUtils.dp(getContext(), 68), UiUtils.dp(getContext(), 28));
-        if (addStartMargin) params.setMarginStart(UiUtils.dp(getContext(), 8));
+                LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
+        if (addStartMargin) {
+            if (badges.getOrientation() == VERTICAL) {
+                params.topMargin = UiUtils.dp(getContext(), 8);
+            } else {
+                params.setMarginStart(UiUtils.dp(getContext(), 8));
+            }
+        }
         badges.addView(badge, params);
+    }
+
+    private static boolean usesStackedBadges(Context context) {
+        return context.getResources().getConfiguration().fontScale >= 1.5f;
     }
 
     private static int labelForRisk(FeatureCatalog.Risk risk) {
@@ -81,8 +97,8 @@ public final class RiskNoticeView extends LinearLayout {
     private static int colorForRisk(FeatureCatalog.Risk risk) {
         if (risk == FeatureCatalog.Risk.VERY_HIGH) return R.color.risk_badge_very_high;
         if (risk == FeatureCatalog.Risk.HIGH) return R.color.risk_badge_high;
-        if (risk == FeatureCatalog.Risk.MEDIUM) return R.color.warning;
-        return R.color.success;
+        if (risk == FeatureCatalog.Risk.MEDIUM) return R.color.risk_badge_medium;
+        return R.color.risk_badge_recommended;
     }
 
     private static int summaryFor(FeatureCatalog.Risk risk, boolean experimental) {

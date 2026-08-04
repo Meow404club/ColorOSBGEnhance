@@ -30,12 +30,13 @@ public final class HookStatusViewModelTest {
                 hook(CURRENT_BOOT, HookTargetIds.OGUARD_FORCE_STOP, "UNSUPPORTED"),
                 hook(CURRENT_BOOT, HookTargetIds.ATHENA_PERIODIC, "FAILED"),
                 config(CURRENT_BOOT, BridgeContract.PROCESS_SYSTEM_SERVER, 7),
+                configError(CURRENT_BOOT, BridgeContract.PROCESS_ATHENA),
                 config("old-boot", BridgeContract.PROCESS_SYSTEM_SERVER, 99)));
 
         HookStatusViewModel.State state = last(states);
         assertEquals(HookStatusViewModel.Status.READY, state.status());
         assertEquals(CURRENT_BOOT, state.bootId());
-        assertEquals(3, state.rows().size());
+        assertEquals(4, state.rows().size());
         assertEquals(HookStatusViewModel.Installation.UNKNOWN,
                 state.installation(HookTargetIds.OGUARD_KILL));
         assertFalse(state.isExplicitlyUnavailable(HookTargetIds.OGUARD_KILL));
@@ -45,6 +46,8 @@ public final class HookStatusViewModelTest {
                 state.installation(HookTargetIds.ATHENA_PERIODIC));
         assertTrue(state.isExplicitlyUnavailable(HookTargetIds.ATHENA_PERIODIC));
         assertEquals(7, state.configRevision(BridgeContract.PROCESS_SYSTEM_SERVER));
+        assertFalse(state.hasConfigError(BridgeContract.PROCESS_SYSTEM_SERVER));
+        assertTrue(state.hasConfigError(BridgeContract.PROCESS_ATHENA));
     }
 
     @Test
@@ -64,6 +67,26 @@ public final class HookStatusViewModelTest {
         assertEquals(HookStatusViewModel.Installation.UNKNOWN,
                 state.installation(HookTargetIds.OGUARD_KILL));
         assertFalse(state.isExplicitlyUnavailable(HookTargetIds.OGUARD_KILL));
+    }
+
+    @Test
+    public void hookStatusFromTheWrongProcessCannotMaskExpectedProcessFailure() {
+        Source source = new Source();
+        List<HookStatusViewModel.State> states = new ArrayList<>();
+        HookStatusViewModel viewModel = viewModel(source, states);
+
+        viewModel.refresh();
+        source.future.complete(page(
+                hook(CURRENT_BOOT, HookTargetIds.ATHENA_PERIODIC, "FAILED"),
+                DiagnosticsHookState.builder()
+                        .processId(BridgeContract.PROCESS_SYSTEM_SERVER)
+                        .hookTargetId(HookTargetIds.ATHENA_PERIODIC)
+                        .installStatus("INSTALLED")
+                        .bootId(CURRENT_BOOT)
+                        .build()));
+
+        assertEquals(HookStatusViewModel.Installation.FAILED,
+                last(states).installation(HookTargetIds.ATHENA_PERIODIC));
     }
 
     @Test
@@ -141,7 +164,7 @@ public final class HookStatusViewModelTest {
     private static DiagnosticsHookState hook(
             String bootId, String hookTargetId, String status) {
         return DiagnosticsHookState.builder()
-                .processId(BridgeContract.PROCESS_SYSTEM_SERVER)
+                .processId(HookTargetIds.expectedProcessId(hookTargetId))
                 .hookTargetId(hookTargetId)
                 .installStatus(status)
                 .bootId(bootId)
@@ -155,6 +178,15 @@ public final class HookStatusViewModelTest {
                 .hookTargetId(DiagnosticsTargetIds.RUNTIME_CONFIG)
                 .installStatus("CONFIG_READY")
                 .configRevision(revision)
+                .bootId(bootId)
+                .build();
+    }
+
+    private static DiagnosticsHookState configError(String bootId, String processId) {
+        return DiagnosticsHookState.builder()
+                .processId(processId)
+                .hookTargetId(DiagnosticsTargetIds.RUNTIME_CONFIG)
+                .installStatus("CONFIG_ERROR")
                 .bootId(bootId)
                 .build();
     }

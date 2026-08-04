@@ -136,8 +136,13 @@ public final class ModuleApplication extends Application
         return sSyncError;
     }
 
+    public static boolean hasConfigSyncError() {
+        return isServiceConnected() && sSyncError != null && !sSyncError.isEmpty();
+    }
+
     public static boolean isConfigSynced(Context context) {
         return isServiceConnected()
+                && !hasConfigSyncError()
                 && sSyncedRevision >= ModuleSettings.getConfigRevision(context);
     }
 

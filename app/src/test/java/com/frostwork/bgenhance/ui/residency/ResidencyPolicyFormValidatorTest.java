@@ -19,6 +19,14 @@ public final class ResidencyPolicyFormValidatorTest {
     }
 
     @Test
+    public void inactiveHiddenInputIsIgnoredEvenWhenItsStaleTextIsInvalid() {
+        assertEquals(0L,
+                ResidencyPolicyFormValidator.parseSecondsWhenActive("not-a-number", false));
+        assertEquals(1_500L,
+                ResidencyPolicyFormValidator.parseSecondsWhenActive("1.5", true));
+    }
+
+    @Test
     public void acceptedRangeIsOneSecondThroughTwentyFourHours() {
         assertEquals(1_000L, ResidencyPolicyFormValidator.parseSeconds("1", true));
         assertEquals(1_500L, ResidencyPolicyFormValidator.parseSeconds("1.5", true));

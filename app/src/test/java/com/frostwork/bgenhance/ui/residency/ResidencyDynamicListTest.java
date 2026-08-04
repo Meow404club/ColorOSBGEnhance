@@ -60,7 +60,7 @@ public final class ResidencyDynamicListTest {
     }
 
     @Test
-    public void largeFontStartsBoundedAndBoundedPaddingPreservesScreenInsets() {
+    public void largeFontKeepsThePortraitListInsideTheWholePageScroller() {
         assertFalse(ResidencyAppsActivity.shouldStartBoundedList(1f));
         assertTrue(ResidencyAppsActivity.shouldStartBoundedList(2f));
 
@@ -69,20 +69,21 @@ public final class ResidencyDynamicListTest {
         try {
             ResidencyAppsActivity apps = appsController.get();
             RecyclerView appsList = apps.findViewById(R.id.residency_app_list);
-            int appsNormalPadding = appsList.getPaddingBottom();
             apps.applyListSurfaceMode(true, false);
-            assertEquals(dp(apps, 16), appsList.getPaddingBottom());
+            assertEquals(dp(apps, 96), appsList.getPaddingBottom());
             setFontScale(apps, 2f);
             apps.setListSurfaceMode(true);
             setFontScale(apps, 1f);
-            assertBounded(apps, appsNormalPadding);
+            assertWholePageList(apps);
+            assertEquals(dp(apps, 96), appsList.getPaddingBottom());
+            assertFalse(appsList.isNestedScrollingEnabled());
         } finally {
             appsController.destroy();
         }
     }
 
     @Test
-    public void ordinaryFontLongListsPromoteToBoundedAndRemainScrollable() {
+    public void ordinaryFontLongListsUseThePageScrollerWhilePickerStaysBounded() {
         ActivityController<ResidencyAppsActivity> appsController =
                 Robolectric.buildActivity(ResidencyAppsActivity.class).create();
         ActivityController<ResidencyAppPickerActivity> pickerController =
@@ -90,7 +91,7 @@ public final class ResidencyDynamicListTest {
         try {
             ResidencyAppsActivity apps = appsController.get();
             apps.findViewById(R.id.residency_filters).setVisibility(View.VISIBLE);
-            assertLongListBecomesBounded(apps);
+            assertLongListUsesWholePageScroller(apps);
 
             ResidencyAppPickerActivity picker = pickerController.get();
             RecyclerView pickerList = picker.findViewById(R.id.residency_app_list);
@@ -100,6 +101,24 @@ public final class ResidencyDynamicListTest {
         } finally {
             pickerController.destroy();
             appsController.destroy();
+        }
+    }
+
+    @Test
+    @Config(qualifiers = "land")
+    public void landscapeKeepsTheListAsAnIndependentScroller() {
+        ActivityController<ResidencyAppsActivity> controller =
+                Robolectric.buildActivity(ResidencyAppsActivity.class).create();
+        try {
+            ResidencyAppsActivity activity = controller.get();
+            RecyclerView list = activity.findViewById(R.id.residency_app_list);
+
+            activity.applyListSurfaceMode(true, true);
+
+            assertTrue(list.isNestedScrollingEnabled());
+            assertBounded(activity, dp(activity, 80));
+        } finally {
+            controller.destroy();
         }
     }
 
@@ -141,16 +160,24 @@ public final class ResidencyDynamicListTest {
         assertEquals(ViewGroup.LayoutParams.WRAP_CONTENT, list.getLayoutParams().height);
     }
 
-    private static void assertLongListBecomesBounded(Activity activity) {
+    private static void assertLongListUsesWholePageScroller(ResidencyAppsActivity activity) {
         RecyclerView list = activity.findViewById(R.id.residency_app_list);
-        int normalBottomPadding = list.getPaddingBottom();
         list.setAdapter(new FixedHeightAdapter(40));
         setContentMode(activity);
         measure(activity, 360, 640);
         measure(activity, 360, 640);
 
-        assertBounded(activity, normalBottomPadding);
-        assertTrue(list.canScrollVertically(1));
+        assertWholePageList(activity);
+        assertFalse(list.isNestedScrollingEnabled());
+        assertTrue(activity.findViewById(R.id.residency_page_scroll).canScrollVertically(1));
+    }
+
+    private static void assertWholePageList(Activity activity) {
+        RecyclerView list = activity.findViewById(R.id.residency_app_list);
+        LinearLayout.LayoutParams surfaceParams = surfaceParams(activity);
+        assertEquals(ViewGroup.LayoutParams.WRAP_CONTENT, surfaceParams.height);
+        assertEquals(0f, surfaceParams.weight, 0f);
+        assertEquals(ViewGroup.LayoutParams.WRAP_CONTENT, list.getLayoutParams().height);
     }
 
     private static void setContentMode(Activity activity) {

@@ -26,15 +26,21 @@ final class ResidencyApplyStatus {
             HookTargetIds.HANS_RESOURCE_DISPATCH,
             HookTargetIds.HANS_R_TO_M_TIMING,
             HookTargetIds.HANS_M_TO_F_TIMING,
+            HookTargetIds.HANS_CORE_EXEMPTION,
             HookTargetIds.HANS_LCD_ON_EXEMPTION,
             HookTargetIds.HANS_ACTIVE_RECOVERY));
+
+    enum Tone { INFO, WARNING, ERROR, SUCCESS }
 
     private ResidencyApplyStatus() {}
 
     static int message(
             HookStatusViewModel.State state,
             boolean serviceConnected,
-            int localConfigRevision) {
+            boolean localConfigError,
+            int localConfigRevision,
+            boolean masterEnabled,
+            boolean residencyEnabled) {
         if (state == null
                 || state.status() == HookStatusViewModel.Status.IDLE
                 || state.status() == HookStatusViewModel.Status.LOADING) {
@@ -42,6 +48,11 @@ final class ResidencyApplyStatus {
         }
         if (state.status() != HookStatusViewModel.Status.READY) {
             return R.string.effect_runtime_unavailable;
+        }
+        if (state.hasConfigError(BridgeContract.PROCESS_SYSTEM_SERVER)
+                || state.hasConfigError(BridgeContract.PROCESS_ATHENA)
+                || localConfigError) {
+            return R.string.residency_apply_config_error;
         }
 
         boolean anySystemReport = state.hasProcessReport(
@@ -60,15 +71,31 @@ final class ResidencyApplyStatus {
         if (!serviceConnected) {
             return R.string.residency_apply_sync_unavailable;
         }
-        if (state.configRevision(BridgeContract.PROCESS_SYSTEM_SERVER) < localConfigRevision
-                || state.configRevision(BridgeContract.PROCESS_ATHENA) < localConfigRevision) {
-            return R.string.residency_apply_sync_pending;
-        }
         for (String hookTargetId : REQUIRED_HOOKS) {
             if (!state.isInstalled(hookTargetId)) {
                 return R.string.residency_apply_partial;
             }
         }
+        if (state.configRevision(BridgeContract.PROCESS_SYSTEM_SERVER) < localConfigRevision
+                || state.configRevision(BridgeContract.PROCESS_ATHENA) < localConfigRevision) {
+            return R.string.residency_apply_sync_pending;
+        }
+        if (!masterEnabled) return R.string.residency_apply_master_disabled;
+        if (!residencyEnabled) return R.string.residency_apply_disabled;
         return R.string.residency_apply_without_restart;
+    }
+
+    static Tone tone(int messageRes) {
+        if (messageRes == R.string.residency_apply_without_restart) return Tone.SUCCESS;
+        if (messageRes == R.string.residency_apply_config_error
+                || messageRes == R.string.effect_runtime_unavailable) {
+            return Tone.ERROR;
+        }
+        if (messageRes == R.string.status_checking_summary
+                || messageRes == R.string.residency_apply_master_disabled
+                || messageRes == R.string.residency_apply_disabled) {
+            return Tone.INFO;
+        }
+        return Tone.WARNING;
     }
 }

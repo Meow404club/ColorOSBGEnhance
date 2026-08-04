@@ -2,8 +2,10 @@ package com.frostwork.bgenhance.ui.residency;
 
 import android.os.Bundle;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.RadioGroup;
 import androidx.appcompat.app.AppCompatActivity;
+import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.R;
 import com.frostwork.bgenhance.residency.model.FreezePolicy;
 import com.frostwork.bgenhance.residency.model.KillPolicy;
@@ -17,6 +19,7 @@ import com.frostwork.bgenhance.residency.model.WakeMode;
 import com.frostwork.bgenhance.residency.model.WakePolicy;
 import com.frostwork.bgenhance.residency.model.WakeSource;
 import com.frostwork.bgenhance.ui.UiUtils;
+import com.frostwork.bgenhance.ui.HookStatusViewModel;
 import com.google.android.material.button.MaterialButtonToggleGroup;
 import com.google.android.material.materialswitch.MaterialSwitch;
 import com.google.android.material.snackbar.Snackbar;
@@ -30,6 +33,8 @@ public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
     private String packageName;
     private ResidencyPolicyEditorContract.Section section;
     private ResidencyPolicyDraft draft;
+    private HookStatusViewModel hookStatusViewModel;
+    private HookStatusViewModel.State hookStatus;
     private boolean binding;
 
     @Override
@@ -51,6 +56,25 @@ public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
         bindInteractions();
         showSection();
         bindDraft();
+        hookStatusViewModel = HookStatusViewModel.create(this);
+        hookStatusViewModel.setListener(state -> {
+            hookStatus = state;
+            applyHookAvailability();
+        });
+        hookStatus = hookStatusViewModel.state();
+        applyHookAvailability();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (hookStatusViewModel != null) hookStatusViewModel.refresh();
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (hookStatusViewModel != null) hookStatusViewModel.close();
+        super.onDestroy();
     }
 
     private void bindInteractions() {
@@ -354,6 +378,7 @@ public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
         boolean timing = !exempt && isChecked(R.id.residency_freeze_custom_timing);
         findViewById(R.id.residency_freeze_timing_fields).setVisibility(
                 timing ? View.VISIBLE : View.GONE);
+        applyHookAvailability();
     }
 
     private void updateWakeCooldownVisibility() {
@@ -365,6 +390,173 @@ public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
         findViewById(R.id.residency_alarm_cooldown_layout).setVisibility(
                 alarm.getCheckedButtonId() == R.id.residency_alarm_throttle
                         ? View.VISIBLE : View.GONE);
+    }
+
+    private void applyHookAvailability() {
+        if (section == null) return;
+        boolean partial;
+        switch (section) {
+            case KILL:
+                partial = applyKillAvailability();
+                break;
+            case FREEZE:
+                partial = applyFreezeAvailability();
+                break;
+            case WAKE:
+                partial = applyWakeAvailability();
+                break;
+            case RESOURCE:
+                partial = applyResourceAvailability();
+                break;
+            case REFREEZE:
+                partial = setHookEnabled(
+                        R.id.residency_refreeze_group,
+                        HookTargetIds.HANS_M_TO_F_TIMING,
+                        true);
+                setHookEnabled(
+                        R.id.residency_refreeze_fields,
+                        HookTargetIds.HANS_M_TO_F_TIMING,
+                        true);
+                break;
+            default:
+                throw new AssertionError(section);
+        }
+        findViewById(R.id.residency_detail_support_notice).setVisibility(
+                partial ? View.VISIBLE : View.GONE);
+    }
+
+    private boolean applyKillAvailability() {
+        boolean partial = false;
+        partial |= setHookEnabled(
+                R.id.residency_kill_power, HookTargetIds.OGUARD_KILL, true);
+        partial |= setHookEnabled(
+                R.id.residency_kill_force_stop, HookTargetIds.OGUARD_FORCE_STOP, true);
+        partial |= setHookEnabled(
+                R.id.residency_kill_periodic, HookTargetIds.ATHENA_PERIODIC, true);
+        partial |= setHookEnabled(
+                R.id.residency_kill_fast_clear, HookTargetIds.FAST_CLEAR_DISPATCH, true);
+        partial |= setHookEnabled(
+                R.id.residency_kill_tournament, HookTargetIds.TOURNAMENT, true);
+        partial |= setHookEnabled(
+                R.id.residency_kill_memory, HookTargetIds.MEMORY_GUARD_DISPATCH, true);
+        partial |= setHookEnabled(
+                R.id.residency_kill_grouped, HookTargetIds.OSENSE_PROCESS_KILL, true);
+        partial |= setHookEnabled(
+                R.id.residency_kill_process, HookTargetIds.OSENSE_PROCESS_KILL, true);
+        return partial;
+    }
+
+    private boolean applyFreezeAvailability() {
+        boolean exempt = isChecked(R.id.residency_freeze_full_exemption);
+        boolean timing = !exempt && isChecked(R.id.residency_freeze_custom_timing);
+        boolean rToMUnavailable = isHookUnavailable(HookTargetIds.HANS_R_TO_M_TIMING);
+        boolean mToFUnavailable = isHookUnavailable(HookTargetIds.HANS_M_TO_F_TIMING);
+        boolean partial = false;
+        partial |= setHookEnabled(
+                R.id.residency_freeze_normal, HookTargetIds.HANS_FREEZE_DISPATCH, !exempt);
+        partial |= setHookEnabled(
+                R.id.residency_freeze_fast, HookTargetIds.HANS_FAST_FREEZE_DISPATCH, !exempt);
+        partial |= setHookEnabled(
+                R.id.residency_freeze_super, HookTargetIds.HANS_FREEZE_DISPATCH, !exempt);
+        partial |= setHookEnabled(
+                R.id.residency_freeze_preload, HookTargetIds.HANS_FREEZE_DISPATCH, !exempt);
+        partial |= setHookEnabled(
+                R.id.residency_freeze_full_exemption,
+                HookTargetIds.HANS_FREEZE_DISPATCH,
+                true);
+        partial |= setHookEnabled(
+                R.id.residency_freeze_core_exemption,
+                HookTargetIds.HANS_CORE_EXEMPTION,
+                !exempt);
+        setEnabledRecursively(
+                findViewById(R.id.residency_freeze_custom_timing),
+                !exempt && !(rToMUnavailable && mToFUnavailable));
+        setEnabledRecursively(
+                findViewById(R.id.residency_freeze_prepare_layout),
+                timing && !rToMUnavailable);
+        setEnabledRecursively(
+                findViewById(R.id.residency_freeze_execute_layout),
+                timing && !mToFUnavailable);
+        partial |= rToMUnavailable || mToFUnavailable;
+        partial |= setHookEnabled(
+                R.id.residency_freeze_lcd_exemption,
+                HookTargetIds.HANS_LCD_ON_EXEMPTION,
+                !exempt);
+        return partial;
+    }
+
+    private boolean applyWakeAvailability() {
+        boolean partial = false;
+        partial |= setHookEnabled(
+                R.id.residency_packet_group, HookTargetIds.HANS_WAKE_DISPATCH, true);
+        partial |= setHookEnabled(
+                R.id.residency_packet_cooldown_layout,
+                HookTargetIds.HANS_WAKE_DISPATCH,
+                true);
+        partial |= setHookEnabled(
+                R.id.residency_alarm_group, HookTargetIds.ALARM_WAKE_DELIVERY, true);
+        partial |= setHookEnabled(
+                R.id.residency_alarm_cooldown_layout,
+                HookTargetIds.ALARM_WAKE_DELIVERY,
+                true);
+        int[] sourceControls = {
+            R.id.residency_wake_async,
+            R.id.residency_wake_transaction,
+            R.id.residency_wake_signal,
+            R.id.residency_wake_service,
+            R.id.residency_wake_broadcast,
+            R.id.residency_wake_job,
+            R.id.residency_wake_wakelock,
+            R.id.residency_wake_audio,
+            R.id.residency_wake_connectivity
+        };
+        for (int id : sourceControls) {
+            partial |= setHookEnabled(id, HookTargetIds.HANS_WAKE_DISPATCH, true);
+        }
+        return partial;
+    }
+
+    private boolean applyResourceAvailability() {
+        int[] controls = {
+            R.id.residency_resource_network,
+            R.id.residency_resource_service,
+            R.id.residency_resource_broadcast,
+            R.id.residency_resource_job,
+            R.id.residency_resource_sensor,
+            R.id.residency_resource_binder,
+            R.id.residency_resource_alarm,
+            R.id.residency_resource_wakelock,
+            R.id.residency_resource_gps,
+            R.id.residency_resource_audio,
+            R.id.residency_resource_bluetooth
+        };
+        boolean partial = false;
+        for (int id : controls) {
+            partial |= setHookEnabled(id, HookTargetIds.HANS_RESOURCE_DISPATCH, true);
+        }
+        return partial;
+    }
+
+    private boolean setHookEnabled(int viewId, String hookTargetId, boolean baseEnabled) {
+        boolean unavailable = isHookUnavailable(hookTargetId);
+        setEnabledRecursively(findViewById(viewId), baseEnabled && !unavailable);
+        return unavailable;
+    }
+
+    private boolean isHookUnavailable(String hookTargetId) {
+        return hookStatus != null
+                && hookStatus.status() == HookStatusViewModel.Status.READY
+                && hookStatus.isExplicitlyUnavailable(hookTargetId);
+    }
+
+    private static void setEnabledRecursively(View view, boolean enabled) {
+        if (view == null) return;
+        view.setEnabled(enabled);
+        if (!(view instanceof ViewGroup)) return;
+        ViewGroup group = (ViewGroup) view;
+        for (int index = 0; index < group.getChildCount(); index++) {
+            setEnabledRecursively(group.getChildAt(index), enabled);
+        }
     }
 
     private void fillDefaultRefreezeDelaysIfBlank() {
@@ -385,7 +577,7 @@ public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
         TextInputEditText input = findViewById(valueId);
         layout.setError(null);
         try {
-            return ResidencyPolicyFormValidator.parseSeconds(
+            return ResidencyPolicyFormValidator.parseSecondsWhenActive(
                     input.getText() == null ? "" : input.getText().toString(), required);
         } catch (ResidencyPolicyFormValidator.InputException exception) {
             int error = exception.failure() == ResidencyPolicyFormValidator.InputFailure.REQUIRED

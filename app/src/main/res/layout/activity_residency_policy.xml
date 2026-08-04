@@ -114,9 +114,11 @@
                             android:orientation="horizontal">
 
                             <LinearLayout
+                                android:id="@+id/residency_policy_enabled_text"
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
+                                android:importantForAccessibility="noHideDescendants"
                                 android:orientation="vertical"
                                 android:paddingStart="0dp"
                                 android:paddingEnd="12dp">
@@ -139,7 +141,7 @@
                                 android:id="@+id/residency_policy_enabled"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:contentDescription="@string/residency_policy_enabled" />
+                                android:contentDescription="@string/residency_policy_enabled_accessibility" />
                         </LinearLayout>
 
                         <TextView
@@ -496,6 +498,7 @@
 
                 <TextView
                     android:id="@+id/residency_policy_apply_notice"
+                    android:accessibilityLiveRegion="polite"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="@dimen/card_spacing"
@@ -534,6 +537,7 @@
         android:id="@+id/residency_policy_error_state"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:accessibilityLiveRegion="polite"
         android:layout_marginTop="56dp"
         android:background="@color/page_bg"
         android:gravity="center"

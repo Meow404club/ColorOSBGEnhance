@@ -9,6 +9,7 @@ import com.frostwork.bgenhance.BuildConfig;
 import com.frostwork.bgenhance.DiagnosticsTargetIds;
 import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.ModuleRuntimeStatus;
+import com.frostwork.bgenhance.R;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
 import java.util.Arrays;
 import java.util.Collections;
@@ -72,6 +73,25 @@ public final class HomeDiagnosticsStatusTest {
     }
 
     @Test
+    public void optionalHookCannotReplaceAMissingPrimaryHook() {
+        HomeDiagnosticsStatus status = HomeDiagnosticsStatus.evaluate(
+                Arrays.asList(
+                        process(BridgeContract.PROCESS_SYSTEM_SERVER,
+                                currentStage(), CURRENT_BOOT),
+                        process(BridgeContract.PROCESS_ATHENA,
+                                currentStage(), CURRENT_BOOT),
+                        hook(HookTargetIds.OGUARD_KILL, "INSTALLED:1"),
+                        hook(HookTargetIds.OGUARD_FORCE_STOP, "INSTALLED:1"),
+                        hook(HookTargetIds.FAST_CLEAR_DISPATCH, "INSTALLED:1")),
+                CURRENT_BOOT,
+                1,
+                BuildConfig.VERSION_CODE);
+
+        assertEquals(HomeDiagnosticsStatus.Activation.PARTIAL, status.activation);
+        assertEquals(2, status.installedPrimaryHooks);
+    }
+
+    @Test
     public void configMustBeReadyAtCurrentRevision() {
         HomeDiagnosticsStatus status = HomeDiagnosticsStatus.evaluate(
                 Arrays.asList(
@@ -89,6 +109,65 @@ public final class HomeDiagnosticsStatusTest {
 
         assertFalse(status.systemConfigSynced);
         assertFalse(status.athenaConfigSynced);
+        assertTrue(status.athenaConfigError);
+        assertTrue(status.hasConfigError());
+        assertEquals(R.string.effect_config_error, status.effectNotice(true, false, false));
+    }
+
+    @Test
+    public void explicitlyUnavailablePrimaryHookDisablesOnlyItsOwnControl() {
+        HomeDiagnosticsStatus status = HomeDiagnosticsStatus.evaluate(
+                Arrays.asList(
+                        process(BridgeContract.PROCESS_SYSTEM_SERVER,
+                                currentStage(), CURRENT_BOOT),
+                        process(BridgeContract.PROCESS_ATHENA,
+                                currentStage(), CURRENT_BOOT),
+                        config(BridgeContract.PROCESS_SYSTEM_SERVER, 7),
+                        config(BridgeContract.PROCESS_ATHENA, 7),
+                        hook(HookTargetIds.ATHENA_PERIODIC, "FAILED_FAIL_OPEN"),
+                        hook(HookTargetIds.OGUARD_KILL, "UNSUPPORTED"),
+                        hook(HookTargetIds.OGUARD_FORCE_STOP, "INSTALLED")),
+                CURRENT_BOOT,
+                7,
+                BuildConfig.VERSION_CODE);
+
+        assertTrue(status.isPrimaryHookExplicitlyUnavailable(
+                HookTargetIds.ATHENA_PERIODIC));
+        assertTrue(status.isPrimaryHookExplicitlyUnavailable(HookTargetIds.OGUARD_KILL));
+        assertFalse(status.isPrimaryHookExplicitlyUnavailable(
+                HookTargetIds.OGUARD_FORCE_STOP));
+        assertEquals(R.string.effect_primary_hook_unavailable,
+                status.effectNotice(true, true, false));
+    }
+
+    @Test
+    public void effectNoticeSeparatesRestartSyncAndHealthyStates() {
+        HomeDiagnosticsStatus inactive = HomeDiagnosticsStatus.evaluate(
+                Collections.emptyList(), CURRENT_BOOT, 7, BuildConfig.VERSION_CODE);
+        assertEquals(R.string.effect_restart_required,
+                inactive.effectNotice(false, false, false));
+
+        HomeDiagnosticsStatus active = HomeDiagnosticsStatus.evaluate(
+                Arrays.asList(
+                        process(BridgeContract.PROCESS_SYSTEM_SERVER,
+                                currentStage(), CURRENT_BOOT),
+                        process(BridgeContract.PROCESS_ATHENA,
+                                currentStage(), CURRENT_BOOT),
+                        config(BridgeContract.PROCESS_SYSTEM_SERVER, 7),
+                        config(BridgeContract.PROCESS_ATHENA, 7),
+                        hook(HookTargetIds.ATHENA_PERIODIC, "INSTALLED"),
+                        hook(HookTargetIds.OGUARD_KILL, "INSTALLED"),
+                        hook(HookTargetIds.OGUARD_FORCE_STOP, "INSTALLED")),
+                CURRENT_BOOT,
+                7,
+                BuildConfig.VERSION_CODE);
+        assertEquals(R.string.effect_config_service_waiting,
+                active.effectNotice(false, true, false));
+        assertEquals(R.string.effect_config_pending,
+                active.effectNotice(true, false, false));
+        assertEquals(R.string.effect_config_error,
+                active.effectNotice(true, false, true));
+        assertEquals(0, active.effectNotice(true, true, false));
     }
 
     @Test
@@ -143,7 +222,7 @@ public final class HomeDiagnosticsStatusTest {
 
     private static DiagnosticsHookState hook(String targetId, String installStatus) {
         return DiagnosticsHookState.builder()
-                .processId(BridgeContract.PROCESS_SYSTEM_SERVER)
+                .processId(HookTargetIds.expectedProcessId(targetId))
                 .hookTargetId(targetId)
                 .installStatus(installStatus)
                 .bootId(CURRENT_BOOT)

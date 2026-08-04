@@ -3,7 +3,6 @@ package com.frostwork.bgenhance.ui;
 import android.content.Context;
 import android.content.res.TypedArray;
 import android.graphics.drawable.GradientDrawable;
-import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
@@ -24,11 +23,13 @@ public final class SettingSwitchRow extends LinearLayout {
     private Listener listener;
     private boolean binding;
     private boolean rowEnabled = true;
+    private int summaryRes;
 
     public SettingSwitchRow(Context context) {
         super(context);
         setOrientation(HORIZONTAL);
         setGravity(Gravity.CENTER_VERTICAL);
+        setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         setMinimumHeight(UiUtils.dp(context, 92));
         setPadding(UiUtils.dp(context, 20), UiUtils.dp(context, 14),
                 UiUtils.dp(context, 16), UiUtils.dp(context, 14));
@@ -42,6 +43,8 @@ public final class SettingSwitchRow extends LinearLayout {
 
         LinearLayout textColumn = new LinearLayout(context);
         textColumn.setOrientation(VERTICAL);
+        textColumn.setImportantForAccessibility(
+                View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         LayoutParams textParams = new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f);
         textParams.setMarginEnd(UiUtils.dp(context, 12));
         addView(textColumn, textParams);
@@ -49,8 +52,8 @@ public final class SettingSwitchRow extends LinearLayout {
         titleView = new TextView(context);
         titleView.setTextAppearance(R.style.TextAppearance_ColorOSBgEnhance_SettingTitle);
         titleView.setSingleLine(false);
-        titleView.setMaxLines(2);
-        titleView.setEllipsize(TextUtils.TruncateAt.END);
+        titleView.setMaxLines(Integer.MAX_VALUE);
+        titleView.setEllipsize(null);
         textColumn.addView(titleView,
                 new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
@@ -68,7 +71,10 @@ public final class SettingSwitchRow extends LinearLayout {
         textColumn.addView(detailView, detailParams);
 
         FrameLayout trailing = new FrameLayout(context);
-        addView(trailing, new LayoutParams(UiUtils.dp(context, 68), UiUtils.dp(context, 48)));
+        trailing.setMinimumWidth(UiUtils.dp(context, 68));
+        trailing.setMinimumHeight(UiUtils.dp(context, 48));
+        addView(trailing, new LayoutParams(
+                LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
 
         switchView = new MaterialSwitch(context);
         switchView.setShowText(false);
@@ -81,15 +87,24 @@ public final class SettingSwitchRow extends LinearLayout {
         trailingStatusView.setGravity(Gravity.CENTER);
         trailingStatusView.setIncludeFontPadding(false);
         trailingStatusView.setTextColor(context.getColor(R.color.chip_text));
-        trailingStatusView.setTextSize(11f);
+        trailingStatusView.setTextSize(12f);
+        trailingStatusView.setTypeface(
+                trailingStatusView.getTypeface(), android.graphics.Typeface.BOLD);
+        trailingStatusView.setMinHeight(UiUtils.dp(context, 32));
+        trailingStatusView.setMaxLines(2);
+        trailingStatusView.setPadding(UiUtils.dp(context, 10), UiUtils.dp(context, 5),
+                UiUtils.dp(context, 10), UiUtils.dp(context, 5));
         trailingStatusView.setVisibility(View.GONE);
+        trailingStatusView.setContentDescription(null);
         GradientDrawable neutral = new GradientDrawable();
         neutral.setShape(GradientDrawable.RECTANGLE);
         neutral.setColor(context.getColor(R.color.chip_neutral));
         neutral.setCornerRadius(UiUtils.dp(context, 10));
         trailingStatusView.setBackground(neutral);
         FrameLayout.LayoutParams statusParams = new FrameLayout.LayoutParams(
-                UiUtils.dp(context, 68), UiUtils.dp(context, 34), Gravity.CENTER);
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER);
         trailing.addView(trailingStatusView, statusParams);
 
         switchView.setOnCheckedChangeListener((button, checked) -> {
@@ -104,13 +119,14 @@ public final class SettingSwitchRow extends LinearLayout {
 
     public void bind(FeatureCatalog.FeatureSpec spec, boolean checked) {
         titleView.setText(spec.titleRes);
+        summaryRes = spec.summaryRes;
         summaryView.setText(spec.summaryRes);
         detailView.setText(spec.detailRes);
+        updateSwitchContentDescription();
         trailingStatusView.setVisibility(View.GONE);
+        trailingStatusView.setContentDescription(null);
         switchView.setVisibility(View.VISIBLE);
-        rowEnabled = true;
-        switchView.setEnabled(true);
-        setAlpha(1f);
+        updateInteraction(true, 1f);
         setCheckedSilently(checked);
     }
 
@@ -125,14 +141,26 @@ public final class SettingSwitchRow extends LinearLayout {
     public boolean isChecked() { return switchView.isChecked(); }
 
     public void setRowEnabled(boolean enabled) {
-        rowEnabled = enabled;
-        switchView.setEnabled(enabled);
-        setAlpha(enabled ? 1f : 0.55f);
+        updateInteraction(enabled, enabled ? 1f : 0.55f);
     }
 
     public void showUnsupported() {
-        showTrailingStatus(R.string.trailing_unsupported);
+        showUnsupported(isChecked());
+    }
+
+    public void showUnsupported(boolean currentlyEnabled) {
+        if (summaryRes != 0) summaryView.setText(summaryRes);
+        if (currentlyEnabled) {
+            trailingStatusView.setVisibility(View.GONE);
+            switchView.setVisibility(View.VISIBLE);
+            summaryView.append("\n" + getContext().getString(
+                    R.string.feature_unavailable_enabled_summary));
+            updateSwitchContentDescription();
+            updateInteraction(true, 1f);
+            return;
+        }
         summaryView.append("\n" + getContext().getString(R.string.feature_unavailable_summary));
+        showTrailingStatus(R.string.trailing_unsupported);
     }
 
     public void showDiagnosticOnly() {
@@ -140,11 +168,33 @@ public final class SettingSwitchRow extends LinearLayout {
     }
 
     private void showTrailingStatus(int textRes) {
-        rowEnabled = false;
-        switchView.setEnabled(false);
         switchView.setVisibility(View.GONE);
         trailingStatusView.setText(textRes);
+        trailingStatusView.setContentDescription(getContext().getString(
+                R.string.setting_status_accessibility,
+                titleView.getText(),
+                summaryView.getText(),
+                detailView.getText(),
+                getContext().getString(textRes)));
         trailingStatusView.setVisibility(View.VISIBLE);
-        setAlpha(0.62f);
+        updateInteraction(false, 0.62f);
+    }
+
+    private void updateInteraction(boolean enabled, float alpha) {
+        rowEnabled = enabled;
+        boolean switchAvailable = switchView.getVisibility() == View.VISIBLE;
+        switchView.setEnabled(enabled && switchAvailable);
+        switchView.setFocusable(enabled && switchAvailable);
+        setClickable(enabled && switchAvailable);
+        setFocusable(false);
+        setAlpha(alpha);
+    }
+
+    private void updateSwitchContentDescription() {
+        switchView.setContentDescription(getContext().getString(
+                R.string.setting_switch_accessibility_detail,
+                titleView.getText(),
+                summaryView.getText(),
+                detailView.getText()));
     }
 }

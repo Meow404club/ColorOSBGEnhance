@@ -2,6 +2,7 @@ package com.frostwork.bgenhance.ui;
 
 import android.content.Context;
 import com.frostwork.bgenhance.DiagnosticsTargetIds;
+import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.ModuleApplication;
 import com.frostwork.bgenhance.ModuleRuntimeStatus;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
@@ -125,14 +126,29 @@ public final class HookStatusViewModel implements AutoCloseable {
             return revision;
         }
 
+        public boolean hasConfigError(String processId) {
+            if (status != Status.READY) return false;
+            for (DiagnosticsHookState row : rows) {
+                if (same(processId, row.processId)
+                        && DiagnosticsTargetIds.RUNTIME_CONFIG.equals(row.hookTargetId)
+                        && safe(row.installStatus).startsWith("CONFIG_ERROR")) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         public Installation installation(String hookTargetId) {
             if (status != Status.READY || hookTargetId == null || hookTargetId.isEmpty()) {
                 return Installation.UNKNOWN;
             }
             boolean failed = false;
             boolean unsupported = false;
+            String expectedProcessId = HookTargetIds.expectedProcessId(hookTargetId);
             for (DiagnosticsHookState row : rows) {
                 if (!hookTargetId.equals(row.hookTargetId)) continue;
+                if (!expectedProcessId.isEmpty()
+                        && !expectedProcessId.equals(row.processId)) continue;
                 String value = safe(row.installStatus);
                 if (value.startsWith("INSTALLED")) return Installation.INSTALLED;
                 if (value.startsWith("FAILED")) failed = true;

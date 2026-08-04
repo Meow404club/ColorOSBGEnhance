@@ -9,6 +9,7 @@ import android.view.ViewGroup;
 import android.widget.TextView;
 import android.widget.LinearLayout;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.widget.NestedScrollView;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import com.frostwork.bgenhance.R;
@@ -170,6 +171,17 @@ public final class ResidencyAppsActivity extends AppCompatActivity {
                 }
             }
         });
+        NestedScrollView pageScroll = findViewById(R.id.residency_page_scroll);
+        if (pageScroll != null && !list.isNestedScrollingEnabled()) {
+            pageScroll.setOnScrollChangeListener((NestedScrollView.OnScrollChangeListener)
+                    (scrollView, scrollX, scrollY, oldScrollX, oldScrollY) -> {
+                        if (scrollY > oldScrollY && currentState != null
+                                && currentState.hasMore()
+                                && !scrollView.canScrollVertically(1)) {
+                            viewModel.loadNextPage();
+                        }
+                    });
+        }
     }
 
     private void render(ResidencyAppsViewModel.State state) {
@@ -264,6 +276,10 @@ public final class ResidencyAppsActivity extends AppCompatActivity {
     }
 
     void applyListSurfaceMode(boolean content, boolean bounded) {
+        if (!list.isNestedScrollingEnabled()) {
+            applyWholePageListSurfaceMode(content);
+            return;
+        }
         ViewGroup.LayoutParams surfaceParams = listSurface.getLayoutParams();
         if (surfaceParams instanceof LinearLayout.LayoutParams) {
             LinearLayout.LayoutParams linearParams = (LinearLayout.LayoutParams) surfaceParams;
@@ -294,6 +310,31 @@ public final class ResidencyAppsActivity extends AppCompatActivity {
                 content && !bounded
                         ? getResources().getDimensionPixelSize(R.dimen.card_spacing)
                         : listBottomPadding);
+    }
+
+    private void applyWholePageListSurfaceMode(boolean content) {
+        ViewGroup.LayoutParams surfaceParams = listSurface.getLayoutParams();
+        if (surfaceParams instanceof LinearLayout.LayoutParams) {
+            LinearLayout.LayoutParams linearParams = (LinearLayout.LayoutParams) surfaceParams;
+            linearParams.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+            linearParams.weight = 0f;
+            listSurface.setLayoutParams(linearParams);
+        }
+        View surfaceContent = listSurface.getChildAt(0);
+        if (surfaceContent != null) {
+            ViewGroup.LayoutParams contentParams = surfaceContent.getLayoutParams();
+            contentParams.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+            surfaceContent.setLayoutParams(contentParams);
+        }
+        ViewGroup.LayoutParams listParams = list.getLayoutParams();
+        listParams.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+        list.setLayoutParams(listParams);
+        list.setNestedScrollingEnabled(false);
+        list.setPadding(
+                list.getPaddingLeft(),
+                list.getPaddingTop(),
+                list.getPaddingRight(),
+                listBottomPadding);
     }
 
     private void renderEmptyState() {

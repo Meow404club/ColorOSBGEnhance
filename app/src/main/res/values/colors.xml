@@ -10,9 +10,10 @@
     <color name="brand_soft">#FFE7F0FF</color>
     <color name="field_bg">#FFF0EFF4</color>
     <color name="dropdown_ripple">#332267C9</color>
-    <color name="success">#FF2E9B62</color>
     <color name="warning">#FFD98600</color>
     <color name="error">#FFB3261E</color>
+    <color name="risk_badge_recommended">#FF1D6F46</color>
+    <color name="risk_badge_medium">#FF875700</color>
     <color name="risk_badge_high">#FFB3261E</color>
     <color name="risk_badge_very_high">#FFC9343A</color>
     <color name="risk_badge_experimental">#FF1557B0</color>

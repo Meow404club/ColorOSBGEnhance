@@ -4,6 +4,7 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.activity.result.ActivityResultLauncher;
@@ -158,12 +159,51 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
         experimentalRiskRow = findViewById(R.id.residency_risk_experimental_row);
         highRiskSummary = findViewById(R.id.residency_risk_high_summary);
         experimentalRiskSummary = findViewById(R.id.residency_risk_experimental_summary);
+        adaptRiskNoticeLayout();
         applyNotice = findViewById(R.id.residency_policy_apply_notice);
         modeSummary = findViewById(R.id.residency_mode_selected_summary);
         modeSelector = findViewById(R.id.residency_mode_selector);
         enabledSwitch = findViewById(R.id.residency_policy_enabled);
         saveButton = findViewById(R.id.residency_policy_save);
         deleteButton = findViewById(R.id.residency_policy_delete);
+    }
+
+    private void adaptRiskNoticeLayout() {
+        adaptRiskNoticeRow(
+                this,
+                (LinearLayout) highRiskRow,
+                findViewById(R.id.residency_risk_high_badge),
+                highRiskSummary,
+                getResources().getConfiguration().fontScale);
+        adaptRiskNoticeRow(
+                this,
+                (LinearLayout) experimentalRiskRow,
+                findViewById(R.id.residency_risk_experimental_badge),
+                experimentalRiskSummary,
+                getResources().getConfiguration().fontScale);
+    }
+
+    static void adaptRiskNoticeRow(
+            android.content.Context context,
+            LinearLayout row,
+            View badge,
+            TextView summary,
+            float fontScale) {
+        boolean stacked = fontScale >= 1.5f;
+        row.setOrientation(stacked ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams badgeParams =
+                (LinearLayout.LayoutParams) badge.getLayoutParams();
+        badgeParams.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+        badgeParams.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+        badge.setLayoutParams(badgeParams);
+
+        LinearLayout.LayoutParams summaryParams =
+                (LinearLayout.LayoutParams) summary.getLayoutParams();
+        summaryParams.width = stacked ? ViewGroup.LayoutParams.MATCH_PARENT : 0;
+        summaryParams.weight = stacked ? 0f : 1f;
+        summaryParams.setMarginStart(stacked ? 0 : UiUtils.dp(context, 14));
+        summaryParams.topMargin = stacked ? UiUtils.dp(context, 8) : 0;
+        summary.setLayoutParams(summaryParams);
     }
 
     private void bindInteractions() {
@@ -450,10 +490,33 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
 
     private void updateApplyNotice() {
         if (applyNotice == null) return;
-        applyNotice.setText(ResidencyApplyStatus.message(
+        int message = ResidencyApplyStatus.message(
                 hookStatus,
                 ModuleApplication.isServiceConnected(),
-                ModuleSettings.getConfigRevision(this)));
+                ModuleApplication.hasConfigSyncError(),
+                ModuleSettings.getConfigRevision(this),
+                ModuleSettings.getLocalBoolean(this, ModuleSettings.KEY_MASTER_ENABLE),
+                ModuleSettings.getResidencyPolicy(this).enabled());
+        applyNotice.setText(message);
+        switch (ResidencyApplyStatus.tone(message)) {
+            case SUCCESS:
+                applyNotice.setBackgroundResource(R.drawable.bg_notice_success);
+                applyNotice.setTextColor(getColor(R.color.status_success_text));
+                break;
+            case ERROR:
+                applyNotice.setBackgroundResource(R.drawable.bg_notice_error);
+                applyNotice.setTextColor(getColor(R.color.status_error_text));
+                break;
+            case WARNING:
+                applyNotice.setBackgroundResource(R.drawable.bg_notice_warning);
+                applyNotice.setTextColor(getColor(R.color.banner_warning_text));
+                break;
+            case INFO:
+            default:
+                applyNotice.setBackgroundResource(R.drawable.bg_notice_info);
+                applyNotice.setTextColor(getColor(R.color.item_title));
+                break;
+        }
     }
 
     private void save() {

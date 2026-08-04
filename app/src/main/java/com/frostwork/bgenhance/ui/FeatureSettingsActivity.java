@@ -119,9 +119,7 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
             FeatureCatalog.FeatureSpec spec = specs.get(i);
             SettingSwitchRow row = new SettingSwitchRow(this);
             row.bind(spec, ModuleSettings.getLocalBoolean(this, spec.prefKey));
-            boolean unsupported = hookStatus != null
-                    && hookStatus.status() == HookStatusViewModel.Status.READY
-                    && hookStatus.isExplicitlyUnavailable(spec.hookTargetId);
+            boolean unsupported = isExplicitlyUnsupported(spec);
             if (spec.diagnosticOnly) row.showDiagnosticOnly();
             else if (unsupported) row.showUnsupported();
             else row.setRowEnabled(masterEnabled);
@@ -158,7 +156,7 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
                     .setNegativeButton(R.string.cancel, (dialog, which) -> row.setCheckedSilently(false))
                     .setPositiveButton(R.string.enable_anyway, (dialog, which) -> {
                         ModuleSettings.prefs(this).edit()
-                                .putBoolean("confirmed_risk." + spec.prefKey, true).commit();
+                                .putBoolean("confirmed_risk." + spec.prefKey, true).apply();
                         persist(spec, row, true);
                     })
                     .setOnCancelListener(dialog -> row.setCheckedSilently(false))
@@ -177,6 +175,8 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
             return;
         }
         boolean saved = ModuleSettings.setBoolean(this, spec.prefKey, checked);
+        row.setCheckedSilently(ModuleSettings.getLocalBoolean(this, spec.prefKey));
+        if (isExplicitlyUnsupported(spec)) row.showUnsupported(row.isChecked());
         Snackbar.make(findViewById(android.R.id.content),
                 saved ? R.string.settings_saved : R.string.settings_save_failed,
                 saved ? Snackbar.LENGTH_SHORT : Snackbar.LENGTH_LONG).show();
@@ -186,6 +186,12 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
         return spec.risk == FeatureCatalog.Risk.HIGH
                 || spec.risk == FeatureCatalog.Risk.VERY_HIGH
                 || spec.experimental;
+    }
+
+    private boolean isExplicitlyUnsupported(FeatureCatalog.FeatureSpec spec) {
+        return hookStatus != null
+                && hookStatus.status() == HookStatusViewModel.Status.READY
+                && hookStatus.isExplicitlyUnavailable(spec.hookTargetId);
     }
 
     private boolean isCustomMode() {
