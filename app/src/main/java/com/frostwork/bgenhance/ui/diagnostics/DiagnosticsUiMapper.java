@@ -468,6 +468,8 @@ public final class DiagnosticsUiMapper {
             DiagnosticsHookState state, int localConfigRevision) {
         String value = state.installStatus == null ? "" : state.installStatus;
         if (value.startsWith("CONFIG_ERROR")) return HookStatus.FAILED;
+        if (value.startsWith("IDENTITY_READY")) return HookStatus.READY;
+        if (value.startsWith("PENDING_IDENTITY")) return HookStatus.PENDING;
         if (value.startsWith("CONFIG_READY")) {
             return state.configRevision >= localConfigRevision
                     ? HookStatus.READY : HookStatus.PENDING;

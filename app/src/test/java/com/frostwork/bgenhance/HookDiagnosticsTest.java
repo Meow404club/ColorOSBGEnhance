@@ -14,14 +14,23 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsBootId;
+import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsWireParser;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsWriteBatch;
+import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
+import com.frostwork.bgenhance.residency.model.ResidencyMode;
+import com.frostwork.bgenhance.residency.model.ResidencyPresets;
+import com.frostwork.bgenhance.residency.runtime.PackageUidSource;
+import com.frostwork.bgenhance.residency.runtime.ResidencyRuntimeController;
+import com.frostwork.bgenhance.residency.runtime.RuntimeConfigSnapshot;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalInt;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -109,6 +118,46 @@ public final class HookDiagnosticsTest {
 
         assertTrue(first.sameConfigurationAs(retry));
         assertNotEquals(first.reloadLatencyMs, retry.reloadLatencyMs);
+    }
+
+    @Test
+    public void residencyIdentityFailureIsPersistedAsAStickyRuntimeState()
+            throws Exception {
+        ResidencyRuntimeController controller = new ResidencyRuntimeController(Runnable::run);
+        controller.setPackageUidSource(new PackageUidSource() {
+            @Override
+            public boolean hasCompleteUidEnumeration() { return true; }
+
+            @Override
+            public OptionalInt findUid(String packageName) {
+                throw new SecurityException("visibility denied");
+            }
+
+            @Override
+            public Set<String> findPackagesForUid(int uid) {
+                return Set.of("com.example.managed");
+            }
+        });
+        AppResidencyPolicy policy = ResidencyPresets.create(
+                "com.example.managed", ResidencyMode.BALANCED);
+        controller.updateConfig(RuntimeConfigSnapshot.available(
+                7L, true, true, false, 2L,
+                Map.of(policy.packageName(), policy)));
+
+        HookDiagnostics.reportResidencyRuntime(controller.state());
+
+        DiagnosticsHookState identity = null;
+        for (DiagnosticsHookState candidate : stickyStates("system_server")) {
+            if (DiagnosticsTargetIds.RUNTIME_IDENTITY.equals(candidate.hookTargetId)) {
+                identity = candidate;
+                break;
+            }
+        }
+        assertNotNull(identity);
+        assertEquals("FAILED_FAIL_OPEN_IDENTITY_REBUILD", identity.installStatus);
+        assertEquals(7, identity.configRevision);
+        assertEquals(-1, identity.policyRevision);
+        assertTrue(identity.lastError.contains("SecurityException"));
     }
 
     @Test
@@ -864,6 +913,14 @@ public final class HookDiagnosticsTest {
         return parsed.batch;
     }
 
+    @SuppressWarnings("unchecked")
+    private static List<DiagnosticsHookState> stickyStates(String processId)
+            throws Exception {
+        Method method = HookDiagnostics.class.getDeclaredMethod("stickyStates", String.class);
+        method.setAccessible(true);
+        return (List<DiagnosticsHookState>) method.invoke(null, processId);
+    }
+
     private static Bundle acceptedAck(Bundle request, long epoch) {
         DiagnosticsWriteBatch batch = parse(request);
         Bundle response = baseResponse(true, epoch);
@@ -1065,6 +1122,11 @@ public final class HookDiagnosticsTest {
                         HookDiagnostics.class, "CURRENT_CONFIG_REPORT");
         config.set(new HookDiagnostics.ConfigReportState(
                 Integer.MIN_VALUE, "", "", 0L, ""));
+        @SuppressWarnings("unchecked")
+        AtomicReference<HookDiagnostics.IdentityReportState> identity =
+                (AtomicReference<HookDiagnostics.IdentityReportState>) staticValue(
+                        HookDiagnostics.class, "CURRENT_IDENTITY_REPORT");
+        identity.set(HookDiagnostics.IdentityReportState.empty());
 
         setStaticField(HookDiagnostics.class, "sLastReportedConfig", null);
         setStaticField(HookDiagnostics.class, "sLastConfigReportAt", 0L);

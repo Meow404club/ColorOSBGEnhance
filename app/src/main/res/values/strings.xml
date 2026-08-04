@@ -147,8 +147,10 @@
     <string name="diagnostics_source_other">其他来源</string>
     <string name="diagnostics_runtime_system_process">系统框架进程</string>
     <string name="diagnostics_runtime_system_config">系统框架设置</string>
+    <string name="diagnostics_runtime_system_identity">系统框架应用识别</string>
     <string name="diagnostics_runtime_athena_process">系统后台管理服务（Athena）</string>
     <string name="diagnostics_runtime_athena_config">系统后台管理服务（Athena）设置</string>
+    <string name="diagnostics_runtime_athena_identity">后台管理服务应用识别</string>
     <string name="diagnostics_hook_bridge_startup">运行记录连接</string>
     <string name="diagnostics_process_system_server">系统框架</string>
     <string name="diagnostics_process_athena">系统后台管理服务（Athena）</string>

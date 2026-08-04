@@ -18,7 +18,8 @@ public final class DiagnosticsHookCatalog {
     public enum Kind {
         HOOK_TARGET,
         RUNTIME_PROCESS,
-        RUNTIME_CONFIG
+        RUNTIME_CONFIG,
+        RUNTIME_IDENTITY
     }
 
     public static final class Entry {
@@ -71,6 +72,12 @@ public final class DiagnosticsHookCatalog {
                 "diagnostics_runtime_system_config",
                 "系统服务设置同步"));
         entries.add(runtime(
+                PROCESS_SYSTEM_SERVER,
+                DiagnosticsTargetIds.RUNTIME_IDENTITY,
+                Kind.RUNTIME_IDENTITY,
+                "diagnostics_runtime_system_identity",
+                "系统服务应用识别"));
+        entries.add(runtime(
                 PROCESS_ATHENA,
                 DiagnosticsTargetIds.RUNTIME_PROCESS,
                 Kind.RUNTIME_PROCESS,
@@ -82,6 +89,12 @@ public final class DiagnosticsHookCatalog {
                 Kind.RUNTIME_CONFIG,
                 "diagnostics_runtime_athena_config",
                 "后台管理服务设置同步"));
+        entries.add(runtime(
+                PROCESS_ATHENA,
+                DiagnosticsTargetIds.RUNTIME_IDENTITY,
+                Kind.RUNTIME_IDENTITY,
+                "diagnostics_runtime_athena_identity",
+                "后台管理服务应用识别"));
         entries.add(system(
                 HookTargetIds.DIAGNOSTICS_BRIDGE_STARTUP,
                 "diagnostics_hook_bridge_startup",

@@ -20,6 +20,7 @@ import com.frostwork.bgenhance.residency.model.FreezeSource;
 import com.frostwork.bgenhance.residency.model.ResourceType;
 import com.frostwork.bgenhance.residency.model.WakeSource;
 import com.frostwork.bgenhance.residency.runtime.IdentityResolutionStatus;
+import com.frostwork.bgenhance.residency.runtime.ResidencyRuntimeState;
 import com.frostwork.bgenhance.residency.runtime.RuntimeConfigSnapshot;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -89,6 +90,8 @@ public final class HookDiagnostics {
     private static final AtomicReference<ConfigReportState> CURRENT_CONFIG_REPORT =
             new AtomicReference<>(new ConfigReportState(
                     Integer.MIN_VALUE, "", "", 0L, ""));
+    private static final AtomicReference<IdentityReportState> CURRENT_IDENTITY_REPORT =
+            new AtomicReference<>(IdentityReportState.empty());
     private static final String BOOT_ID = DiagnosticsBootId.readCurrent();
     private static final String SENDER_INSTANCE_ID = createSenderInstanceId();
 
@@ -165,6 +168,23 @@ public final class HookDiagnostics {
         if (featureValue.isEmpty()) return;
         FEATURE_STATUSES.put(featureValue, stableId(status, "UNKNOWN"));
         FEATURE_UPDATED_AT.put(featureValue, System.currentTimeMillis());
+        STICKY_GENERATION.incrementAndGet();
+        scheduleFlush(0L);
+    }
+
+    static void reportResidencyRuntime(ResidencyRuntimeState state) {
+        if (state == null) return;
+        String processId = safeCurrentProcessId();
+        String error = state.status() == ResidencyRuntimeState.Status.IDENTITY_REBUILD_FAILED
+                || state.status() == ResidencyRuntimeState.Status.IDENTITY_SOURCE_UNAVAILABLE
+                ? state.error() : "";
+        CURRENT_IDENTITY_REPORT.set(new IdentityReportState(
+                processId,
+                identityStatus(state.status()),
+                diagnosticRevision(state.snapshot().configRevision()),
+                diagnosticRevision(state.identityIndex().policyRevision()),
+                error,
+                System.currentTimeMillis()));
         STICKY_GENERATION.incrementAndGet();
         scheduleFlush(0L);
     }
@@ -657,6 +677,19 @@ public final class HookDiagnostics {
                             processId, System.currentTimeMillis()))
                     .build());
         }
+        IdentityReportState identity = CURRENT_IDENTITY_REPORT.get();
+        if (identity.reported && processId.equals(identity.processId)) {
+            values.add(DiagnosticsHookState.builder()
+                    .processId(processId)
+                    .hookTargetId(DiagnosticsTargetIds.RUNTIME_IDENTITY)
+                    .installStatus(identity.status)
+                    .bootId(BOOT_ID)
+                    .configRevision(identity.configRevision)
+                    .policyRevision(identity.policyRevision)
+                    .lastError(identity.error)
+                    .updatedAt(identity.updatedAt)
+                    .build());
+        }
         ConfigReportState config = CURRENT_CONFIG_REPORT.get();
         if (config.revision != Integer.MIN_VALUE) {
             values.add(DiagnosticsHookState.builder()
@@ -796,6 +829,24 @@ public final class HookDiagnostics {
         }
         if (HookTargetIds.HANS_ACTIVE_RECOVERY.equals(target)) return FeatureIds.HANS_RECOVERY;
         return "";
+    }
+
+    private static String identityStatus(ResidencyRuntimeState.Status status) {
+        if (status == null) return "IDENTITY_UNKNOWN";
+        switch (status) {
+            case READY:
+                return "IDENTITY_READY";
+            case IDENTITY_REBUILD_PENDING:
+                return "PENDING_IDENTITY_REBUILD";
+            case IDENTITY_SOURCE_UNAVAILABLE:
+                return "PENDING_IDENTITY_SOURCE";
+            case CONFIG_UNAVAILABLE:
+                return "PENDING_IDENTITY_CONFIG";
+            case IDENTITY_REBUILD_FAILED:
+                return "FAILED_FAIL_OPEN_IDENTITY_REBUILD";
+            default:
+                return "IDENTITY_UNKNOWN";
+        }
     }
 
     static String hookTargetFor(HookEvent event, DecisionTrace trace) {
@@ -1199,6 +1250,36 @@ public final class HookDiagnostics {
             this.epoch = epoch;
             this.sequence = sequence;
             this.snapshot = snapshot;
+        }
+    }
+
+    static final class IdentityReportState {
+        final String processId;
+        final String status;
+        final int configRevision;
+        final int policyRevision;
+        final String error;
+        final long updatedAt;
+        final boolean reported;
+
+        IdentityReportState(
+                String processId,
+                String status,
+                int configRevision,
+                int policyRevision,
+                String error,
+                long updatedAt) {
+            this.processId = processId == null ? "" : processId;
+            this.status = status == null ? "IDENTITY_UNKNOWN" : status;
+            this.configRevision = configRevision;
+            this.policyRevision = policyRevision;
+            this.error = error == null ? "" : error;
+            this.updatedAt = updatedAt;
+            this.reported = !this.processId.isEmpty();
+        }
+
+        static IdentityReportState empty() {
+            return new IdentityReportState("", "IDENTITY_UNKNOWN", -1, -1, "", 0L);
         }
     }
 

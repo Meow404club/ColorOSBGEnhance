@@ -56,6 +56,9 @@ public final class HookResidencyRuntime {
     };
     private static final ResidencyRuntimeController CONTROLLER =
             new ResidencyRuntimeController(IDENTITY_EXECUTOR, IDENTITY_RETRY_SCHEDULER);
+    static {
+        CONTROLLER.addStateListener(HookDiagnostics::reportResidencyRuntime);
+    }
     private static final RetryingRegistration PACKAGE_RECEIVER_REGISTRATION =
             new RetryingRegistration(
                     IDENTITY_EXECUTOR::schedule,

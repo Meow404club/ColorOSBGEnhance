@@ -204,12 +204,18 @@ public final class DiagnosticsUiMapperTest {
                 hookState(DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
                         DiagnosticsTargetIds.RUNTIME_CONFIG,
                         "current_boot", "CONFIG_READY", 8L),
+                hookState(DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                        DiagnosticsTargetIds.RUNTIME_IDENTITY,
+                        "current_boot", "IDENTITY_READY", 8L),
                 hookState(DiagnosticsHookCatalog.PROCESS_ATHENA,
                         DiagnosticsTargetIds.RUNTIME_PROCESS,
                         "current_boot", currentStage(), 9L),
                 hookState(DiagnosticsHookCatalog.PROCESS_ATHENA,
                         DiagnosticsTargetIds.RUNTIME_CONFIG,
-                        "current_boot", "CONFIG_READY", 10L));
+                        "current_boot", "CONFIG_READY", 10L),
+                hookState(DiagnosticsHookCatalog.PROCESS_ATHENA,
+                        DiagnosticsTargetIds.RUNTIME_IDENTITY,
+                        "current_boot", "IDENTITY_READY", 10L));
 
         List<DiagnosticsUiMapper.HookTargetRow> rows = mapper.mapHookTargets(
                 DiagnosticsDataSource.HookStatePage.success(states), "current_boot");
@@ -231,6 +237,27 @@ public final class DiagnosticsUiMapperTest {
             assertTrue(row.reported);
             assertEquals(DiagnosticsUiMapper.HookStatus.READY, row.status);
         }
+    }
+
+    @Test
+    public void identityRuntimeDistinguishesReadyPendingAndFailure() {
+        List<DiagnosticsHookState> states = Arrays.asList(
+                hookState(DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                        DiagnosticsTargetIds.RUNTIME_IDENTITY,
+                        "current_boot", "PENDING_IDENTITY_REBUILD", 1L),
+                hookState(DiagnosticsHookCatalog.PROCESS_ATHENA,
+                        DiagnosticsTargetIds.RUNTIME_IDENTITY,
+                        "current_boot", "FAILED_FAIL_OPEN_IDENTITY_REBUILD", 2L));
+
+        List<DiagnosticsUiMapper.HookTargetRow> rows = mapper.mapHookTargets(
+                DiagnosticsDataSource.HookStatePage.success(states), "current_boot");
+
+        assertEquals(DiagnosticsUiMapper.HookStatus.PENDING,
+                findHook(rows, DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                        DiagnosticsTargetIds.RUNTIME_IDENTITY).status);
+        assertEquals(DiagnosticsUiMapper.HookStatus.FAILED,
+                findHook(rows, DiagnosticsHookCatalog.PROCESS_ATHENA,
+                        DiagnosticsTargetIds.RUNTIME_IDENTITY).status);
     }
 
     @Test

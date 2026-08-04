@@ -33,8 +33,8 @@ public final class DiagnosticsHookCatalogTest {
 
         assertEquals(expected, actual);
         assertEquals(HookTargetIds.all().size(), DiagnosticsHookCatalog.physicalHooks().size());
-        assertEquals(4, DiagnosticsHookCatalog.runtimeRows().size());
-        assertEquals(HookTargetIds.all().size() + 4, DiagnosticsHookCatalog.all().size());
+        assertEquals(6, DiagnosticsHookCatalog.runtimeRows().size());
+        assertEquals(HookTargetIds.all().size() + 6, DiagnosticsHookCatalog.all().size());
     }
 
     @Test
@@ -63,10 +63,14 @@ public final class DiagnosticsHookCatalogTest {
                 + ":" + DiagnosticsTargetIds.RUNTIME_PROCESS);
         expected.add(DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER
                 + ":" + DiagnosticsTargetIds.RUNTIME_CONFIG);
+        expected.add(DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER
+                + ":" + DiagnosticsTargetIds.RUNTIME_IDENTITY);
         expected.add(DiagnosticsHookCatalog.PROCESS_ATHENA
                 + ":" + DiagnosticsTargetIds.RUNTIME_PROCESS);
         expected.add(DiagnosticsHookCatalog.PROCESS_ATHENA
                 + ":" + DiagnosticsTargetIds.RUNTIME_CONFIG);
+        expected.add(DiagnosticsHookCatalog.PROCESS_ATHENA
+                + ":" + DiagnosticsTargetIds.RUNTIME_IDENTITY);
 
         Set<String> actual = new LinkedHashSet<>();
         for (DiagnosticsHookCatalog.Entry entry : DiagnosticsHookCatalog.runtimeRows()) {

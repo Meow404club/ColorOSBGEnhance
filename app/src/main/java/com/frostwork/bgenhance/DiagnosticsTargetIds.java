@@ -6,10 +6,12 @@ public final class DiagnosticsTargetIds {
 
     public static final String RUNTIME_PROCESS = "runtime_process";
     public static final String RUNTIME_CONFIG = "runtime_config";
+    public static final String RUNTIME_IDENTITY = "runtime_identity";
 
     public static boolean isKnown(String value) {
         return HookTargetIds.all().contains(value)
                 || RUNTIME_PROCESS.equals(value)
-                || RUNTIME_CONFIG.equals(value);
+                || RUNTIME_CONFIG.equals(value)
+                || RUNTIME_IDENTITY.equals(value);
     }
 }
