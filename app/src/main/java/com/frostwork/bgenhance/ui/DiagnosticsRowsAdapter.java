@@ -314,6 +314,11 @@ final class DiagnosticsRowsAdapter
                         ? R.string.diagnostics_runtime_athena_config
                         : R.string.diagnostics_runtime_system_config;
             }
+            if (DiagnosticsTargetIds.RUNTIME_IDENTITY.equals(target)) {
+                return BridgeContract.PROCESS_ATHENA.equals(row.expectedProcessId)
+                        ? R.string.diagnostics_runtime_athena_identity
+                        : R.string.diagnostics_runtime_system_identity;
+            }
             if (HookTargetIds.DIAGNOSTICS_BRIDGE_STARTUP.equals(target)) {
                 return R.string.diagnostics_hook_bridge_startup;
             }
