@@ -33,7 +33,7 @@ public final class FeatureCatalogIdentifierTest {
                 count++;
             }
         }
-        assertEquals(13, count);
+        assertEquals(12, count);
     }
 
     @Test
@@ -53,14 +53,12 @@ public final class FeatureCatalogIdentifierTest {
                 HookTargetIds.OSENSE_PROCESS_KILL);
         assertGroupTargets(FeatureCatalog.GROUP_FREEZE,
                 HookTargetIds.HANS_FREEZE_DISPATCH,
-                HookTargetIds.HANS_FREEZE_DISPATCH,
                 HookTargetIds.HANS_FREEZE_DISPATCH);
 
         List<FeatureCatalog.FeatureSpec> freeze =
                 FeatureCatalog.forGroup(FeatureCatalog.GROUP_FREEZE);
         assertFalse(freeze.get(0).diagnosticOnly);
         assertFalse(freeze.get(1).diagnosticOnly);
-        assertTrue(freeze.get(2).diagnosticOnly);
     }
 
     private static void assertGroupTargets(String group, String... expected) {

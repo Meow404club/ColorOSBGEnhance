@@ -3,14 +3,23 @@ package com.frostwork.bgenhance.ui;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.graphics.Color;
+import android.graphics.Rect;
+import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.Gravity;
+import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.PopupWindow;
+import android.widget.FrameLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.widget.PopupWindowCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import com.frostwork.bgenhance.FeatureIds;
@@ -46,15 +55,15 @@ public final class DiagnosticsActivity extends AppCompatActivity {
     private RecyclerView list;
     private MaterialButtonToggleGroup tabs;
     private TextView resultCount;
+    private TextView historyNotice;
     private View loadingState;
     private TextView loadingText;
     private View emptyState;
     private TextView emptyTitle;
     private TextView emptySummary;
     private View errorState;
-    private MaterialSwitch verboseSwitch;
     private DiagnosticsViewModel.State currentState;
-    private boolean bindingVerbose;
+    private PopupWindow optionsPopup;
     private boolean clearInFlight;
     private boolean exportInFlight;
     private boolean started;
@@ -81,7 +90,6 @@ public final class DiagnosticsActivity extends AppCompatActivity {
         bindToolbar();
         bindTabs(savedInstanceState == null
                 ? 0 : savedInstanceState.getInt(STATE_SELECTED_TAB, 0));
-        bindVerboseLogging();
 
         viewModel = DiagnosticsViewModel.create(this, backend, this::runOnUiThread);
         viewModel.setListener(this::render);
@@ -120,6 +128,7 @@ public final class DiagnosticsActivity extends AppCompatActivity {
         }
         if (viewModel != null) viewModel.close();
         if (adapter != null) adapter.close();
+        if (optionsPopup != null) optionsPopup.dismiss();
         super.onDestroy();
     }
 
@@ -133,15 +142,15 @@ public final class DiagnosticsActivity extends AppCompatActivity {
         list = findViewById(R.id.diagnostics_list);
         tabs = findViewById(R.id.diagnostics_tabs);
         resultCount = findViewById(R.id.diagnostics_result_count);
+        historyNotice = findViewById(R.id.diagnostics_history_notice);
         loadingState = findViewById(R.id.diagnostics_loading_state);
         loadingText = findViewById(R.id.diagnostics_loading_text);
         emptyState = findViewById(R.id.diagnostics_empty_state);
         emptyTitle = findViewById(R.id.diagnostics_empty_title);
         emptySummary = findViewById(R.id.diagnostics_empty_summary);
         errorState = findViewById(R.id.diagnostics_error_state);
-        verboseSwitch = findViewById(R.id.diagnostics_verbose_switch);
-
-        adapter = new DiagnosticsRowsAdapter(this);
+        adapter = new DiagnosticsRowsAdapter(this, behavior -> startActivity(
+                DiagnosticsBehaviorDetailActivity.createIntent(this, behavior)));
         list.setLayoutManager(new LinearLayoutManager(this));
         list.setAdapter(adapter);
         findViewById(R.id.diagnostics_retry).setOnClickListener(view -> viewModel.refresh());
@@ -166,6 +175,11 @@ public final class DiagnosticsActivity extends AppCompatActivity {
             }
             if (item.getItemId() == R.id.action_clear_diagnostics) {
                 confirmClear();
+                return true;
+            }
+            if (item.getItemId() == R.id.action_more_diagnostics) {
+                View anchor = toolbar.findViewById(R.id.action_more_diagnostics);
+                showOptionsPopup(anchor == null ? toolbar : anchor);
                 return true;
             }
             return false;
@@ -198,22 +212,88 @@ public final class DiagnosticsActivity extends AppCompatActivity {
         return 0;
     }
 
-    private void bindVerboseLogging() {
-        bindingVerbose = true;
-        verboseSwitch.setChecked(ModuleSettings.getLocalBoolean(
+    private void showOptionsPopup(View anchor) {
+        if (optionsPopup != null) optionsPopup.dismiss();
+        FrameLayout popupParent = new FrameLayout(this);
+        View content = LayoutInflater.from(this).inflate(
+                R.layout.popup_diagnostics_options, popupParent, false);
+        MaterialSwitch verbose = content.findViewById(
+                R.id.diagnostics_popup_verbose_switch);
+        verbose.setContentDescription(getString(
+                R.string.setting_switch_accessibility_summary,
+                getString(R.string.verbose_title),
+                getString(R.string.verbose_summary)));
+        verbose.setChecked(ModuleSettings.getLocalBoolean(
                 this, ModuleSettings.KEY_VERBOSE_LOG));
-        bindingVerbose = false;
-        verboseSwitch.setOnCheckedChangeListener((button, checked) -> {
-            if (bindingVerbose) return;
-            if (!ModuleSettings.setBoolean(this, ModuleSettings.KEY_VERBOSE_LOG, checked)) {
-                bindingVerbose = true;
-                verboseSwitch.setChecked(!checked);
-                bindingVerbose = false;
-                Toast.makeText(this, R.string.settings_save_failed, Toast.LENGTH_LONG).show();
+        boolean[] bindingVerbose = { false };
+        verbose.setOnCheckedChangeListener((button, checked) -> {
+            if (bindingVerbose[0]) return;
+            if (ModuleSettings.setBoolean(this, ModuleSettings.KEY_VERBOSE_LOG, checked)) {
+                Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show();
+                return;
             }
+            bindingVerbose[0] = true;
+            button.setChecked(!checked);
+            bindingVerbose[0] = false;
+            Toast.makeText(this, R.string.settings_save_failed, Toast.LENGTH_LONG).show();
         });
-        findViewById(R.id.diagnostics_verbose_row).setOnClickListener(
-                view -> verboseSwitch.toggle());
+        content.findViewById(R.id.diagnostics_popup_verbose_row).setOnClickListener(
+                view -> verbose.toggle());
+        content.findViewById(R.id.diagnostics_popup_save).setOnClickListener(view -> {
+            dismissOptionsPopup();
+            confirmFullExport();
+        });
+        content.findViewById(R.id.diagnostics_popup_clear).setOnClickListener(view -> {
+            dismissOptionsPopup();
+            confirmClear();
+        });
+
+        int width = Math.min(dp(300), getResources().getDisplayMetrics().widthPixels
+                - dp(24));
+        width = Math.max(1, width);
+        content.measure(
+                View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        Rect visibleFrame = new Rect();
+        anchor.getWindowVisibleDisplayFrame(visibleFrame);
+        int[] anchorLocation = new int[2];
+        anchor.getLocationOnScreen(anchorLocation);
+        int availableBelow = visibleFrame.bottom
+                - (anchorLocation[1] + anchor.getHeight());
+        int availableAbove = anchorLocation[1] - visibleFrame.top;
+        int availableHeight = Math.max(availableBelow, availableAbove);
+        if (availableHeight <= 0) availableHeight = visibleFrame.height();
+        if (availableHeight <= 0) {
+            availableHeight = getResources().getDisplayMetrics().heightPixels;
+        }
+        int height = constrainedPopupHeight(
+                content.getMeasuredHeight(), availableHeight, dp(12));
+        PopupWindow popup = new PopupWindow(
+                content, width, height, true);
+        popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        popup.setOutsideTouchable(true);
+        popup.setElevation(dp(10));
+        popup.setClippingEnabled(true);
+        popup.setInputMethodMode(PopupWindow.INPUT_METHOD_NOT_NEEDED);
+        popup.setOnDismissListener(() -> {
+            if (optionsPopup == popup) optionsPopup = null;
+        });
+        optionsPopup = popup;
+        PopupWindowCompat.showAsDropDown(popup, anchor, 0, 0, Gravity.END);
+    }
+
+    private void dismissOptionsPopup() {
+        if (optionsPopup != null) optionsPopup.dismiss();
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    static int constrainedPopupHeight(
+            int desiredHeight, int visibleHeight, int verticalMargin) {
+        int maximumHeight = Math.max(1, visibleHeight - Math.max(0, verticalMargin));
+        return Math.max(1, Math.min(Math.max(1, desiredHeight), maximumHeight));
     }
 
     private void bindListPaging() {
@@ -242,6 +322,11 @@ public final class DiagnosticsActivity extends AppCompatActivity {
         emptyState.setVisibility(empty ? View.VISIBLE : View.GONE);
         errorState.setVisibility(error ? View.VISIBLE : View.GONE);
         resultCount.setVisibility(content || empty ? View.VISIBLE : View.INVISIBLE);
+        boolean aggregateView = state.view == DiagnosticsViewModel.View.APPLICATION
+                || state.view == DiagnosticsViewModel.View.BEHAVIOR;
+        historyNotice.setVisibility(
+                (content || empty) && aggregateView && state.historyTruncated
+                        ? View.VISIBLE : View.GONE);
 
         if (content) {
             adapter.submitList(state.items);

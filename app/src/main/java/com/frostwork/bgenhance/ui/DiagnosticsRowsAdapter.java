@@ -25,11 +25,21 @@ import java.util.List;
 final class DiagnosticsRowsAdapter
         extends RecyclerView.Adapter<DiagnosticsRowsAdapter.RowViewHolder>
         implements AutoCloseable {
+    interface BehaviorClickListener {
+        void onBehaviorClicked(DiagnosticsBehavior behavior);
+    }
+
     private final ResidencyAppIconLoader iconLoader;
+    private final BehaviorClickListener behaviorClickListener;
     private List<DiagnosticsUiMapper.UiRow> items = new ArrayList<>();
 
     DiagnosticsRowsAdapter(Context context) {
+        this(context, null);
+    }
+
+    DiagnosticsRowsAdapter(Context context, BehaviorClickListener behaviorClickListener) {
         iconLoader = new ResidencyAppIconLoader(context);
+        this.behaviorClickListener = behaviorClickListener;
         setHasStableIds(true);
     }
 
@@ -82,6 +92,7 @@ final class DiagnosticsRowsAdapter
         private final TextView metrics;
         private final TextView detail;
         private final TextView badge;
+        private final ImageView chevron;
 
         RowViewHolder(View itemView) {
             super(itemView);
@@ -91,6 +102,7 @@ final class DiagnosticsRowsAdapter
             metrics = itemView.findViewById(R.id.diagnostics_row_metrics);
             detail = itemView.findViewById(R.id.diagnostics_row_detail);
             badge = itemView.findViewById(R.id.diagnostics_row_badge);
+            chevron = itemView.findViewById(R.id.diagnostics_row_chevron);
         }
 
         void bind(DiagnosticsUiMapper.UiRow row) {
@@ -107,10 +119,14 @@ final class DiagnosticsRowsAdapter
 
         private void bindApplication(DiagnosticsUiMapper.ApplicationRow row) {
             Context context = itemView.getContext();
-            icon.setVisibility(View.VISIBLE);
-            iconLoader.bind(icon, row.packageName);
-            title.setText(row.displayName);
-            if (!row.displayName.equals(row.packageName)) setSubtitle(row.packageName);
+            if (row.unidentified) {
+                title.setText(R.string.diagnostics_application_unidentified);
+            } else {
+                icon.setVisibility(View.VISIBLE);
+                iconLoader.bind(icon, row.packageName);
+                title.setText(row.displayName);
+                if (!row.displayName.equals(row.packageName)) setSubtitle(row.packageName);
+            }
             metrics.setText(metricsSummary(context, row.totals));
             setDetail(applicationDetail(context, row));
         }
@@ -119,13 +135,20 @@ final class DiagnosticsRowsAdapter
             Context context = itemView.getContext();
             title.setText(behaviorTitle(row.behavior));
             metrics.setText(metricsSummary(context, row.metrics));
+            if (behaviorClickListener != null) {
+                chevron.setVisibility(View.VISIBLE);
+                itemView.setClickable(true);
+                itemView.setFocusable(true);
+                itemView.setOnClickListener(view ->
+                        behaviorClickListener.onBehaviorClicked(row.behavior));
+            }
             if (row.metrics.isEmpty()) {
-                setDetail(context.getString(R.string.diagnostics_no_activity));
+                setDetail(context.getString(R.string.diagnostics_behavior_detail_action)
+                        + "\n" + context.getString(R.string.diagnostics_no_activity));
             } else {
-                String value = context.getString(
-                        R.string.diagnostics_metrics_secondary,
-                        row.metrics.passed,
-                        row.metrics.throttled);
+                String value = context.getString(R.string.diagnostics_behavior_detail_action);
+                String resultDetails = resultDetails(context, row.metrics);
+                if (!resultDetails.isEmpty()) value += "\n" + resultDetails;
                 if (row.metrics.lastAt > 0L) {
                     value += "\n" + context.getString(
                             R.string.diagnostics_recent_activity,
@@ -152,10 +175,14 @@ final class DiagnosticsRowsAdapter
             }
 
             ArrayList<String> details = new ArrayList<>();
-            if (row.configRevision >= 0 || row.policyRevision >= 0) {
+            if (row.configRevision >= 0) {
                 details.add(context.getString(
-                        R.string.diagnostics_hook_revisions,
-                        row.configRevision,
+                        R.string.diagnostics_hook_config_revision,
+                        row.configRevision));
+            }
+            if (row.policyRevision >= 0) {
+                details.add(context.getString(
+                        R.string.diagnostics_hook_policy_revision,
                         row.policyRevision));
             }
             long latest = Math.max(row.updatedAt, Math.max(row.lastHookAt, row.lastEventAt));
@@ -176,6 +203,10 @@ final class DiagnosticsRowsAdapter
             subtitle.setVisibility(View.GONE);
             detail.setVisibility(View.GONE);
             badge.setVisibility(View.GONE);
+            chevron.setVisibility(View.GONE);
+            itemView.setOnClickListener(null);
+            itemView.setClickable(false);
+            itemView.setFocusable(false);
             title.setText("");
             subtitle.setText("");
             metrics.setText("");
@@ -255,7 +286,7 @@ final class DiagnosticsRowsAdapter
             if (badge.getVisibility() == View.VISIBLE) values.add(badge.getText());
             values.add(metrics.getText());
             if (detail.getVisibility() == View.VISIBLE) values.add(detail.getText());
-            return android.text.TextUtils.join(". ", values);
+            return android.text.TextUtils.join("，", values);
         }
 
         private int behaviorTitle(DiagnosticsBehavior behavior) {
@@ -325,6 +356,31 @@ final class DiagnosticsRowsAdapter
                 metrics.observed,
                 metrics.blocked,
                 metrics.failOpen);
+    }
+
+    static String resultDetails(
+            Context context, DiagnosticsUiMapper.Metrics metrics) {
+        ArrayList<String> values = new ArrayList<>();
+        addMetric(values, context, R.string.diagnostics_result_passed, metrics.passed);
+        addMetric(values, context, R.string.diagnostics_result_observed, metrics.observedOnly);
+        addMetric(values, context, R.string.diagnostics_result_recovered, metrics.recovered);
+        addMetric(values, context, R.string.diagnostics_result_no_action,
+                metrics.noActionNeeded);
+        addMetric(values, context, R.string.diagnostics_result_safety_aborted,
+                metrics.safetyAborted);
+        addMetric(values, context, R.string.diagnostics_result_applied, metrics.applied);
+        addMetric(values, context, R.string.diagnostics_result_throttle_allowed,
+                metrics.throttleAllowed);
+        addMetric(values, context, R.string.diagnostics_result_throttle_blocked,
+                metrics.throttleBlocked);
+        addMetric(values, context, R.string.diagnostics_result_unknown,
+                metrics.unknownResult);
+        return android.text.TextUtils.join(" · ", values);
+    }
+
+    private static void addMetric(
+            List<String> values, Context context, int labelRes, long count) {
+        if (count > 0L) values.add(context.getString(labelRes, count));
     }
 
     private static String applicationDetail(

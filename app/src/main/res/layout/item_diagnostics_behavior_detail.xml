@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:importantForAccessibility="yes"
+    android:minHeight="88dp"
+    android:orientation="vertical"
+    android:paddingStart="18dp"
+    android:paddingTop="14dp"
+    android:paddingEnd="18dp">
+
+    <TextView
+        android:id="@+id/diagnostics_detail_row_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:importantForAccessibility="no"
+        android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" />
+
+    <TextView
+        android:id="@+id/diagnostics_detail_row_metrics"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:importantForAccessibility="no"
+        android:layout_marginTop="7dp"
+        android:textColor="@color/item_title"
+        android:textSize="13sp" />
+
+    <TextView
+        android:id="@+id/diagnostics_detail_row_secondary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:importantForAccessibility="no"
+        android:layout_marginTop="4dp"
+        android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
+
+    <View
+        android:id="@+id/diagnostics_detail_row_divider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:importantForAccessibility="no"
+        android:layout_marginTop="14dp"
+        android:background="@color/divider" />
+</LinearLayout>

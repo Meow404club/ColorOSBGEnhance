@@ -48,7 +48,7 @@ public final class DiagnosticsUiMapperTest {
     }
 
     @Test
-    public void managedApplicationsAreLeftJoinedAndKeepZeroEventRows() {
+    public void managedApplicationsKeepZeroRowsWithoutDroppingHistoricalOrUnknownEvents() {
         List<DiagnosticsUiMapper.ApplicationRow> rows = mapper.mapApplications(
                 Arrays.asList(
                         new DiagnosticsDataSource.ManagedApplication(
@@ -59,15 +59,45 @@ public final class DiagnosticsUiMapperTest {
                         row("com.example.active", 10_001, "WAKE", DiagnosticsResult.PASSED,
                                 3L, 0L, 0L, 3L, 2L),
                         row("com.example.unmanaged", 10_002, "KILL", DiagnosticsResult.BLOCKED,
-                                9L, 9L, 0L, 9L, 3L)));
+                                9L, 9L, 0L, 9L, 3L),
+                        row("", -1, "KILL", DiagnosticsResult.OBSERVED,
+                                4L, 0L, 0L, 4L, 4L)));
 
-        assertEquals(2, rows.size());
+        assertEquals(4, rows.size());
         assertEquals("com.example.zero", rows.get(0).packageName);
         assertEquals("Zero Events", rows.get(0).displayName);
         assertTrue(rows.get(0).totals.isEmpty());
         assertTrue(rows.get(0).observedUids.isEmpty());
         assertEquals("com.example.active", rows.get(1).packageName);
         assertEquals(3L, rows.get(1).totals.observed);
+        assertEquals("com.example.unmanaged", rows.get(2).packageName);
+        assertEquals(9L, rows.get(2).totals.observed);
+        assertTrue(rows.get(3).unidentified);
+        assertEquals("application:@unidentified", rows.get(3).stableId);
+        assertEquals(4L, rows.get(3).totals.observedOnly);
+    }
+
+    @Test
+    public void resultCategoriesDoNotMislabelRecoveryAsNormalPassThrough() {
+        List<DiagnosticsUiMapper.BehaviorRow> rows = mapper.mapBehaviors(Arrays.asList(
+                row("", -1, "RECOVERY", DiagnosticsResult.PASSED,
+                        1L, 0L, 0L, 1L, 1L),
+                row("", -1, "RECOVERY", DiagnosticsResult.RECOVERED,
+                        2L, 0L, 0L, 2L, 2L),
+                row("", -1, "RECOVERY", DiagnosticsResult.NO_ACTION_NEEDED,
+                        3L, 0L, 0L, 3L, 3L),
+                row("", -1, "RECOVERY", DiagnosticsResult.SAFETY_ABORTED,
+                        4L, 0L, 0L, 4L, 4L),
+                row("", -1, "RECOVERY", "future_result",
+                        5L, 0L, 0L, 5L, 5L)));
+
+        DiagnosticsUiMapper.Metrics metrics =
+                rows.get(DiagnosticsBehavior.RECOVERY.ordinal()).metrics;
+        assertEquals(1L, metrics.passed);
+        assertEquals(2L, metrics.recovered);
+        assertEquals(3L, metrics.noActionNeeded);
+        assertEquals(4L, metrics.safetyAborted);
+        assertEquals(5L, metrics.unknownResult);
     }
 
     @Test

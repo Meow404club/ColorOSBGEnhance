@@ -90,10 +90,7 @@ public final class FeatureCatalog {
                     R.string.hans_summary, R.string.hans_detail, Risk.VERY_HIGH, false, false),
             new FeatureSpec(FeatureIds.SUPER_FREEZE, HookTargetIds.HANS_FREEZE_DISPATCH,
                     ModuleSettings.KEY_SUPER_FREEZE, R.string.super_freeze_title,
-                    R.string.super_freeze_summary, R.string.super_freeze_detail, Risk.VERY_HIGH, true, false),
-            new FeatureSpec(FeatureIds.ANDROID_FREEZE, HookTargetIds.HANS_FREEZE_DISPATCH,
-                    ModuleSettings.KEY_ANDROID_FREEZE, R.string.android_freeze_title,
-                    R.string.android_freeze_summary, R.string.android_freeze_detail, Risk.VERY_HIGH, true, true)
+                    R.string.super_freeze_summary, R.string.super_freeze_detail, Risk.VERY_HIGH, true, false)
     );
 
     public static List<FeatureSpec> forGroup(String group) {

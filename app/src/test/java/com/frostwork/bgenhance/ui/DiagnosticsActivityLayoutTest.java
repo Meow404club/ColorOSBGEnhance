@@ -30,6 +30,7 @@ import com.frostwork.bgenhance.ModuleApplication;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
 import com.frostwork.bgenhance.diagnostics.NormalizedDiagnosticsEvent;
 import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
+import com.frostwork.bgenhance.ui.diagnostics.DiagnosticsViewModel;
 import com.frostwork.bgenhance.ui.diagnostics.FullDiagnosticsExportViewModel;
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
@@ -50,7 +51,11 @@ import org.robolectric.shadows.ShadowLooper;
 import org.robolectric.shadows.ShadowToast;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.Collections;
+import java.util.List;
 import org.junit.After;
 import org.junit.Before;
 
@@ -90,6 +95,19 @@ public final class DiagnosticsActivityLayoutTest {
         RecyclerView list = activity.findViewById(R.id.diagnostics_list);
         assertNotNull(list.getAdapter());
         assertTrue(list.getAdapter() instanceof DiagnosticsRowsAdapter);
+        assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE,
+                activity.findViewById(R.id.diagnostics_result_count)
+                        .getAccessibilityLiveRegion());
+        assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE,
+                activity.findViewById(R.id.diagnostics_loading_state)
+                        .getAccessibilityLiveRegion());
+        assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE,
+                activity.findViewById(R.id.diagnostics_empty_state)
+                        .getAccessibilityLiveRegion());
+        assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE,
+                activity.findViewById(R.id.diagnostics_error_state)
+                        .getAccessibilityLiveRegion());
+        assertHistoryNoticeLayout(activity);
         assertNull(activity.findViewById(R.id.home_stats_overview));
         activity.finish();
     }
@@ -113,7 +131,7 @@ public final class DiagnosticsActivityLayoutTest {
 
     @Test
     @Config(qualifiers = "land", sdk = 34, application = Application.class)
-    public void landscapeKeepsActionsTabsListAndVerboseSwitchAvailable() {
+    public void landscapeKeepsActionsTabsAndExpandedListAvailable() {
         DiagnosticsActivity activity = Robolectric.buildActivity(DiagnosticsActivity.class)
                 .setup()
                 .get();
@@ -125,9 +143,11 @@ public final class DiagnosticsActivityLayoutTest {
         assertNotNull(toolbar.getMenu().findItem(R.id.action_export_diagnostics));
         assertNotNull(toolbar.getMenu().findItem(R.id.action_save_full_diagnostics));
         assertNotNull(toolbar.getMenu().findItem(R.id.action_clear_diagnostics));
-        assertNotNull(activity.<MaterialSwitch>findViewById(
-                R.id.diagnostics_verbose_switch));
+        assertNotNull(toolbar.getMenu().findItem(R.id.action_more_diagnostics));
         assertNotNull(activity.<RecyclerView>findViewById(R.id.diagnostics_list));
+        assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE,
+                activity.findViewById(R.id.diagnostics_loading_state)
+                        .getAccessibilityLiveRegion());
         LinearLayout emptyState = activity.findViewById(R.id.diagnostics_empty_state);
         assertEquals(LinearLayout.HORIZONTAL, emptyState.getOrientation());
         LinearLayout.LayoutParams summaryParams = (LinearLayout.LayoutParams)
@@ -138,6 +158,47 @@ public final class DiagnosticsActivityLayoutTest {
         assertEquals(2, emptySummary.getMaxLines());
         assertEquals(TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM,
                 emptySummary.getAutoSizeTextType());
+        assertHistoryNoticeLayout(activity);
+        activity.finish();
+    }
+
+    @Test
+    public void historyNoticeOnlyShowsForCompletedAggregateViewsWithTruncatedHistory()
+            throws Exception {
+        DiagnosticsActivity activity = Robolectric.buildActivity(DiagnosticsActivity.class)
+                .setup()
+                .get();
+        TextView notice = activity.findViewById(R.id.diagnostics_history_notice);
+
+        render(activity, state(
+                DiagnosticsViewModel.View.APPLICATION,
+                DiagnosticsViewModel.Status.CONTENT,
+                true));
+        assertEquals(View.VISIBLE, notice.getVisibility());
+
+        render(activity, state(
+                DiagnosticsViewModel.View.BEHAVIOR,
+                DiagnosticsViewModel.Status.EMPTY,
+                true));
+        assertEquals(View.VISIBLE, notice.getVisibility());
+
+        render(activity, state(
+                DiagnosticsViewModel.View.HOOK_TARGET,
+                DiagnosticsViewModel.Status.CONTENT,
+                true));
+        assertEquals(View.GONE, notice.getVisibility());
+
+        render(activity, state(
+                DiagnosticsViewModel.View.APPLICATION,
+                DiagnosticsViewModel.Status.CONTENT,
+                false));
+        assertEquals(View.GONE, notice.getVisibility());
+
+        render(activity, state(
+                DiagnosticsViewModel.View.BEHAVIOR,
+                DiagnosticsViewModel.Status.LOADING,
+                true));
+        assertEquals(View.GONE, notice.getVisibility());
         activity.finish();
     }
 
@@ -161,7 +222,11 @@ public final class DiagnosticsActivityLayoutTest {
 
     @Test
     public void compactStatusBadgesMeetNormalTextContrast() {
-        Context context = configuredContext(false);
+        assertStatusBadgeContrast(configuredContext(false, false));
+        assertStatusBadgeContrast(configuredContext(false, true));
+    }
+
+    private static void assertStatusBadgeContrast(Context context) {
         assertTrue(ColorUtils.calculateContrast(
                 context.getColor(R.color.status_success_text),
                 context.getColor(R.color.status_success_bg)) >= 4.5d);
@@ -369,6 +434,7 @@ public final class DiagnosticsActivityLayoutTest {
             Context context, int widthDp, int heightDp, int minimumListDp) {
         View root = LayoutInflater.from(context)
                 .inflate(R.layout.activity_diagnostics, null, false);
+        root.findViewById(R.id.diagnostics_history_notice).setVisibility(View.VISIBLE);
         int width = dp(context, widthDp);
         int height = dp(context, heightDp);
         root.measure(
@@ -377,6 +443,55 @@ public final class DiagnosticsActivityLayoutTest {
         root.layout(0, 0, width, height);
         assertTrue(root.findViewById(R.id.diagnostics_list).getMeasuredHeight()
                 >= dp(context, minimumListDp));
+    }
+
+    private static void assertHistoryNoticeLayout(Activity activity) {
+        TextView notice = activity.findViewById(R.id.diagnostics_history_notice);
+        assertNotNull(notice);
+        assertEquals(activity.getString(R.string.diagnostics_history_truncated),
+                notice.getText().toString());
+        assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE,
+                notice.getAccessibilityLiveRegion());
+        assertEquals(activity.getColor(R.color.item_summary), notice.getCurrentTextColor());
+        assertEquals(activity.getResources().getDimension(R.dimen.setting_summary_size),
+                notice.getTextSize(), 0.5f);
+        assertNull(notice.getBackground());
+        assertEquals(Integer.MAX_VALUE, notice.getMaxLines());
+    }
+
+    private static DiagnosticsViewModel.State state(
+            DiagnosticsViewModel.View view,
+            DiagnosticsViewModel.Status status,
+            boolean historyTruncated) throws Exception {
+        Constructor<DiagnosticsViewModel.State> constructor =
+                DiagnosticsViewModel.State.class.getDeclaredConstructor(
+                        DiagnosticsViewModel.View.class,
+                        DiagnosticsViewModel.Status.class,
+                        List.class,
+                        int.class,
+                        boolean.class,
+                        boolean.class,
+                        String.class,
+                        long.class);
+        constructor.setAccessible(true);
+        return constructor.newInstance(
+                view,
+                status,
+                Collections.emptyList(),
+                0,
+                false,
+                historyTruncated,
+                "",
+                1L);
+    }
+
+    private static void render(
+            DiagnosticsActivity activity,
+            DiagnosticsViewModel.State state) throws Exception {
+        Method render = DiagnosticsActivity.class.getDeclaredMethod(
+                "render", DiagnosticsViewModel.State.class);
+        render.setAccessible(true);
+        render.invoke(activity, state);
     }
 
     private static void assertMatchesHomepageSegments(Context context) {

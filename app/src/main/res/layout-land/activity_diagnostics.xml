@@ -56,9 +56,20 @@
         android:id="@+id/diagnostics_result_count"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:accessibilityLiveRegion="polite"
         android:layout_marginTop="6dp"
         android:layout_marginBottom="6dp"
         android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
+
+    <TextView
+        android:id="@+id/diagnostics_history_notice"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="4dp"
+        android:accessibilityLiveRegion="polite"
+        android:text="@string/diagnostics_history_truncated"
+        android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary"
+        android:visibility="gone" />
 
     <FrameLayout
         android:layout_width="match_parent"
@@ -78,6 +89,7 @@
             android:id="@+id/diagnostics_loading_state"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
+            android:accessibilityLiveRegion="polite"
             android:gravity="center"
             android:orientation="horizontal"
             android:padding="16dp">
@@ -101,6 +113,7 @@
             android:layout_height="match_parent"
             android:gravity="center"
             android:orientation="horizontal"
+            android:accessibilityLiveRegion="polite"
             android:padding="16dp"
             android:visibility="gone">
 
@@ -135,6 +148,7 @@
             android:layout_height="match_parent"
             android:gravity="center"
             android:orientation="horizontal"
+            android:accessibilityLiveRegion="polite"
             android:padding="16dp"
             android:visibility="gone">
 
@@ -168,32 +182,4 @@
         </LinearLayout>
     </FrameLayout>
 
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="@color/divider" />
-
-    <LinearLayout
-        android:id="@+id/diagnostics_verbose_row"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:foreground="?attr/selectableItemBackground"
-        android:gravity="center_vertical"
-        android:minHeight="56dp"
-        android:orientation="horizontal">
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/verbose_title"
-            android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" />
-
-        <com.google.android.material.materialswitch.MaterialSwitch
-            android:id="@+id/diagnostics_verbose_switch"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:contentDescription="@string/verbose_title"
-            android:showText="false" />
-    </LinearLayout>
 </LinearLayout>

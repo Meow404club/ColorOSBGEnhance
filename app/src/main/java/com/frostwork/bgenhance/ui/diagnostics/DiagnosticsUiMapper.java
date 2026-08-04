@@ -5,6 +5,8 @@ import com.frostwork.bgenhance.DiagnosticsResult;
 import com.frostwork.bgenhance.ModuleRuntimeStatus;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
+import com.frostwork.bgenhance.diagnostics.BehaviorDetailStats;
+import com.frostwork.bgenhance.diagnostics.DiagnosticsBehaviorClassifier;
 import com.frostwork.bgenhance.diagnostics.RecentBehaviorStats;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -38,6 +40,14 @@ public final class DiagnosticsUiMapper {
         public final long observed;
         public final long blocked;
         public final long passed;
+        public final long observedOnly;
+        public final long recovered;
+        public final long noActionNeeded;
+        public final long safetyAborted;
+        public final long applied;
+        public final long throttleAllowed;
+        public final long throttleBlocked;
+        public final long unknownResult;
         public final long throttled;
         public final long failOpen;
         public final long rawHits;
@@ -51,6 +61,14 @@ public final class DiagnosticsUiMapper {
             observed = source.observed;
             blocked = source.blocked;
             passed = source.passed;
+            observedOnly = source.observedOnly;
+            recovered = source.recovered;
+            noActionNeeded = source.noActionNeeded;
+            safetyAborted = source.safetyAborted;
+            applied = source.applied;
+            throttleAllowed = source.throttleAllowed;
+            throttleBlocked = source.throttleBlocked;
+            unknownResult = source.unknownResult;
             throttled = source.throttled;
             failOpen = source.failOpen;
             rawHits = source.rawHits;
@@ -70,6 +88,7 @@ public final class DiagnosticsUiMapper {
         public final String stableId;
         public final String packageName;
         public final String displayName;
+        public final boolean unidentified;
         public final List<Integer> observedUids;
         public final Map<DiagnosticsBehavior, Metrics> behaviors;
         public final Metrics totals;
@@ -80,9 +99,12 @@ public final class DiagnosticsUiMapper {
                 List<Integer> observedUids,
                 Map<DiagnosticsBehavior, Metrics> behaviors,
                 Metrics totals) {
-            this.stableId = "application:" + packageName;
+            this.unidentified = packageName == null || packageName.isEmpty();
+            this.stableId = unidentified
+                    ? "application:@unidentified" : "application:" + packageName;
             this.packageName = packageName;
-            this.displayName = displayName == null || displayName.isEmpty()
+            this.displayName = unidentified ? ""
+                    : displayName == null || displayName.isEmpty()
                     ? packageName : displayName;
             this.observedUids = Collections.unmodifiableList(new ArrayList<>(observedUids));
             this.behaviors = Collections.unmodifiableMap(
@@ -113,6 +135,35 @@ public final class DiagnosticsUiMapper {
             this.behavior = behavior;
             this.titleKey = behavior.titleKey;
             this.fallbackTitle = behavior.fallbackTitle;
+            this.metrics = metrics;
+        }
+
+        @Override
+        public String stableId() {
+            return stableId;
+        }
+    }
+
+    public static final class BehaviorDetailRow implements UiRow {
+        public final String stableId;
+        public final DiagnosticsBehavior behavior;
+        public final int titleRes;
+        public final int titleFormatRes;
+        public final boolean fallback;
+        public final Metrics metrics;
+
+        private BehaviorDetailRow(
+                String stableId,
+                DiagnosticsBehavior behavior,
+                int titleRes,
+                int titleFormatRes,
+                boolean fallback,
+                Metrics metrics) {
+            this.stableId = "behavior-detail:" + behavior.wireId + ":" + stableId;
+            this.behavior = behavior;
+            this.titleRes = titleRes;
+            this.titleFormatRes = titleFormatRes;
+            this.fallback = fallback;
             this.metrics = metrics;
         }
 
@@ -195,11 +246,11 @@ public final class DiagnosticsUiMapper {
         LinkedHashMap<String, ApplicationAccumulator> applications = new LinkedHashMap<>();
         if (rows != null) {
             for (DiagnosticsQuery.AggregateRow row : rows) {
-                if (row == null || row.packageName == null || row.packageName.isEmpty()) continue;
+                if (row == null) continue;
+                String packageName = row.packageName == null ? "" : row.packageName.trim();
                 DiagnosticsBehavior behavior = DiagnosticsBehavior.fromWireId(row.behavior);
-                if (behavior == null) continue;
                 ApplicationAccumulator accumulator = applications.computeIfAbsent(
-                        row.packageName, ApplicationAccumulator::new);
+                        packageName, ApplicationAccumulator::new);
                 accumulator.add(behavior, row);
             }
         }
@@ -209,12 +260,13 @@ public final class DiagnosticsUiMapper {
             LinkedHashSet<String> addedPackages = new LinkedHashSet<>();
             for (DiagnosticsDataSource.ManagedApplication application : managedApplications) {
                 if (application == null || !addedPackages.add(application.packageName)) continue;
-                ApplicationAccumulator accumulator = applications.get(application.packageName);
+                ApplicationAccumulator accumulator = applications.remove(application.packageName);
                 if (accumulator == null) {
                     accumulator = new ApplicationAccumulator(application.packageName);
                 }
                 result.add(accumulator.build(application.displayName));
             }
+            appendHistoricalApplications(result, applications);
             return immutable(result);
         }
 
@@ -228,6 +280,24 @@ public final class DiagnosticsUiMapper {
             return compared != 0 ? compared : left.packageName.compareTo(right.packageName);
         });
         return immutable(result);
+    }
+
+    private static void appendHistoricalApplications(
+            List<ApplicationRow> result,
+            Map<String, ApplicationAccumulator> applications) {
+        ArrayList<ApplicationRow> historical = new ArrayList<>();
+        for (ApplicationAccumulator accumulator : applications.values()) {
+            historical.add(accumulator.build(accumulator.packageName));
+        }
+        historical.sort((left, right) -> {
+            int compared = Long.compare(right.totals.observed, left.totals.observed);
+            if (compared != 0) return compared;
+            compared = Long.compare(right.totals.lastAt, left.totals.lastAt);
+            if (compared != 0) return compared;
+            if (left.unidentified != right.unidentified) return left.unidentified ? 1 : -1;
+            return left.packageName.compareTo(right.packageName);
+        });
+        result.addAll(historical);
     }
 
     public List<BehaviorRow> mapBehaviors(List<DiagnosticsQuery.AggregateRow> rows) {
@@ -260,6 +330,68 @@ public final class DiagnosticsUiMapper {
                     || behaviorMetrics.rawHits > 0L) {
                 result.add(new BehaviorRow(behavior, behaviorMetrics));
             }
+        }
+        return immutable(result);
+    }
+
+    public List<BehaviorDetailRow> mapBehaviorDetails(
+            DiagnosticsBehavior selectedBehavior, BehaviorDetailStats snapshot) {
+        Objects.requireNonNull(selectedBehavior, "selectedBehavior");
+        Objects.requireNonNull(snapshot, "snapshot");
+        if (!snapshot.isSuccessful()) {
+            throw new IllegalArgumentException(
+                    "cannot map failed behavior details: " + snapshot.errorCode);
+        }
+
+        List<DiagnosticsBehaviorDetailCatalog.Entry> entries =
+                DiagnosticsBehaviorDetailCatalog.entriesFor(selectedBehavior);
+        ArrayList<MutableMetrics> entryMetrics = new ArrayList<>(entries.size());
+        for (int index = 0; index < entries.size(); index++) {
+            entryMetrics.add(new MutableMetrics());
+        }
+        MutableMetrics fallbackMetrics = new MutableMetrics();
+
+        for (DiagnosticsQuery.AggregateRow row : snapshot.rows) {
+            if (row == null || DiagnosticsBehavior.fromWireId(
+                    DiagnosticsBehaviorClassifier.normalizeStoredBehavior(row.behavior))
+                    != selectedBehavior) {
+                continue;
+            }
+            int matchedIndex = -1;
+            for (int index = 0; index < entries.size(); index++) {
+                if (entries.get(index).matches(row)) {
+                    matchedIndex = index;
+                    break;
+                }
+            }
+            if (matchedIndex >= 0) {
+                entryMetrics.get(matchedIndex).add(row);
+            } else {
+                fallbackMetrics.add(row);
+            }
+        }
+
+        ArrayList<BehaviorDetailRow> result = new ArrayList<>();
+        for (int index = 0; index < entries.size(); index++) {
+            DiagnosticsBehaviorDetailCatalog.Entry entry = entries.get(index);
+            result.add(new BehaviorDetailRow(
+                    entry.stableId,
+                    selectedBehavior,
+                    entry.titleRes,
+                    entry.titleFormatRes,
+                    false,
+                    entryMetrics.get(index).build()));
+        }
+        Metrics fallback = fallbackMetrics.build();
+        if (selectedBehavior == DiagnosticsBehavior.UNCLASSIFIED
+                || !fallback.isEmpty()) {
+            result.add(new BehaviorDetailRow(
+                    "other",
+                    selectedBehavior,
+                    DiagnosticsBehaviorDetailCatalog.fallbackTitleRes(selectedBehavior),
+                    0,
+                    true,
+                    fallback));
         }
         return immutable(result);
     }
@@ -331,8 +463,22 @@ public final class DiagnosticsUiMapper {
         return HookStatus.UNKNOWN;
     }
 
-    private static Metrics zeroMetrics() {
+    public static Metrics emptyMetrics() {
         return new MutableMetrics().build();
+    }
+
+    public static Metrics sumDetailMetrics(List<BehaviorDetailRow> rows) {
+        MutableMetrics total = new MutableMetrics();
+        if (rows != null) {
+            for (BehaviorDetailRow row : rows) {
+                if (row != null) total.add(row.metrics);
+            }
+        }
+        return total.build();
+    }
+
+    private static Metrics zeroMetrics() {
+        return emptyMetrics();
     }
 
     private static <T> List<T> immutable(List<T> values) {
@@ -376,6 +522,14 @@ public final class DiagnosticsUiMapper {
         long observed;
         long blocked;
         long passed;
+        long observedOnly;
+        long recovered;
+        long noActionNeeded;
+        long safetyAborted;
+        long applied;
+        long throttleAllowed;
+        long throttleBlocked;
+        long unknownResult;
         long throttled;
         long failOpen;
         long rawHits;
@@ -387,19 +541,16 @@ public final class DiagnosticsUiMapper {
 
         void add(DiagnosticsQuery.AggregateRow row) {
             observed = saturatingAdd(observed, row.eventCount);
-            blocked = saturatingAdd(blocked, row.blockedCount);
+            long normalizedBlocked = DiagnosticsResult.CANDIDATE_FILTERED.equals(row.result)
+                    ? Math.max(row.blockedCount, row.eventCount)
+                    : row.blockedCount;
+            blocked = saturatingAdd(blocked, normalizedBlocked);
             failOpen = saturatingAdd(failOpen, row.failOpenCount);
             rawHits = saturatingAdd(rawHits, row.rawHitCount);
             identityResolved = saturatingAdd(identityResolved, row.identityResolvedCount);
             latencyMicrosTotal = saturatingAdd(latencyMicrosTotal, row.latencyMicrosTotal);
             latencyMicrosMax = Math.max(latencyMicrosMax, row.latencyMicrosMax);
-            if (countsAsPassed(row.result)) {
-                passed = saturatingAdd(passed, row.eventCount);
-            }
-            if (DiagnosticsResult.THROTTLE_ALLOWED.equals(row.result)
-                    || DiagnosticsResult.THROTTLE_BLOCKED.equals(row.result)) {
-                throttled = saturatingAdd(throttled, row.eventCount);
-            }
+            addResult(row.result, row.eventCount);
             if (row.firstAt > 0L && (firstAt == 0L || row.firstAt < firstAt)) {
                 firstAt = row.firstAt;
             }
@@ -414,29 +565,66 @@ public final class DiagnosticsUiMapper {
             identityResolved = saturatingAdd(identityResolved, row.identityResolvedCount);
             latencyMicrosTotal = saturatingAdd(latencyMicrosTotal, row.latencyMicrosTotal);
             latencyMicrosMax = Math.max(latencyMicrosMax, row.latencyMicrosMax);
-            if (countsAsPassed(row.result)) {
-                passed = saturatingAdd(passed, row.eventCount);
-            }
-            if (DiagnosticsResult.THROTTLE_ALLOWED.equals(row.result)
-                    || DiagnosticsResult.THROTTLE_BLOCKED.equals(row.result)) {
-                throttled = saturatingAdd(throttled, row.eventCount);
-            }
+            addResult(row.result, row.eventCount);
             if (row.firstAt > 0L && (firstAt == 0L || row.firstAt < firstAt)) {
                 firstAt = row.firstAt;
             }
             lastAt = Math.max(lastAt, row.lastAt);
         }
 
+        void add(Metrics metrics) {
+            if (metrics == null) return;
+            observed = saturatingAdd(observed, metrics.observed);
+            blocked = saturatingAdd(blocked, metrics.blocked);
+            passed = saturatingAdd(passed, metrics.passed);
+            observedOnly = saturatingAdd(observedOnly, metrics.observedOnly);
+            recovered = saturatingAdd(recovered, metrics.recovered);
+            noActionNeeded = saturatingAdd(noActionNeeded, metrics.noActionNeeded);
+            safetyAborted = saturatingAdd(safetyAborted, metrics.safetyAborted);
+            applied = saturatingAdd(applied, metrics.applied);
+            throttleAllowed = saturatingAdd(throttleAllowed, metrics.throttleAllowed);
+            throttleBlocked = saturatingAdd(throttleBlocked, metrics.throttleBlocked);
+            unknownResult = saturatingAdd(unknownResult, metrics.unknownResult);
+            throttled = saturatingAdd(throttled, metrics.throttled);
+            failOpen = saturatingAdd(failOpen, metrics.failOpen);
+            rawHits = saturatingAdd(rawHits, metrics.rawHits);
+            identityResolved = saturatingAdd(identityResolved, metrics.identityResolved);
+            latencyMicrosTotal = saturatingAdd(
+                    latencyMicrosTotal, metrics.latencyMicrosTotal);
+            latencyMicrosMax = Math.max(latencyMicrosMax, metrics.latencyMicrosMax);
+            if (metrics.firstAt > 0L && (firstAt == 0L || metrics.firstAt < firstAt)) {
+                firstAt = metrics.firstAt;
+            }
+            lastAt = Math.max(lastAt, metrics.lastAt);
+        }
+
         Metrics build() {
             return new Metrics(this);
         }
-    }
 
-    private static boolean countsAsPassed(String result) {
-        return DiagnosticsResult.PASSED.equals(result)
-                || DiagnosticsResult.CANDIDATE_FILTERED.equals(result)
-                || DiagnosticsResult.RECOVERED.equals(result)
-                || DiagnosticsResult.NO_ACTION_NEEDED.equals(result);
+        private void addResult(String result, long count) {
+            if (DiagnosticsResult.PASSED.equals(result)) {
+                passed = saturatingAdd(passed, count);
+            } else if (DiagnosticsResult.OBSERVED.equals(result)) {
+                observedOnly = saturatingAdd(observedOnly, count);
+            } else if (DiagnosticsResult.RECOVERED.equals(result)) {
+                recovered = saturatingAdd(recovered, count);
+            } else if (DiagnosticsResult.NO_ACTION_NEEDED.equals(result)) {
+                noActionNeeded = saturatingAdd(noActionNeeded, count);
+            } else if (DiagnosticsResult.SAFETY_ABORTED.equals(result)) {
+                safetyAborted = saturatingAdd(safetyAborted, count);
+            } else if (DiagnosticsResult.APPLIED.equals(result)) {
+                applied = saturatingAdd(applied, count);
+            } else if (DiagnosticsResult.THROTTLE_ALLOWED.equals(result)) {
+                throttleAllowed = saturatingAdd(throttleAllowed, count);
+                throttled = saturatingAdd(throttled, count);
+            } else if (DiagnosticsResult.THROTTLE_BLOCKED.equals(result)) {
+                throttleBlocked = saturatingAdd(throttleBlocked, count);
+                throttled = saturatingAdd(throttled, count);
+            } else if (!DiagnosticsResult.isKnown(result)) {
+                unknownResult = saturatingAdd(unknownResult, count);
+            }
+        }
     }
 
     private static long saturatingAdd(long left, long right) {

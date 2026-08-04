@@ -31,6 +31,10 @@
             android:exported="false" />
 
         <activity
+            android:name=".ui.DiagnosticsBehaviorDetailActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".ui.FeatureSettingsActivity"
             android:exported="false" />
 
