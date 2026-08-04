@@ -33,21 +33,16 @@ import com.frostwork.bgenhance.residency.runtime.RuntimeConfigSnapshot;
 import java.util.Collections;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /** Process-local facade used by hooks; all platform identity work stays on a background thread. */
 public final class HookResidencyRuntime {
     private HookResidencyRuntime() {}
 
-    private static final ScheduledExecutorService IDENTITY_EXECUTOR =
-            Executors.newSingleThreadScheduledExecutor(runnable -> {
-        Thread thread = new Thread(runnable, "BgEnhanceIdentity");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private static final ScheduledThreadPoolExecutor IDENTITY_EXECUTOR =
+            createIdentityExecutor();
     private static final ResidencyRuntimeController.RetryScheduler IDENTITY_RETRY_SCHEDULER =
             (command, delayMs) -> {
         ScheduledFuture<?> future = IDENTITY_EXECUTOR.schedule(
@@ -59,6 +54,17 @@ public final class HookResidencyRuntime {
     static {
         CONTROLLER.addStateListener(HookDiagnostics::reportResidencyRuntime);
     }
+
+    private static ScheduledThreadPoolExecutor createIdentityExecutor() {
+        ScheduledThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(1, runnable -> {
+            Thread thread = new Thread(runnable, "BgEnhanceIdentity");
+            thread.setDaemon(true);
+            return thread;
+        });
+        executor.setRemoveOnCancelPolicy(true);
+        return executor;
+    }
+
     private static final RetryingRegistration PACKAGE_RECEIVER_REGISTRATION =
             new RetryingRegistration(
                     IDENTITY_EXECUTOR::schedule,
