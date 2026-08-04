@@ -17,10 +17,16 @@ import java.util.concurrent.Executor;
  */
 public final class DiagnosticsViewModel implements AutoCloseable {
     public static final int DEFAULT_UI_PAGE_SIZE = 40;
-    public static final int DEFAULT_QUERY_PAGE_SIZE = 200;
+    public static final int DEFAULT_QUERY_PAGE_SIZE =
+            com.frostwork.bgenhance.diagnostics.DiagnosticsRetentionPolicy
+                    .DEFAULT_AGGREGATE_ROW_LIMIT;
     private static final int MAX_UI_PAGE_SIZE = 200;
-    private static final int MAX_QUERY_PAGE_SIZE = 200;
-    private static final int MAX_AGGREGATE_ROWS = 65_536;
+    private static final int MAX_QUERY_PAGE_SIZE =
+            com.frostwork.bgenhance.diagnostics.DiagnosticsRetentionPolicy
+                    .DEFAULT_AGGREGATE_ROW_LIMIT;
+    private static final int MAX_AGGREGATE_ROWS =
+            com.frostwork.bgenhance.diagnostics.DiagnosticsRetentionPolicy
+                    .MAX_AGGREGATE_SNAPSHOT_ROWS;
     private static final int MAX_HOOK_STATES = 512;
 
     public enum View {
@@ -47,6 +53,7 @@ public final class DiagnosticsViewModel implements AutoCloseable {
         public final List<DiagnosticsUiMapper.UiRow> items;
         public final int totalItemCount;
         public final boolean hasMore;
+        public final boolean historyTruncated;
         public final String errorCode;
         public final long generation;
 
@@ -56,6 +63,7 @@ public final class DiagnosticsViewModel implements AutoCloseable {
                 List<? extends DiagnosticsUiMapper.UiRow> items,
                 int totalItemCount,
                 boolean hasMore,
+                boolean historyTruncated,
                 String errorCode,
                 long generation) {
             this.view = view;
@@ -63,6 +71,7 @@ public final class DiagnosticsViewModel implements AutoCloseable {
             this.items = immutableRows(items);
             this.totalItemCount = Math.max(this.items.size(), totalItemCount);
             this.hasMore = hasMore;
+            this.historyTruncated = historyTruncated;
             this.errorCode = errorCode == null ? "" : errorCode;
             this.generation = generation;
         }
@@ -84,7 +93,8 @@ public final class DiagnosticsViewModel implements AutoCloseable {
     private final ArrayList<DiagnosticsQuery.AggregateRow> aggregateRows = new ArrayList<>();
     private List<DiagnosticsUiMapper.UiRow> allRows = Collections.emptyList();
     private State state = new State(
-            View.APPLICATION, Status.IDLE, Collections.emptyList(), 0, false, "", 0L);
+            View.APPLICATION, Status.IDLE, Collections.emptyList(), 0,
+            false, false, "", 0L);
     private Listener listener;
     private View selectedView = View.APPLICATION;
     private DiagnosticsDataSource.ManagedApplicationPage managedApplications =
@@ -93,6 +103,8 @@ public final class DiagnosticsViewModel implements AutoCloseable {
     private int visibleLimit;
     private boolean requestInFlight;
     private boolean aggregateComplete;
+    private boolean aggregateHistoryTruncated;
+    private boolean contentHistoryTruncated;
     private boolean managedApplicationsComplete;
     private boolean applicationMappingStarted;
     private boolean closed;
@@ -136,7 +148,7 @@ public final class DiagnosticsViewModel implements AutoCloseable {
             throw new IllegalArgumentException("uiPageSize must be between 1 and 200");
         }
         if (queryPageSize <= 0 || queryPageSize > MAX_QUERY_PAGE_SIZE) {
-            throw new IllegalArgumentException("queryPageSize must be between 1 and 200");
+            throw new IllegalArgumentException("queryPageSize is outside the supported range");
         }
         this.uiPageSize = uiPageSize;
         this.queryPageSize = queryPageSize;
@@ -172,10 +184,13 @@ public final class DiagnosticsViewModel implements AutoCloseable {
             allRows = Collections.emptyList();
             managedApplications = DiagnosticsDataSource.ManagedApplicationPage.unsupported();
             aggregateComplete = false;
+            aggregateHistoryTruncated = false;
+            contentHistoryTruncated = false;
             managedApplicationsComplete = view != View.APPLICATION;
             applicationMappingStarted = false;
             loading = new State(
-                    view, Status.LOADING, Collections.emptyList(), 0, false, "",
+                    view, Status.LOADING, Collections.emptyList(), 0,
+                    false, false, "",
                     requestGeneration);
             state = loading;
         }
@@ -186,7 +201,7 @@ public final class DiagnosticsViewModel implements AutoCloseable {
             requestBehaviorStats(requestGeneration);
         } else {
             requestManagedApplications(requestGeneration);
-            requestAggregatePage(requestGeneration, view, 0);
+            requestAggregateSnapshot(requestGeneration, view);
         }
     }
 
@@ -239,14 +254,14 @@ public final class DiagnosticsViewModel implements AutoCloseable {
         }
     }
 
-    private void requestAggregatePage(long requestGeneration, View view, int offset) {
+    private void requestAggregateSnapshot(long requestGeneration, View view) {
         synchronized (lock) {
             if (!isCurrentLocked(requestGeneration, view)) return;
         }
-        DiagnosticsQuery.AggregateQuery query = applicationAggregateQuery(offset);
+        DiagnosticsQuery.AggregateQuery query = applicationAggregateQuery(0);
         CompletableFuture<DiagnosticsQuery.AggregatePage> future;
         try {
-            future = dataSource.queryAggregatesAsync(query);
+            future = dataSource.queryAggregateSnapshotAsync(query, MAX_AGGREGATE_ROWS);
         } catch (RuntimeException error) {
             finishError(requestGeneration, view, "query_failed");
             return;
@@ -256,13 +271,12 @@ public final class DiagnosticsViewModel implements AutoCloseable {
             return;
         }
         future.whenComplete((page, failure) ->
-                handleAggregatePage(requestGeneration, view, offset, page, failure));
+                handleAggregateSnapshot(requestGeneration, view, page, failure));
     }
 
-    private void handleAggregatePage(
+    private void handleAggregateSnapshot(
             long requestGeneration,
             View view,
-            int requestedOffset,
             DiagnosticsQuery.AggregatePage page,
             Throwable failure) {
         if (failure != null || page == null) {
@@ -274,33 +288,20 @@ public final class DiagnosticsViewModel implements AutoCloseable {
             return;
         }
 
-        int nextOffset = -1;
-        List<DiagnosticsQuery.AggregateRow> rowsToMap = null;
-        String pagingError = "";
+        if (page.hasMore) {
+            finishError(requestGeneration, view, "result_limit_exceeded");
+            return;
+        }
+        if (page.items.size() > MAX_AGGREGATE_ROWS) {
+            finishError(requestGeneration, view, "result_limit_exceeded");
+            return;
+        }
         synchronized (lock) {
             if (!isCurrentLocked(requestGeneration, view)) return;
-            if (aggregateRows.size() > MAX_AGGREGATE_ROWS - page.items.size()) {
-                pagingError = "result_limit_exceeded";
-            } else {
-                aggregateRows.addAll(page.items);
-                if (page.hasMore) {
-                    if (page.nextOffset <= requestedOffset) {
-                        pagingError = "invalid_page_cursor";
-                    } else {
-                        nextOffset = page.nextOffset;
-                    }
-                } else {
-                    rowsToMap = new ArrayList<>(aggregateRows);
-                }
-            }
+            aggregateRows.addAll(page.items);
+            aggregateHistoryTruncated |= page.historyTruncated;
         }
-        if (!pagingError.isEmpty()) {
-            finishError(requestGeneration, view, pagingError);
-        } else if (nextOffset >= 0) {
-            requestAggregatePage(requestGeneration, view, nextOffset);
-        } else if (rowsToMap != null) {
-            finishApplicationAggregateMapping(requestGeneration);
-        }
+        finishApplicationAggregateMapping(requestGeneration);
     }
 
     private void finishApplicationAggregateMapping(long requestGeneration) {
@@ -339,7 +340,8 @@ public final class DiagnosticsViewModel implements AutoCloseable {
                 finishError(requestGeneration, View.BEHAVIOR, "mapping_failed");
                 return;
             }
-            finishContent(requestGeneration, View.BEHAVIOR, mapped);
+            finishContent(
+                    requestGeneration, View.BEHAVIOR, mapped, snapshot.historyTruncated);
         });
     }
 
@@ -395,7 +397,13 @@ public final class DiagnosticsViewModel implements AutoCloseable {
             finishError(requestGeneration, View.APPLICATION, "mapping_failed");
             return;
         }
-        finishContent(requestGeneration, View.APPLICATION, mapped);
+        boolean historyTruncated;
+        synchronized (lock) {
+            if (!isCurrentLocked(requestGeneration, View.APPLICATION)) return;
+            historyTruncated = aggregateHistoryTruncated;
+        }
+        finishContent(
+                requestGeneration, View.APPLICATION, mapped, historyTruncated);
     }
 
     private void requestHookStates(long requestGeneration) {
@@ -433,23 +441,25 @@ public final class DiagnosticsViewModel implements AutoCloseable {
                 finishError(requestGeneration, View.HOOK_TARGET, "mapping_failed");
                 return;
             }
-            finishContent(requestGeneration, View.HOOK_TARGET, mapped);
+            finishContent(requestGeneration, View.HOOK_TARGET, mapped, false);
         });
     }
 
     private void finishContent(
             long requestGeneration,
             View view,
-            List<? extends DiagnosticsUiMapper.UiRow> mapped) {
+            List<? extends DiagnosticsUiMapper.UiRow> mapped,
+            boolean historyTruncated) {
         State next;
         synchronized (lock) {
             if (!isCurrentLocked(requestGeneration, view)) return;
             allRows = immutableRows(mapped);
+            contentHistoryTruncated = historyTruncated;
             requestInFlight = false;
             visibleLimit = Math.min(uiPageSize, allRows.size());
             next = allRows.isEmpty()
-                    ? new State(view, Status.EMPTY, Collections.emptyList(), 0, false, "",
-                            requestGeneration)
+                    ? new State(view, Status.EMPTY, Collections.emptyList(), 0,
+                            false, historyTruncated, "", requestGeneration)
                     : contentStateLocked();
             state = next;
         }
@@ -464,11 +474,13 @@ public final class DiagnosticsViewModel implements AutoCloseable {
             aggregateRows.clear();
             allRows = Collections.emptyList();
             aggregateComplete = false;
+            aggregateHistoryTruncated = false;
+            contentHistoryTruncated = false;
             managedApplicationsComplete = false;
             applicationMappingStarted = false;
             String errorCode = normalizeError(requestedErrorCode);
-            error = new State(view, Status.ERROR, Collections.emptyList(), 0, false,
-                    errorCode, requestGeneration);
+            error = new State(view, Status.ERROR, Collections.emptyList(), 0,
+                    false, false, errorCode, requestGeneration);
             state = error;
         }
         emit(error);
@@ -492,6 +504,7 @@ public final class DiagnosticsViewModel implements AutoCloseable {
                 allRows.subList(0, count),
                 allRows.size(),
                 count < allRows.size(),
+                contentHistoryTruncated,
                 "",
                 generation);
     }

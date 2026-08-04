@@ -42,6 +42,24 @@ public final class DiagnosticsQueryTest {
     }
 
     @Test
+    public void homepageSnapshotSaturatesTotalsInsteadOfWrappingNegative() {
+        LinkedHashMap<String, DiagnosticsQuery.FeatureStats> features = new LinkedHashMap<>();
+        features.put("one", new DiagnosticsQuery.FeatureStats(
+                "one", Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE,
+                1L, "", "", "", "", "blocked"));
+        features.put("two", new DiagnosticsQuery.FeatureStats(
+                "two", 1L, 1L, 1L,
+                2L, "", "", "", "", "blocked"));
+
+        DiagnosticsQuery.HomeStatsSnapshot snapshot =
+                new DiagnosticsQuery.HomeStatsSnapshot(features, "");
+
+        assertEquals(Long.MAX_VALUE, snapshot.observed);
+        assertEquals(Long.MAX_VALUE, snapshot.blocked);
+        assertEquals(Long.MAX_VALUE, snapshot.failOpen);
+    }
+
+    @Test
     public void redactedExportDefaultsNeverOptInToIdentifiers() {
         DiagnosticsQuery.ExportOptions options =
                 DiagnosticsQuery.ExportOptions.redactedDefaults();

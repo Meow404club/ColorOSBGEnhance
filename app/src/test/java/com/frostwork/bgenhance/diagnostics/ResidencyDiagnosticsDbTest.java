@@ -134,9 +134,10 @@ public final class ResidencyDiagnosticsDbTest {
     public void retentionBoundsAgeAndRowsAcrossDetailedTables() {
         database = open(policy(3, 2, 2, 1_000L));
         long now = System.currentTimeMillis();
+        long oldAt = DiagnosticsValues.dayBucket(now) - 1L;
         DiagnosticsWriteBatch.Builder batch = DiagnosticsWriteBatch.builder()
-                .addRawHit(raw(now - 10_000L, false, false))
-                .addEvent(event(now - 10_000L, "old", "old.pkg", 1,
+                .addRawHit(raw(oldAt, false, false))
+                .addEvent(event(oldAt, "old", "old.pkg", 1,
                         "KILL", "passed"));
         for (int index = 0; index < 5; index++) {
             long at = now + index;
@@ -158,7 +159,7 @@ public final class ResidencyDiagnosticsDbTest {
                 DiagnosticsQuery.EventFilter.builder().limit(20).build());
         assertEquals(3, events.items.size());
         assertFalse(events.items.stream().anyMatch(value -> "old.pkg".equals(value.packageName)));
-        assertEquals(2, database.queryAggregates(
+        assertEquals(5, database.queryAggregates(
                 DiagnosticsQuery.AggregateQuery.builder()
                         .dimension(DiagnosticsQuery.AggregateDimension.BEHAVIOR)
                         .limit(20)
@@ -230,6 +231,86 @@ public final class ResidencyDiagnosticsDbTest {
     }
 
     @Test
+    public void storagePressureMarksMissingAggregateHistoryAndPreservesCurrentBootState() {
+        DiagnosticsRetentionPolicy bounded = DiagnosticsRetentionPolicy.builder()
+                .retentionMillis(60_000L)
+                .recentEventLimit(20)
+                .aggregateRowLimit(20)
+                .rawAggregateRowLimit(20)
+                .hookStateLimit(20)
+                .featureTotalLimit(20)
+                .queueCapacity(20)
+                .batchSize(20)
+                .emergencyCleanupRowLimit(1)
+                .maxDatabaseBytes(2L * 1_024L * 1_024L)
+                .build();
+        database = open(bounded);
+        long now = System.currentTimeMillis();
+        database.writeBatch(DiagnosticsWriteBatch.builder()
+                .addEvent(event(now, "pressure-aggregate", "pkg", 1,
+                        "FREEZE", "blocked"))
+                .addHookState(state(now, "INSTALLED"))
+                .build());
+        android.database.sqlite.SQLiteDatabase writable = database.getWritableDatabase();
+        writable.delete(ResidencyDiagnosticsDb.TABLE_EVENTS, null, null);
+        writable.delete(ResidencyDiagnosticsDb.TABLE_RAW, null, null);
+        writable.delete(ResidencyDiagnosticsDb.TABLE_FEATURE_TOTALS, null, null);
+
+        database.performMaintenance(now, true);
+
+        DiagnosticsQuery.AggregatePage partial = database.queryAggregates(
+                DiagnosticsQuery.AggregateQuery.builder().limit(20).build());
+        assertTrue(partial.items.isEmpty());
+        assertTrue(partial.historyTruncated);
+        assertEquals(1, database.queryHookStates(20).size());
+
+        database.clear(DiagnosticsQuery.ClearScope.STATISTICS);
+
+        assertFalse(database.queryAggregates(
+                DiagnosticsQuery.AggregateQuery.builder().limit(20).build())
+                .historyTruncated);
+        assertEquals(1, database.queryHookStates(20).size());
+    }
+
+    @Test
+    public void aggregateHistoryWarningExpiresAfterDeletedBucketsLeaveRetentionWindow() {
+        DiagnosticsRetentionPolicy bounded = DiagnosticsRetentionPolicy.builder()
+                .retentionMillis(1_000L)
+                .recentEventLimit(20)
+                .aggregateRowLimit(20)
+                .rawAggregateRowLimit(20)
+                .hookStateLimit(20)
+                .featureTotalLimit(20)
+                .queueCapacity(20)
+                .batchSize(20)
+                .emergencyCleanupRowLimit(1)
+                .maxDatabaseBytes(2L * 1_024L * 1_024L)
+                .build();
+        database = open(bounded);
+        long now = System.currentTimeMillis();
+        database.writeBatch(DiagnosticsWriteBatch.builder()
+                .addEvent(event(now, "pressure-expiry", "pkg", 1,
+                        "FREEZE", "blocked"))
+                .build());
+        android.database.sqlite.SQLiteDatabase writable = database.getWritableDatabase();
+        writable.delete(ResidencyDiagnosticsDb.TABLE_EVENTS, null, null);
+        writable.delete(ResidencyDiagnosticsDb.TABLE_FEATURE_TOTALS, null, null);
+
+        database.performMaintenance(now, true);
+        assertTrue(database.queryAggregates(
+                DiagnosticsQuery.AggregateQuery.builder().limit(20).build())
+                .historyTruncated);
+
+        database.performMaintenance(
+                now + bounded.retentionMillis + DiagnosticsValues.DAY_MILLIS + 1L,
+                false);
+
+        assertFalse(database.queryAggregates(
+                DiagnosticsQuery.AggregateQuery.builder().limit(20).build())
+                .historyTruncated);
+    }
+
+    @Test
     public void filtersAndKeysetPaginationAreParameterizedAndStable() {
         database = open(policy(20, 20, 20, 60_000L));
         long now = System.currentTimeMillis();
@@ -285,6 +366,71 @@ public final class ResidencyDiagnosticsDbTest {
         assertEquals(2L, rows.items.get(0).eventCount);
         assertEquals("pkg.a", rows.items.get(0).packageName);
         assertEquals("freeze_target", rows.items.get(0).hookTargetId);
+    }
+
+    @Test
+    public void aggregatePaginationUsesDimensionKeysToBreakMetricTies() {
+        database = open(policy(20, 20, 20, 60_000L));
+        long now = System.currentTimeMillis();
+        NormalizedDiagnosticsEvent zFeature = NormalizedDiagnosticsEvent.builder()
+                .timestampMillis(now)
+                .processId("system_server")
+                .featureId("z_feature")
+                .hookTargetId("target")
+                .behavior("KILL")
+                .decision("PASS")
+                .result("passed")
+                .eventToken("z")
+                .build();
+        NormalizedDiagnosticsEvent aFeature = NormalizedDiagnosticsEvent.builder()
+                .timestampMillis(now)
+                .processId("system_server")
+                .featureId("a_feature")
+                .hookTargetId("target")
+                .behavior("KILL")
+                .decision("PASS")
+                .result("passed")
+                .eventToken("a")
+                .build();
+        database.writeBatch(DiagnosticsWriteBatch.builder()
+                .addEvent(zFeature)
+                .addEvent(aFeature)
+                .build());
+
+        DiagnosticsQuery.AggregateQuery firstQuery = DiagnosticsQuery.AggregateQuery.builder()
+                .dimension(DiagnosticsQuery.AggregateDimension.FEATURE)
+                .limit(1)
+                .build();
+        DiagnosticsQuery.AggregatePage first = database.queryAggregates(firstQuery);
+        DiagnosticsQuery.AggregatePage second = database.queryAggregates(
+                firstQuery.nextPage(first.nextOffset).build());
+
+        assertTrue(first.hasMore);
+        assertEquals("a_feature", first.items.get(0).featureId);
+        assertEquals("z_feature", second.items.get(0).featureId);
+    }
+
+    @Test
+    public void aggregateSnapshotUsesOneCompleteResultInsteadOfPageOffsets() {
+        database = open(policy(20, 20, 20, 60_000L));
+        long now = System.currentTimeMillis();
+        database.writeBatch(DiagnosticsWriteBatch.builder()
+                .addEvent(event(now, "one", "pkg.one", 1, "KILL", "passed"))
+                .addEvent(event(now + 1L, "two", "pkg.two", 2, "FREEZE", "passed"))
+                .build());
+        DiagnosticsQuery.AggregateQuery pagedQuery =
+                DiagnosticsQuery.AggregateQuery.builder()
+                        .dimension(DiagnosticsQuery.AggregateDimension.APPLICATION)
+                        .limit(1)
+                        .offset(1)
+                        .build();
+
+        DiagnosticsQuery.AggregatePage snapshot =
+                database.queryAggregateSnapshot(pagedQuery, 20);
+
+        assertEquals(2, snapshot.items.size());
+        assertFalse(snapshot.hasMore);
+        assertEquals(0, snapshot.nextOffset);
     }
 
     @Test
@@ -694,6 +840,78 @@ public final class ResidencyDiagnosticsDbTest {
             }
         }
         assertTrue(payloadHashFound);
+    }
+
+    @Test
+    public void migrationFromVersionSixRepairsCandidateFilteringCounters() {
+        SQLiteDatabase legacy = context.openOrCreateDatabase(
+                databaseName, Context.MODE_PRIVATE, null);
+        ResidencyDiagnosticsDb.createVersionSixForTest(legacy);
+        ContentValues event = new ContentValues();
+        event.put("observed_at", 1_700_000_000_000L);
+        event.put("process_id", "system_server");
+        event.put("feature_id", "athena_periodic");
+        event.put("hook_target_id", "athena_periodic");
+        event.put("behavior", "KILL");
+        event.put("decision", "FILTER_CANDIDATE");
+        event.put("result", "candidate_filtered");
+        event.put("package_name", "pkg.one,pkg.two");
+        event.put("uid", 10123);
+        event.put("blocked", 0);
+        legacy.insertOrThrow(ResidencyDiagnosticsDb.TABLE_EVENTS, null, event);
+        ContentValues aggregate = new ContentValues();
+        aggregate.put("bucket_start", DiagnosticsValues.dayBucket(1_700_000_000_000L));
+        aggregate.put("feature_id", "athena_periodic");
+        aggregate.put("hook_target_id", "athena_periodic");
+        aggregate.put("behavior", "KILL");
+        aggregate.put("decision", "FILTER_CANDIDATE");
+        aggregate.put("result", "candidate_filtered");
+        aggregate.put("package_name", "pkg.one,pkg.two");
+        aggregate.put("uid", 10123);
+        aggregate.put("event_count", 4L);
+        aggregate.put("blocked_count", 0L);
+        aggregate.put("first_at", 1_700_000_000_000L);
+        aggregate.put("last_at", 1_700_000_000_100L);
+        legacy.insertOrThrow(ResidencyDiagnosticsDb.TABLE_AGGREGATES, null, aggregate);
+        ContentValues anonymousAggregate = new ContentValues(aggregate);
+        anonymousAggregate.put("package_name", "");
+        anonymousAggregate.put("event_count", 2L);
+        anonymousAggregate.put("last_at", 1_700_000_000_200L);
+        legacy.insertOrThrow(
+                ResidencyDiagnosticsDb.TABLE_AGGREGATES, null, anonymousAggregate);
+        ContentValues totals = new ContentValues();
+        totals.put("feature_id", "athena_periodic");
+        totals.put("observed", 10L);
+        totals.put("blocked", 6L);
+        totals.put("last_at", 1_700_000_000_100L);
+        totals.put("last_package", "pkg.one,pkg.two");
+        legacy.insertOrThrow(ResidencyDiagnosticsDb.TABLE_FEATURE_TOTALS, null, totals);
+        legacy.setVersion(6);
+        legacy.close();
+
+        database = open(policy(20, 20, 20, 60_000L));
+        SQLiteDatabase upgraded = database.getWritableDatabase();
+        DiagnosticsQuery.AggregatePage rows = database.queryAggregates(
+                DiagnosticsQuery.AggregateQuery.builder()
+                        .dimension(DiagnosticsQuery.AggregateDimension.RESULT)
+                        .limit(20)
+                        .build());
+
+        assertEquals(ResidencyDiagnosticsDb.SCHEMA_VERSION, upgraded.getVersion());
+        assertEquals(6L, rows.items.get(0).eventCount);
+        assertEquals(6L, rows.items.get(0).blockedCount);
+        assertEquals("", rows.items.get(0).packageName);
+        assertTrue(rows.historyTruncated);
+        DiagnosticsQuery.HomeStatsSnapshot home = database.queryHomeStats(
+                Collections.singletonList("athena_periodic"));
+        assertEquals(12L, home.blocked);
+        assertEquals("", home.features.get("athena_periodic").lastPackage);
+        assertEquals("", database.queryEvents(
+                DiagnosticsQuery.EventFilter.builder().build())
+                .items.get(0).packageName);
+        assertEquals(1L, DatabaseUtils.longForQuery(upgraded,
+                "SELECT blocked FROM " + ResidencyDiagnosticsDb.TABLE_EVENTS + " LIMIT 1",
+                null));
     }
 
     private ResidencyDiagnosticsDb open(DiagnosticsRetentionPolicy policy) {

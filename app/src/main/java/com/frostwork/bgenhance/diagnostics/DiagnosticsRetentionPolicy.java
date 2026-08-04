@@ -3,6 +3,7 @@ package com.frostwork.bgenhance.diagnostics;
 /** Explicit bounds for the private diagnostics database and its in-memory writer. */
 public final class DiagnosticsRetentionPolicy {
     private static final int MAX_ROW_LIMIT = 65_536;
+    public static final int MAX_AGGREGATE_SNAPSHOT_ROWS = MAX_ROW_LIMIT;
     private static final int MAX_QUEUE_CAPACITY = 8_192;
     public static final int MAX_ACCEPTED_BATCH_ITEMS = 256;
     private static final int MAX_EMERGENCY_CLEANUP_ROWS = 8_192;

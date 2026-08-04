@@ -260,6 +260,13 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 () -> DiagnosticsQuery.AggregatePage.empty("database_unavailable"));
     }
 
+    public CompletableFuture<DiagnosticsQuery.AggregatePage> queryAggregateSnapshotAsync(
+            DiagnosticsQuery.AggregateQuery query, int maxRows) {
+        return submitQuery(
+                () -> storage().queryAggregateSnapshot(query, maxRows),
+                () -> DiagnosticsQuery.AggregatePage.empty("database_unavailable"));
+    }
+
     public CompletableFuture<DiagnosticsQuery.HomeStatsSnapshot> queryHomeStatsAsync(
             Iterable<String> featureIds) {
         List<String> copied = copyFeatureIds(featureIds);
@@ -807,15 +814,9 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
         List<DiagnosticsHookState> hookStates = copyAtMost(
                 hookProbe, options.hookStateLimit);
 
-        DiagnosticsQuery.HomeStatsSnapshot storedStats = storage().queryHomeStats(null);
-        DiagnosticsQuery.HomeStatsSnapshot requestedStats =
-                storage().queryHomeStats(featureIds);
-        LinkedHashMap<String, DiagnosticsQuery.FeatureStats> combinedStats =
-                new LinkedHashMap<>(storedStats.features);
-        combinedStats.putAll(requestedStats.features);
-        String homeError = firstError(storedStats.errorCode, requestedStats.errorCode);
-        DiagnosticsQuery.HomeStatsSnapshot homeStats =
-                new DiagnosticsQuery.HomeStatsSnapshot(combinedStats, homeError);
+        String homeError = aggregateResult.errorCode;
+        DiagnosticsQuery.HomeStatsSnapshot homeStats = homeStatsFromAggregates(
+                aggregateResult.items, featureIds, homeError);
 
         DiagnosticsQuery.ExportCollectionStatus eventStatus =
                 new DiagnosticsQuery.ExportCollectionStatus(
@@ -825,6 +826,7 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 new DiagnosticsQuery.ExportCollectionStatus(
                         options.aggregateLimit, aggregateResult.items.size(),
                         aggregateResult.pagesRead, aggregateResult.hasMore,
+                        aggregateResult.historyTruncated,
                         aggregateResult.errorCode);
         DiagnosticsQuery.ExportCollectionStatus rawStatus =
                 new DiagnosticsQuery.ExportCollectionStatus(
@@ -889,40 +891,23 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
     }
 
     private AggregateExportResult readAggregatesForExport(int requestedLimit) {
-        ArrayList<DiagnosticsQuery.AggregateRow> items = new ArrayList<>();
-        int offset = 0;
-        int pagesRead = 0;
-        boolean hasMore = false;
-        String errorCode = "";
-        while (items.size() < requestedLimit) {
-            DiagnosticsQuery.AggregateQuery query = DiagnosticsQuery.AggregateQuery.builder()
-                    .dimension(DiagnosticsQuery.AggregateDimension.APPLICATION)
-                    .dimension(DiagnosticsQuery.AggregateDimension.FEATURE)
-                    .dimension(DiagnosticsQuery.AggregateDimension.HOOK_TARGET)
-                    .dimension(DiagnosticsQuery.AggregateDimension.BEHAVIOR)
-                    .dimension(DiagnosticsQuery.AggregateDimension.SOURCE)
-                    .dimension(DiagnosticsQuery.AggregateDimension.DECISION)
-                    .dimension(DiagnosticsQuery.AggregateDimension.RESULT)
-                    .limit(requestedLimit - items.size())
-                    .offset(offset)
-                    .build();
-            DiagnosticsQuery.AggregatePage page = storage().queryAggregates(query);
-            pagesRead++;
-            errorCode = page.errorCode;
-            int before = items.size();
-            for (DiagnosticsQuery.AggregateRow item : page.items) {
-                if (items.size() >= requestedLimit) break;
-                items.add(item);
-            }
-            hasMore = page.hasMore;
-            if (!errorCode.isEmpty() || !hasMore) break;
-            if (items.size() == before || page.nextOffset <= offset) {
-                errorCode = "invalid_aggregate_pagination";
-                break;
-            }
-            offset = page.nextOffset;
-        }
-        return new AggregateExportResult(items, pagesRead, hasMore, errorCode);
+        DiagnosticsQuery.AggregateQuery query = DiagnosticsQuery.AggregateQuery.builder()
+                .dimension(DiagnosticsQuery.AggregateDimension.APPLICATION)
+                .dimension(DiagnosticsQuery.AggregateDimension.FEATURE)
+                .dimension(DiagnosticsQuery.AggregateDimension.HOOK_TARGET)
+                .dimension(DiagnosticsQuery.AggregateDimension.BEHAVIOR)
+                .dimension(DiagnosticsQuery.AggregateDimension.SOURCE)
+                .dimension(DiagnosticsQuery.AggregateDimension.DECISION)
+                .dimension(DiagnosticsQuery.AggregateDimension.RESULT)
+                .build();
+        DiagnosticsQuery.AggregatePage page =
+                storage().queryAggregateSnapshot(query, requestedLimit);
+        return new AggregateExportResult(
+                page.items,
+                page.items.isEmpty() ? 0 : 1,
+                page.hasMore,
+                page.historyTruncated,
+                page.errorCode);
     }
 
     private DiagnosticsQuery.ExportBootStatus bootStatus(
@@ -998,6 +983,40 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
         return value == Integer.MAX_VALUE ? value : value + 1;
     }
 
+    private static DiagnosticsQuery.HomeStatsSnapshot homeStatsFromAggregates(
+            List<DiagnosticsQuery.AggregateRow> rows,
+            Iterable<String> requestedFeatureIds,
+            String errorCode) {
+        LinkedHashMap<String, DiagnosticsQuery.FeatureStats> totals = new LinkedHashMap<>();
+        if (rows != null) {
+            for (DiagnosticsQuery.AggregateRow row : rows) {
+                if (row == null || row.featureId.isEmpty()) continue;
+                DiagnosticsQuery.FeatureStats current = totals.get(row.featureId);
+                boolean latest = current == null || row.lastAt >= current.lastAt;
+                totals.put(row.featureId, new DiagnosticsQuery.FeatureStats(
+                        row.featureId,
+                        saturatedAdd(current == null ? 0L : current.observed, row.eventCount),
+                        saturatedAdd(current == null ? 0L : current.blocked, row.blockedCount),
+                        saturatedAdd(current == null ? 0L : current.failOpen, row.failOpenCount),
+                        Math.max(current == null ? 0L : current.lastAt, row.lastAt),
+                        latest ? row.packageName : current.lastPackage,
+                        "",
+                        "",
+                        "",
+                        latest ? row.result : current.lastResult));
+            }
+        }
+        if (requestedFeatureIds != null) {
+            for (String requested : requestedFeatureIds) {
+                String featureId = DiagnosticsValues.id(requested);
+                if (!featureId.isEmpty()) {
+                    totals.putIfAbsent(featureId, DiagnosticsQuery.FeatureStats.empty(featureId));
+                }
+            }
+        }
+        return new DiagnosticsQuery.HomeStatsSnapshot(totals, errorCode);
+    }
+
     private static <T> List<T> copyAtMost(List<T> source, int limit) {
         if (source == null || source.isEmpty()) return Collections.emptyList();
         int size = Math.min(Math.max(0, limit), source.size());
@@ -1035,16 +1054,19 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
         final List<DiagnosticsQuery.AggregateRow> items;
         final int pagesRead;
         final boolean hasMore;
+        final boolean historyTruncated;
         final String errorCode;
 
         AggregateExportResult(
                 List<DiagnosticsQuery.AggregateRow> items,
                 int pagesRead,
                 boolean hasMore,
+                boolean historyTruncated,
                 String errorCode) {
             this.items = items;
             this.pagesRead = pagesRead;
             this.hasMore = hasMore;
+            this.historyTruncated = historyTruncated;
             this.errorCode = DiagnosticsValues.id(errorCode);
         }
     }
@@ -1132,14 +1154,26 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                     .updatedAt(value.updatedAt)
                     .build());
         }
+        DiagnosticsQuery.ExportStatus exportStatus;
+        if (options.includeSensitiveDetails) {
+            exportStatus = source.exportStatus;
+        } else {
+            exportStatus = new DiagnosticsQuery.ExportStatus(
+                    source.exportStatus.recentEvents,
+                    source.exportStatus.aggregates,
+                    source.exportStatus.rawHooks,
+                    source.exportStatus.hookStates,
+                    featureStats.size(),
+                    source.exportStatus.currentBoot.redacted(),
+                    source.exportStatus.backendHealth);
+        }
         return new DiagnosticsQuery.ExportSnapshot(
                 source.formatVersion, source.databaseSchemaVersion, source.generatedAt,
                 source.retentionMillis, options.includePackageNames, options.includeUids,
                 options.includeSensitiveDetails,
                 events, aggregates, rawHooks, hookStates,
                 new DiagnosticsQuery.HomeStatsSnapshot(featureStats, source.homeStats.errorCode),
-                options.includeSensitiveDetails
-                        ? source.exportStatus : source.exportStatus.redacted(),
+                exportStatus,
                 source.errorCode);
     }
 
@@ -1221,6 +1255,9 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
             String value, DiagnosticsQuery.ExportOptions options) {
         if (options.includeSensitiveDetails || value == null || value.isEmpty()) return value;
         if ("NETWORK".equals(value)
+                || "R_TO_M".equals(value)
+                || "M_TO_F".equals(value)
+                || "LCD_ON".equals(value)
                 || enumContains(FreezeSource.class, value)
                 || enumContains(WakeSource.class, value)
                 || enumContains(ResourceType.class, value)) return value;
@@ -1264,7 +1301,8 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 || DiagnosticsResult.RUNTIME_FAIL_OPEN.equals(value)
                 || DiagnosticsResult.RECOVERED.equals(value)
                 || DiagnosticsResult.NO_ACTION_NEEDED.equals(value)
-                || DiagnosticsResult.SAFETY_ABORTED.equals(value)) return value;
+                || DiagnosticsResult.SAFETY_ABORTED.equals(value)
+                || DiagnosticsResult.APPLIED.equals(value)) return value;
         return UNKNOWN_EXPORTED_VALUE;
     }
 

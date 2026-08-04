@@ -622,10 +622,12 @@ public final class ResidencyDiagnosticsBackendTest {
                 .build());
         LinkedHashMap<String, DiagnosticsQuery.FeatureStats> home = new LinkedHashMap<>();
         home.put(FeatureIds.HANS, new DiagnosticsQuery.FeatureStats(
-                FeatureIds.HANS, 1L, 1L, 0L, 1L,
+                FeatureIds.HANS, 99L, 99L, 99L, 1L,
                 "com.private.target", "system_server", "private scene",
                 "private reason", "blocked"));
         storage.homeStats = new DiagnosticsQuery.HomeStatsSnapshot(home, "");
+        storage.aggregates.add(aggregate(
+                FeatureIds.HANS, 1L, 1L, 0L, 1L, "com.private.target", "blocked"));
         ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 2, 60_000L));
 
         DiagnosticsQuery.ExportSnapshot snapshot = backend.exportAsync(
@@ -640,6 +642,9 @@ public final class ResidencyDiagnosticsBackendTest {
         assertEquals("", snapshot.recentEvents.get(0).failOpenReason);
         assertEquals("", snapshot.recentEvents.get(0).eventToken);
         DiagnosticsQuery.FeatureStats feature = snapshot.homeStats.features.get(FeatureIds.HANS);
+        assertEquals(1L, feature.observed);
+        assertEquals(1L, feature.blocked);
+        assertEquals(0L, feature.failOpen);
         assertEquals("", feature.lastPackage);
         assertEquals("", feature.lastProcess);
         assertEquals("", feature.lastScene);
@@ -683,6 +688,8 @@ public final class ResidencyDiagnosticsBackendTest {
                 "private_feature", 1L, 0L, 0L, 1L,
                 "", "", "", "", "private_result"));
         storage.homeStats = new DiagnosticsQuery.HomeStatsSnapshot(home, "");
+        storage.aggregates.add(aggregate(
+                "private_feature", 1L, 0L, 0L, 1L, "pkg", "private_result"));
         ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 2, 60_000L));
 
         DiagnosticsQuery.ExportSnapshot snapshot = backend.exportAsync(
@@ -705,6 +712,29 @@ public final class ResidencyDiagnosticsBackendTest {
     }
 
     @Test
+    public void defaultExportPreservesDocumentedFreezeTimingSources() throws Exception {
+        FakeStorage storage = new FakeStorage();
+        storage.events.add(event("r-to-m", "pkg", 1).copyBuilder()
+                .source("R_TO_M")
+                .build());
+        storage.events.add(event("m-to-f", "pkg", 1).copyBuilder()
+                .source("M_TO_F")
+                .build());
+        storage.events.add(event("lcd-on", "pkg", 1).copyBuilder()
+                .source("LCD_ON")
+                .build());
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 2, 60_000L));
+
+        DiagnosticsQuery.ExportSnapshot snapshot = backend.exportAsync(
+                DiagnosticsQuery.ExportOptions.redactedDefaults(),
+                Collections.singletonList(FeatureIds.HANS)).get(5, TimeUnit.SECONDS);
+
+        assertEquals("R_TO_M", snapshot.recentEvents.get(0).source);
+        assertEquals("M_TO_F", snapshot.recentEvents.get(1).source);
+        assertEquals("LCD_ON", snapshot.recentEvents.get(2).source);
+    }
+
+    @Test
     public void defaultExportMergesUnknownFeatureStatsWithoutLosingTotals() throws Exception {
         FakeStorage storage = new FakeStorage();
         LinkedHashMap<String, DiagnosticsQuery.FeatureStats> home = new LinkedHashMap<>();
@@ -715,6 +745,10 @@ public final class ResidencyDiagnosticsBackendTest {
                 "private_feature_two", 5L, 2L, 0L, 200L,
                 "pkg.two", "process.two", "scene two", "reason two", "passed"));
         storage.homeStats = new DiagnosticsQuery.HomeStatsSnapshot(home, "");
+        storage.aggregates.add(aggregate(
+                "private_feature_one", 3L, 1L, 1L, 100L, "pkg.one", "blocked"));
+        storage.aggregates.add(aggregate(
+                "private_feature_two", 5L, 2L, 0L, 200L, "pkg.two", "passed"));
         ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 2, 60_000L));
 
         DiagnosticsQuery.ExportSnapshot snapshot = backend.exportAsync(
@@ -722,6 +756,8 @@ public final class ResidencyDiagnosticsBackendTest {
                 home.keySet()).get(5, TimeUnit.SECONDS);
 
         assertEquals(1, snapshot.homeStats.features.size());
+        assertEquals(snapshot.homeStats.features.size(),
+                snapshot.exportStatus.featureStatsCount);
         DiagnosticsQuery.FeatureStats unknown = snapshot.homeStats.features.get("unknown");
         assertEquals(8L, unknown.observed);
         assertEquals(3L, unknown.blocked);
@@ -746,6 +782,11 @@ public final class ResidencyDiagnosticsBackendTest {
                 "private_feature_two", 1L, 1L, 1L,
                 2L, "", "", "", "", "blocked"));
         storage.homeStats = new DiagnosticsQuery.HomeStatsSnapshot(home, "");
+        storage.aggregates.add(aggregate(
+                "private_feature_one", Long.MAX_VALUE, Long.MAX_VALUE,
+                Long.MAX_VALUE, 1L, "", "passed"));
+        storage.aggregates.add(aggregate(
+                "private_feature_two", 1L, 1L, 1L, 2L, "", "blocked"));
         ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 2, 60_000L));
 
         DiagnosticsQuery.ExportSnapshot snapshot = backend.exportAsync(
@@ -767,6 +808,10 @@ public final class ResidencyDiagnosticsBackendTest {
         home.put("private_feature_two", DiagnosticsQuery.FeatureStats.empty(
                 "private_feature_two"));
         storage.homeStats = new DiagnosticsQuery.HomeStatsSnapshot(home, "");
+        storage.aggregates.add(aggregate(
+                "private_feature_one", 0L, 0L, 0L, 0L, "", ""));
+        storage.aggregates.add(aggregate(
+                "private_feature_two", 0L, 0L, 0L, 0L, "", ""));
         ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 2, 60_000L));
 
         DiagnosticsQuery.ExportSnapshot snapshot = backend.exportAsync(
@@ -833,7 +878,7 @@ public final class ResidencyDiagnosticsBackendTest {
         assertEquals(2, snapshot.exportStatus.recentEvents.pagesRead);
         assertTrue(snapshot.exportStatus.recentEvents.truncated);
         assertEquals(350, snapshot.aggregates.size());
-        assertEquals(2, snapshot.exportStatus.aggregates.pagesRead);
+        assertEquals(1, snapshot.exportStatus.aggregates.pagesRead);
         assertTrue(snapshot.exportStatus.aggregates.truncated);
         assertEquals(2, snapshot.rawHooks.size());
         assertTrue(snapshot.exportStatus.rawHooks.truncated);
@@ -850,6 +895,21 @@ public final class ResidencyDiagnosticsBackendTest {
         assertEquals("FEATURES_INSTALLED", snapshot.hookStates.get(0).installStatus);
         assertEquals("FEATURES_INSTALLED", snapshot.hookStates.get(1).installStatus);
         assertEquals("", snapshot.hookStates.get(0).processId);
+    }
+
+    @Test
+    public void exportReportsAggregateHistoryRemovedByStoragePressure() throws Exception {
+        FakeStorage storage = new FakeStorage();
+        storage.aggregateHistoryTruncated = true;
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 2, 60_000L));
+
+        DiagnosticsQuery.ExportSnapshot snapshot = backend.exportAsync(
+                DiagnosticsQuery.ExportOptions.redactedDefaults(),
+                FeatureIds.all()).get(5, TimeUnit.SECONDS);
+
+        assertTrue(snapshot.exportStatus.aggregates.historyTruncated);
+        assertTrue(snapshot.exportStatus.aggregates.truncated);
+        assertTrue(snapshot.exportStatus.truncated);
     }
 
     @Test
@@ -1109,6 +1169,34 @@ public final class ResidencyDiagnosticsBackendTest {
                 .build();
     }
 
+    private static DiagnosticsQuery.AggregateRow aggregate(
+            String featureId,
+            long observed,
+            long blocked,
+            long failOpen,
+            long lastAt,
+            String packageName,
+            String result) {
+        return new DiagnosticsQuery.AggregateRow(
+                packageName,
+                -1,
+                featureId,
+                "",
+                DiagnosticsBehaviorClassifier.forFeatureId(featureId),
+                "",
+                "",
+                result,
+                observed,
+                observed,
+                blocked,
+                failOpen,
+                0L,
+                0L,
+                0L,
+                lastAt,
+                lastAt);
+    }
+
     private static DiagnosticsWriteBatch versionedEventBatch(
             long epoch, long sequence, String token) {
         return DiagnosticsWriteBatch.builder()
@@ -1127,6 +1215,7 @@ public final class ResidencyDiagnosticsBackendTest {
     private static final class FakeStorage implements ResidencyDiagnosticsStorage {
         final List<NormalizedDiagnosticsEvent> events = new ArrayList<>();
         final List<DiagnosticsQuery.AggregateRow> aggregates = new ArrayList<>();
+        boolean aggregateHistoryTruncated;
         final List<DiagnosticsQuery.RawHookSummary> rawHooks = new ArrayList<>();
         final List<DiagnosticsHookState> hookStates = new ArrayList<>();
         volatile int written;
@@ -1277,7 +1366,21 @@ public final class ResidencyDiagnosticsBackendTest {
             boolean hasMore = end < aggregates.size();
             return new DiagnosticsQuery.AggregatePage(
                     new ArrayList<>(aggregates.subList(start, end)),
-                    hasMore ? end : 0, hasMore, "");
+                    hasMore ? end : 0, hasMore, aggregateHistoryTruncated, "");
+        }
+
+        @Override
+        public DiagnosticsQuery.AggregatePage queryAggregateSnapshot(
+                DiagnosticsQuery.AggregateQuery query, int maxRows) {
+            if (failQueries) throw new IllegalStateException("query failed");
+            int limit = Math.max(1, maxRows);
+            int end = Math.min(limit, aggregates.size());
+            return new DiagnosticsQuery.AggregatePage(
+                    new ArrayList<>(aggregates.subList(0, end)),
+                    0,
+                    end < aggregates.size(),
+                    aggregateHistoryTruncated,
+                    "");
         }
 
         @Override

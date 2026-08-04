@@ -38,6 +38,9 @@ interface ResidencyDiagnosticsStorage extends AutoCloseable {
 
     DiagnosticsQuery.AggregatePage queryAggregates(DiagnosticsQuery.AggregateQuery query);
 
+    DiagnosticsQuery.AggregatePage queryAggregateSnapshot(
+            DiagnosticsQuery.AggregateQuery query, int maxRows);
+
     List<DiagnosticsQuery.RawHookSummary> queryRawHooks(
             long fromInclusive, long toExclusive, int limit);
 

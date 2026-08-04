@@ -23,7 +23,8 @@ public final class DiagnosticsExportCodecTest {
                 .uid(-1)
                 .build();
         DiagnosticsQuery.ExportSnapshot snapshot = new DiagnosticsQuery.ExportSnapshot(
-                2, 6, 200L, 300L, false, false, false,
+                2, ResidencyDiagnosticsDb.SCHEMA_VERSION,
+                200L, 300L, false, false, false,
                 Collections.singletonList(event), Collections.emptyList(),
                 Collections.emptyList(), Collections.emptyList(),
                 DiagnosticsQuery.HomeStatsSnapshot.empty(""), "");
@@ -35,8 +36,13 @@ public final class DiagnosticsExportCodecTest {
         assertTrue(encoded.successful());
         assertEquals("bgenhance-residency-diagnostics", root.getString("format"));
         assertEquals(2, root.getInt("formatVersion"));
-        assertEquals(6, root.getInt("databaseSchemaVersion"));
+        assertEquals(ResidencyDiagnosticsDb.SCHEMA_VERSION,
+                root.getInt("databaseSchemaVersion"));
         assertEquals("1970-01-01T00:00:00.200Z", root.getString("generatedAtUtc"));
+        assertEquals(300L, root.getLong("retentionMillis"));
+        assertEquals(DiagnosticsValues.DAY_MILLIS,
+                root.getLong("aggregateBucketMillis"));
+        assertTrue(root.getBoolean("retentionWindowApproximate"));
         assertEquals(1, root.getJSONArray("recentEvents").length());
         assertEquals(0, root.getJSONArray("rawHooks").length());
         assertFalse(root.getJSONObject("privacy").getBoolean("packageNamesIncluded"));
@@ -55,7 +61,8 @@ public final class DiagnosticsExportCodecTest {
                 complete, complete, complete, complete, 3, boot,
                 new DiagnosticsQuery.BackendHealth(8L, 1L, 7L, 0L, 0, false));
         DiagnosticsQuery.ExportSnapshot snapshot = new DiagnosticsQuery.ExportSnapshot(
-                2, 6, 200L, 300L, false, false, false,
+                2, ResidencyDiagnosticsDb.SCHEMA_VERSION,
+                200L, 300L, false, false, false,
                 Collections.emptyList(), Collections.emptyList(),
                 Collections.emptyList(), Collections.emptyList(),
                 DiagnosticsQuery.HomeStatsSnapshot.empty(""), status, "");
@@ -98,7 +105,8 @@ public final class DiagnosticsExportCodecTest {
         DiagnosticsQuery.ExportStatus status = new DiagnosticsQuery.ExportStatus(
                 truncated, complete, complete, complete, 1, boot, null);
         DiagnosticsQuery.ExportSnapshot snapshot = new DiagnosticsQuery.ExportSnapshot(
-                2, 6, 200L, 300L, true, true, true,
+                2, ResidencyDiagnosticsDb.SCHEMA_VERSION,
+                200L, 300L, true, true, true,
                 Collections.emptyList(), Collections.emptyList(),
                 Collections.emptyList(), Collections.emptyList(),
                 DiagnosticsQuery.HomeStatsSnapshot.empty(""), status, "");
@@ -121,6 +129,40 @@ public final class DiagnosticsExportCodecTest {
         assertFalse(root.getJSONObject("exportStatus").getBoolean("complete"));
         assertTrue(root.getJSONObject("exportStatus").getJSONObject("collections")
                 .getJSONObject("recentEvents").getBoolean("hasMore"));
+        assertFalse(root.getJSONObject("exportStatus").getJSONObject("collections")
+                .getJSONObject("recentEvents").getBoolean("historyTruncated"));
+        assertTrue(root.getJSONObject("exportStatus").getJSONObject("collections")
+                .getJSONObject("recentEvents").getBoolean("truncated"));
+    }
+
+    @Test
+    public void historicalCleanupMarksCollectionAndWholeExportTruncated()
+            throws Exception {
+        DiagnosticsQuery.ExportCollectionStatus historyTruncated =
+                new DiagnosticsQuery.ExportCollectionStatus(
+                        10, 4, 1, false, true, "");
+        DiagnosticsQuery.ExportCollectionStatus complete =
+                new DiagnosticsQuery.ExportCollectionStatus(10, 1, 1, false, "");
+        DiagnosticsQuery.ExportStatus status = new DiagnosticsQuery.ExportStatus(
+                complete, historyTruncated, complete, complete, 1, null, null);
+        DiagnosticsQuery.ExportSnapshot snapshot = new DiagnosticsQuery.ExportSnapshot(
+                2, ResidencyDiagnosticsDb.SCHEMA_VERSION,
+                200L, 300L, false, false, false,
+                Collections.emptyList(), Collections.emptyList(),
+                Collections.emptyList(), Collections.emptyList(),
+                DiagnosticsQuery.HomeStatsSnapshot.empty(""), status, "");
+
+        JSONObject exportStatus = new JSONObject(
+                DiagnosticsExportCodec.encode(snapshot).json)
+                .getJSONObject("exportStatus");
+        JSONObject aggregates = exportStatus.getJSONObject("collections")
+                .getJSONObject("aggregates");
+
+        assertFalse(aggregates.getBoolean("hasMore"));
+        assertTrue(aggregates.getBoolean("historyTruncated"));
+        assertTrue(aggregates.getBoolean("truncated"));
+        assertTrue(exportStatus.getBoolean("truncated"));
+        assertFalse(exportStatus.getBoolean("complete"));
     }
 
     @Test

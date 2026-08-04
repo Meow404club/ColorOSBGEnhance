@@ -57,6 +57,12 @@ final class ManagedCatalogDiagnosticsDataSource implements DiagnosticsDataSource
     }
 
     @Override
+    public CompletableFuture<DiagnosticsQuery.AggregatePage> queryAggregateSnapshotAsync(
+            DiagnosticsQuery.AggregateQuery query, int maxRows) {
+        return delegate.queryAggregateSnapshotAsync(query, maxRows);
+    }
+
+    @Override
     public CompletableFuture<HookStatePage> queryHookStatesAsync(int limit) {
         return delegate.queryHookStatesAsync(limit);
     }

@@ -29,6 +29,13 @@ final class BackendDiagnosticsDataSource implements DiagnosticsDataSource {
     }
 
     @Override
+    public CompletableFuture<DiagnosticsQuery.AggregatePage> queryAggregateSnapshotAsync(
+            DiagnosticsQuery.AggregateQuery query, int maxRows) {
+        return backend.queryAggregateSnapshotAsync(
+                Objects.requireNonNull(query, "query"), maxRows);
+    }
+
+    @Override
     public CompletableFuture<HookStatePage> queryHookStatesAsync(int requestedLimit) {
         int limit = Math.max(1, Math.min(MAX_HOOK_STATES, requestedLimit));
         return backend.queryHookStatesAsync(limit)

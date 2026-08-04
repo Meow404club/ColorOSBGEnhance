@@ -42,7 +42,7 @@ public final class DiagnosticsViewModelTest {
     }
 
     @Test
-    public void databasePagesAreCollectedBeforeStableUiPagination() {
+    public void databaseSnapshotIsCollectedBeforeStableUiPagination() {
         FakeDataSource source = new FakeDataSource();
         DiagnosticsViewModel viewModel = viewModel(source, 1, 2);
 
@@ -57,12 +57,11 @@ public final class DiagnosticsViewModelTest {
                 DiagnosticsQuery.AggregateDimension.RESULT));
 
         first.future.complete(page(
-                Collections.singletonList(row("com.example.one", "KILL", 10L)), true, 2));
-        assertEquals(2, source.aggregateRequests.size());
-        AggregateRequest second = source.aggregateRequests.get(1);
-        assertEquals(2, second.query.offset);
-        second.future.complete(page(
-                Collections.singletonList(row("com.example.two", "FREEZE", 5L)), false, 0));
+                java.util.Arrays.asList(
+                        row("com.example.one", "KILL", 10L),
+                        row("com.example.two", "FREEZE", 5L)),
+                false,
+                0));
 
         DiagnosticsViewModel.State firstUiPage = viewModel.state();
         assertEquals(DiagnosticsViewModel.Status.CONTENT, firstUiPage.status);
@@ -74,7 +73,53 @@ public final class DiagnosticsViewModelTest {
         DiagnosticsViewModel.State secondUiPage = viewModel.state();
         assertEquals(2, secondUiPage.items.size());
         assertFalse(secondUiPage.hasMore);
-        assertEquals(2, source.aggregateRequests.size());
+        assertEquals(1, source.aggregateRequests.size());
+    }
+
+    @Test
+    public void applicationHistoryTruncationSurvivesUiPagination() {
+        FakeDataSource source = new FakeDataSource();
+        DiagnosticsViewModel viewModel = viewModel(source, 1, 2);
+
+        viewModel.load(DiagnosticsViewModel.View.APPLICATION);
+        source.aggregateRequests.get(0).future.complete(new DiagnosticsQuery.AggregatePage(
+                java.util.Arrays.asList(
+                        row("com.example.one", "KILL", 1L),
+                        row("com.example.two", "FREEZE", 1L)),
+                0, false, true, ""));
+
+        assertTrue(viewModel.state().historyTruncated);
+        viewModel.loadNextPage();
+        assertTrue(viewModel.state().historyTruncated);
+    }
+
+    @Test
+    public void incompleteApplicationSnapshotIsReportedAsAnError() {
+        FakeDataSource source = new FakeDataSource();
+        DiagnosticsViewModel viewModel = viewModel(source, 10, 2);
+
+        viewModel.load(DiagnosticsViewModel.View.APPLICATION);
+        source.aggregateRequests.get(0).future.complete(page(
+                Collections.singletonList(row("com.example.one", "KILL", 1L)),
+                true,
+                0));
+
+        assertEquals(DiagnosticsViewModel.Status.ERROR, viewModel.state().status);
+        assertEquals("result_limit_exceeded", viewModel.state().errorCode);
+    }
+
+    @Test
+    public void behaviorHistoryTruncationIsPublished() {
+        FakeDataSource source = new FakeDataSource();
+        DiagnosticsViewModel viewModel = viewModel(source, 10, 10);
+
+        viewModel.load(DiagnosticsViewModel.View.BEHAVIOR);
+        source.aggregateRequests.get(0).future.complete(new DiagnosticsQuery.AggregatePage(
+                Collections.singletonList(row("", "KILL", 1L)),
+                0, false, true, ""));
+
+        assertEquals(DiagnosticsViewModel.Status.CONTENT, viewModel.state().status);
+        assertTrue(viewModel.state().historyTruncated);
     }
 
     @Test

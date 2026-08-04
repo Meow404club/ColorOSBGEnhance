@@ -13,23 +13,16 @@ import org.junit.Test;
 
 public final class RecentBehaviorStatsLoaderTest {
     @Test
-    public void allPagesProduceOneBehaviorResultSnapshotWithoutDroppingUnknowns()
+    public void oneBoundedSnapshotProducesTotalsWithoutDroppingUnknowns()
             throws Exception {
         List<DiagnosticsQuery.AggregateQuery> queries = new ArrayList<>();
         RecentBehaviorStats stats = RecentBehaviorStatsLoader.load(query -> {
             queries.add(query);
-            if (query.offset == 0) {
-                return CompletableFuture.completedFuture(new DiagnosticsQuery.AggregatePage(
-                        Collections.singletonList(row(
-                                "KILL", DiagnosticsResult.BLOCKED, 5L, 5L, 0L)),
-                        1,
-                        true,
-                        ""));
-            }
             return CompletableFuture.completedFuture(new DiagnosticsQuery.AggregatePage(
-                    Collections.singletonList(row(
-                            "FUTURE_BEHAVIOR", DiagnosticsResult.FAIL_OPEN,
-                            3L, 0L, 3L)),
+                    List.of(
+                            row("KILL", DiagnosticsResult.BLOCKED, 5L, 5L, 0L),
+                            row("FUTURE_BEHAVIOR", DiagnosticsResult.FAIL_OPEN,
+                                    3L, 0L, 3L)),
                     0,
                     false,
                     ""));
@@ -42,9 +35,8 @@ public final class RecentBehaviorStatsLoaderTest {
         assertEquals(2, stats.rows.size());
         assertEquals(DiagnosticsBehaviorClassifier.UNCLASSIFIED,
                 stats.rows.get(1).behavior);
-        assertEquals(2, queries.size());
+        assertEquals(1, queries.size());
         assertEquals(0, queries.get(0).offset);
-        assertEquals(1, queries.get(1).offset);
         for (DiagnosticsQuery.AggregateQuery query : queries) {
             assertEquals(RecentBehaviorStatsLoader.QUERY_PAGE_SIZE, query.limit);
             assertTrue(query.dimensions.contains(
@@ -56,18 +48,34 @@ public final class RecentBehaviorStatsLoaderTest {
     }
 
     @Test
-    public void invalidPaginationReturnsAnErrorInsteadOfPartialTotals() throws Exception {
+    public void truncatedSnapshotReturnsAnErrorInsteadOfPartialTotals() throws Exception {
         RecentBehaviorStats stats = RecentBehaviorStatsLoader.load(query ->
                 CompletableFuture.completedFuture(new DiagnosticsQuery.AggregatePage(
                         Collections.singletonList(row(
                                 "KILL", DiagnosticsResult.PASSED, 1L, 0L, 0L)),
-                        query.offset,
+                        query.limit,
                         true,
                         ""))).get();
 
         assertFalse(stats.isSuccessful());
-        assertEquals("invalid_page_cursor", stats.errorCode);
+        assertEquals("result_limit_exceeded", stats.errorCode);
         assertEquals(0L, stats.observed);
+    }
+
+    @Test
+    public void retainedSnapshotPreservesHistoricalCleanupMarker() throws Exception {
+        RecentBehaviorStats stats = RecentBehaviorStatsLoader.load(query ->
+                CompletableFuture.completedFuture(new DiagnosticsQuery.AggregatePage(
+                        Collections.singletonList(row(
+                                "KILL", DiagnosticsResult.PASSED, 1L, 0L, 0L)),
+                        0,
+                        false,
+                        true,
+                        ""))).get();
+
+        assertTrue(stats.isSuccessful());
+        assertTrue(stats.historyTruncated);
+        assertEquals(1L, stats.observed);
     }
 
     private static DiagnosticsQuery.AggregateRow row(

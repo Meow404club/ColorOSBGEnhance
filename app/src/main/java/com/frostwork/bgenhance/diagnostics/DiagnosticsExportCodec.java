@@ -28,6 +28,8 @@ public final class DiagnosticsExportCodec {
             root.put("generatedAt", snapshot.generatedAt);
             root.put("generatedAtUtc", Instant.ofEpochMilli(snapshot.generatedAt).toString());
             root.put("retentionMillis", snapshot.retentionMillis);
+            root.put("aggregateBucketMillis", DiagnosticsValues.DAY_MILLIS);
+            root.put("retentionWindowApproximate", true);
             JSONObject privacy = new JSONObject();
             privacy.put("packageNamesIncluded", snapshot.packageNamesIncluded);
             privacy.put("uidsIncluded", snapshot.uidsIncluded);
@@ -156,6 +158,7 @@ public final class DiagnosticsExportCodec {
         out.put("returnedCount", status.returnedCount);
         out.put("pagesRead", status.pagesRead);
         out.put("hasMore", status.hasMore);
+        out.put("historyTruncated", status.historyTruncated);
         out.put("truncated", status.truncated);
         if (!status.errorCode.isEmpty()) out.put("errorCode", status.errorCode);
         return out;

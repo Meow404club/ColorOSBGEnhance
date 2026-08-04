@@ -1,12 +1,12 @@
 package com.frostwork.bgenhance.diagnostics;
 
-import java.util.ArrayList;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
 /** Collects every retained behavior-and-result aggregate page into one shared snapshot. */
 public final class RecentBehaviorStatsLoader {
-    public static final int QUERY_PAGE_SIZE = 200;
+    public static final int QUERY_PAGE_SIZE =
+            DiagnosticsRetentionPolicy.DEFAULT_AGGREGATE_ROW_LIMIT;
     private static final int MAX_ROWS =
             DiagnosticsRetentionPolicy.DEFAULT_AGGREGATE_ROW_LIMIT;
 
@@ -20,21 +20,18 @@ public final class RecentBehaviorStatsLoader {
     public static CompletableFuture<RecentBehaviorStats> load(PageSource source) {
         Objects.requireNonNull(source, "source");
         CompletableFuture<RecentBehaviorStats> result = new CompletableFuture<>();
-        requestPage(source, 0, new ArrayList<>(), result);
+        requestSnapshot(source, result);
         return result;
     }
 
-    private static void requestPage(
+    private static void requestSnapshot(
             PageSource source,
-            int offset,
-            ArrayList<DiagnosticsQuery.AggregateRow> rows,
             CompletableFuture<RecentBehaviorStats> result) {
         if (result.isDone()) return;
         DiagnosticsQuery.AggregateQuery query = DiagnosticsQuery.AggregateQuery.builder()
                 .dimension(DiagnosticsQuery.AggregateDimension.BEHAVIOR)
                 .dimension(DiagnosticsQuery.AggregateDimension.RESULT)
                 .limit(QUERY_PAGE_SIZE)
-                .offset(offset)
                 .build();
         CompletableFuture<DiagnosticsQuery.AggregatePage> future;
         try {
@@ -56,20 +53,16 @@ public final class RecentBehaviorStatsLoader {
                 result.complete(RecentBehaviorStats.empty(page.errorCode));
                 return;
             }
-            if (rows.size() > MAX_ROWS - page.items.size()) {
+            if (page.items.size() > MAX_ROWS) {
                 result.complete(RecentBehaviorStats.empty("result_limit_exceeded"));
                 return;
             }
-            rows.addAll(page.items);
-            if (!page.hasMore) {
-                result.complete(RecentBehaviorStats.fromAggregateRows(rows));
+            if (page.hasMore) {
+                result.complete(RecentBehaviorStats.empty("result_limit_exceeded"));
                 return;
             }
-            if (page.nextOffset <= offset) {
-                result.complete(RecentBehaviorStats.empty("invalid_page_cursor"));
-                return;
-            }
-            requestPage(source, page.nextOffset, rows, result);
+            result.complete(RecentBehaviorStats.fromAggregateRows(
+                    page.items, page.historyTruncated));
         });
     }
 }

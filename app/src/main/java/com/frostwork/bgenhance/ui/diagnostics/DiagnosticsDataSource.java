@@ -1,6 +1,8 @@
 package com.frostwork.bgenhance.ui.diagnostics;
 
 import android.content.Context;
+import com.frostwork.bgenhance.diagnostics.BehaviorDetailStats;
+import com.frostwork.bgenhance.diagnostics.BehaviorDetailStatsLoader;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
 import com.frostwork.bgenhance.diagnostics.RecentBehaviorStats;
@@ -16,8 +18,22 @@ public interface DiagnosticsDataSource extends AutoCloseable {
     CompletableFuture<DiagnosticsQuery.AggregatePage> queryAggregatesAsync(
             DiagnosticsQuery.AggregateQuery query);
 
+    default CompletableFuture<DiagnosticsQuery.AggregatePage> queryAggregateSnapshotAsync(
+            DiagnosticsQuery.AggregateQuery query, int maxRows) {
+        return queryAggregatesAsync(query);
+    }
+
     default CompletableFuture<RecentBehaviorStats> queryRecentBehaviorStatsAsync() {
         return RecentBehaviorStatsLoader.load(this::queryAggregatesAsync);
+    }
+
+    default CompletableFuture<BehaviorDetailStats> queryBehaviorDetailsAsync(
+            DiagnosticsBehavior behavior) {
+        if (behavior == null) {
+            return CompletableFuture.completedFuture(
+                    BehaviorDetailStats.empty("invalid_behavior"));
+        }
+        return BehaviorDetailStatsLoader.load(this::queryAggregatesAsync, behavior.wireId);
     }
 
     CompletableFuture<HookStatePage> queryHookStatesAsync(int limit);

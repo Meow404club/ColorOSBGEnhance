@@ -50,7 +50,7 @@ public final class RecentBehaviorStatsRetentionTest {
     }
 
     @Test
-    public void retainedAggregatesDriveBothTotalsWithoutInventingLegacyBehaviors()
+    public void retainedAggregatesAreNotSilentlyTrimmedByTheQueryRowLimit()
             throws Exception {
         long now = System.currentTimeMillis();
         assertTrue(database.migrateLegacyOnce(DiagnosticsWriteBatch.builder()
@@ -80,10 +80,10 @@ public final class RecentBehaviorStatsRetentionTest {
                 .get(5, TimeUnit.SECONDS);
 
         assertTrue(stats.isSuccessful());
-        assertEquals(2L, stats.observed);
+        assertEquals(3L, stats.observed);
         assertEquals(1L, stats.blocked);
         assertEquals(1L, stats.failOpen);
-        assertEquals(2, stats.rows.size());
+        assertEquals(3, stats.rows.size());
         assertTrue(stats.rows.stream().anyMatch(row ->
                 DiagnosticsBehaviorClassifier.UNCLASSIFIED.equals(row.behavior)));
 

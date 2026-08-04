@@ -17,7 +17,7 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
     private static final long MAX_WAL_BYTES = 2L * 1_024L * 1_024L;
 
     public static final String DATABASE_NAME = "residency_diagnostics.db";
-    public static final int SCHEMA_VERSION = 6;
+    public static final int SCHEMA_VERSION = 7;
 
     static final String TABLE_EVENTS = "normalized_events";
     static final String TABLE_AGGREGATES = "event_aggregates";
@@ -29,6 +29,8 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
 
     private static final String METADATA_EPOCH = "epoch";
     private static final String METADATA_LEGACY_MIGRATION = "legacy_hook_diagnostics_v1";
+    private static final String METADATA_AGGREGATE_HISTORY_TRUNCATED =
+            "aggregate_history_truncated";
 
     private final DiagnosticsRetentionPolicy policy;
     private final String currentBootId;
@@ -103,6 +105,10 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         if (current == 5 && newVersion >= 6) {
             migrateVersionFiveToSix(db);
             current = 6;
+        }
+        if (current == 6 && newVersion >= 7) {
+            migrateVersionSixToSeven(db);
+            current = 7;
         }
         if (current != newVersion) {
             throw new IllegalStateException(
@@ -242,21 +248,45 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
             DiagnosticsQuery.AggregateQuery requested) {
         DiagnosticsQuery.AggregateQuery query = requested == null
                 ? DiagnosticsQuery.AggregateQuery.builder().build() : requested;
-        AggregateSql aggregateSql = aggregateSql(query);
+        return queryAggregates(query, query.limit, query.offset, true);
+    }
+
+    @Override
+    public DiagnosticsQuery.AggregatePage queryAggregateSnapshot(
+            DiagnosticsQuery.AggregateQuery requested, int requestedMaxRows) {
+        DiagnosticsQuery.AggregateQuery query = requested == null
+                ? DiagnosticsQuery.AggregateQuery.builder().build() : requested;
+        int maxRows = Math.max(1, Math.min(
+                DiagnosticsRetentionPolicy.MAX_AGGREGATE_SNAPSHOT_ROWS,
+                requestedMaxRows));
+        return queryAggregates(query, maxRows, 0, false);
+    }
+
+    private DiagnosticsQuery.AggregatePage queryAggregates(
+            DiagnosticsQuery.AggregateQuery query,
+            int limit,
+            int offset,
+            boolean provideNextOffset) {
+        AggregateSql aggregateSql = aggregateSql(query, limit, offset);
         ArrayList<DiagnosticsQuery.AggregateRow> rows = new ArrayList<>();
         boolean hasMore = false;
         try (Cursor cursor = getReadableDatabase().rawQuery(
                 aggregateSql.sql, aggregateSql.arguments)) {
             while (cursor.moveToNext()) {
-                if (rows.size() >= query.limit) {
+                if (rows.size() >= limit) {
                     hasMore = true;
                     break;
                 }
                 rows.add(readAggregate(cursor));
             }
         }
-        int nextOffset = hasMore ? query.offset + rows.size() : 0;
-        return new DiagnosticsQuery.AggregatePage(rows, nextOffset, hasMore, "");
+        int nextOffset = provideNextOffset && hasMore ? offset + rows.size() : 0;
+        return new DiagnosticsQuery.AggregatePage(
+                rows,
+                nextOffset,
+                hasMore,
+                hasMetadata(getReadableDatabase(), METADATA_AGGREGATE_HISTORY_TRUNCATED),
+                "");
     }
 
     @Override
@@ -355,6 +385,9 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                 deleted += db.delete(TABLE_AGGREGATES, null, null);
                 deleted += db.delete(TABLE_RAW, null, null);
                 deleted += db.delete(TABLE_FEATURE_TOTALS, null, null);
+                deleted += db.delete(TABLE_METADATA, "name=?", new String[] {
+                        METADATA_AGGREGATE_HISTORY_TRUNCATED
+                });
             }
             if (scope == DiagnosticsQuery.ClearScope.STATISTICS) {
                 resetHookActivity(db, false);
@@ -795,11 +828,28 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                 String.valueOf(DiagnosticsValues.dayBucket(cutoff))
         });
         trimRows(db, TABLE_EVENTS, "observed_at DESC,id DESC", policy.recentEventLimit);
-        trimRows(db, TABLE_AGGREGATES, "last_at DESC,rowid DESC", policy.aggregateRowLimit);
+        // Aggregate rows are the source of user-visible retained totals. Trimming them by
+        // recency would silently make otherwise retained behavior and application counts drift.
+        // The time window above is the normal bound; storage-pressure maintenance remains the
+        // emergency bound when the database reaches its configured capacity.
         trimRows(db, TABLE_RAW, "last_hit_at DESC,rowid DESC", policy.rawAggregateRowLimit);
         trimRows(db, TABLE_HOOK_STATES, "updated_at DESC,rowid DESC", policy.hookStateLimit);
         trimRows(db, TABLE_FEATURE_TOTALS, "last_at DESC,rowid DESC", policy.featureTotalLimit);
         pruneObsoleteBatchCursors(db);
+        clearExpiredAggregateHistoryMarker(db, now);
+    }
+
+    private void clearExpiredAggregateHistoryMarker(SQLiteDatabase db, long now) {
+        long truncatedAt = metadataLong(db, METADATA_AGGREGATE_HISTORY_TRUNCATED);
+        if (truncatedAt <= 0L) return;
+        long cutoff = now <= policy.retentionMillis ? 0L : now - policy.retentionMillis;
+        long approximateCutoff = cutoff <= DiagnosticsValues.DAY_MILLIS
+                ? 0L : cutoff - DiagnosticsValues.DAY_MILLIS;
+        if (truncatedAt < approximateCutoff) {
+            db.delete(TABLE_METADATA, "name=?", new String[] {
+                    METADATA_AGGREGATE_HISTORY_TRUNCATED
+            });
+        }
     }
 
     private void pruneForStoragePressure(SQLiteDatabase db, long now) {
@@ -819,21 +869,32 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
 
         remaining -= deleteLimited(db, TABLE_EVENTS, null, null,
                 "observed_at ASC,id ASC", remaining);
-        remaining -= deleteLimited(db, TABLE_AGGREGATES, null, null,
-                "last_at ASC,rowid ASC", remaining);
         remaining -= deleteLimited(db, TABLE_RAW, null, null,
                 "last_hit_at ASC,rowid ASC", remaining);
-        remaining -= deleteLimited(db, TABLE_HOOK_STATES, null, null,
-                "updated_at ASC,rowid ASC", remaining);
         remaining -= deleteLimited(db, TABLE_FEATURE_TOTALS, null, null,
                 "last_at ASC,rowid ASC", remaining);
+        if (!currentBootId.isEmpty()) {
+            remaining -= deleteLimited(db, TABLE_HOOK_STATES, "boot_id<>?",
+                    new String[] { currentBootId },
+                    "updated_at ASC,rowid ASC", remaining);
+        }
         String cursorWhere = currentBootId.isEmpty()
                 ? "epoch<>?" : "epoch<>? OR boot_id<>?";
         String[] cursorArguments = currentBootId.isEmpty()
                 ? new String[] { String.valueOf(currentEpoch(db)) }
                 : new String[] { String.valueOf(currentEpoch(db)), currentBootId };
-        deleteLimited(db, TABLE_BATCH_CURSORS, cursorWhere, cursorArguments,
+        remaining -= deleteLimited(db, TABLE_BATCH_CURSORS, cursorWhere, cursorArguments,
                 "updated_at ASC,rowid ASC", remaining);
+        int deletedRetainedAggregates = deleteLimited(
+                db,
+                TABLE_AGGREGATES,
+                null,
+                null,
+                "last_at ASC,rowid ASC",
+                remaining);
+        if (deletedRetainedAggregates > 0) {
+            putMetadataLong(db, METADATA_AGGREGATE_HISTORY_TRUNCATED, now);
+        }
     }
 
     private static int deleteLimited(
@@ -897,7 +958,8 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         return selection;
     }
 
-    private static AggregateSql aggregateSql(DiagnosticsQuery.AggregateQuery query) {
+    private static AggregateSql aggregateSql(
+            DiagnosticsQuery.AggregateQuery query, int limit, int offset) {
         ArrayList<String> selected = new ArrayList<>();
         ArrayList<String> grouped = new ArrayList<>();
         selectDimension(query, DiagnosticsQuery.AggregateDimension.APPLICATION,
@@ -945,9 +1007,11 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                 .append(join(selected)).append(" FROM ").append(TABLE_AGGREGATES)
                 .append(" WHERE ").append(where.clause());
         if (!grouped.isEmpty()) sql.append(" GROUP BY ").append(join(grouped));
-        sql.append(" ORDER BY event_count DESC,last_at DESC LIMIT ? OFFSET ?");
-        where.argument(query.limit + 1);
-        where.argument(query.offset);
+        sql.append(" ORDER BY event_count DESC,last_at DESC,"
+                + "package_name ASC,uid ASC,feature_id ASC,hook_target_id ASC,"
+                + "behavior ASC,source ASC,decision ASC,result ASC LIMIT ? OFFSET ?");
+        where.argument(limit + 1);
+        where.argument(offset);
         return new AggregateSql(sql.toString(), where.arguments());
     }
 
@@ -1169,6 +1233,58 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         createIndexes(db);
     }
 
+    private static void migrateVersionSixToSeven(SQLiteDatabase db) {
+        createMetadataTable(db);
+        putMetadataLong(
+                db,
+                METADATA_AGGREGATE_HISTORY_TRUNCATED,
+                System.currentTimeMillis());
+        normalizeLegacySharedUidPackages(db);
+        db.execSQL("UPDATE " + TABLE_EVENTS
+                + " SET blocked=1 WHERE result='candidate_filtered'");
+        db.execSQL("UPDATE " + TABLE_FEATURE_TOTALS + " SET blocked=blocked+COALESCE((SELECT "
+                + "SUM(MAX(0,event_count-blocked_count)) FROM " + TABLE_AGGREGATES
+                + " WHERE feature_id=" + TABLE_FEATURE_TOTALS + ".feature_id"
+                + " AND result='candidate_filtered'),0)");
+        db.execSQL("UPDATE " + TABLE_AGGREGATES
+                + " SET blocked_count=event_count WHERE result='candidate_filtered'");
+    }
+
+    private static void normalizeLegacySharedUidPackages(SQLiteDatabase db) {
+        db.execSQL("UPDATE " + TABLE_EVENTS
+                + " SET package_name='' WHERE instr(package_name, ',')>0");
+        db.execSQL("DROP TABLE IF EXISTS legacy_shared_uid_aggregates");
+        db.execSQL("CREATE TEMP TABLE legacy_shared_uid_aggregates AS SELECT "
+                + "bucket_start,'' AS package_name,uid,feature_id,hook_target_id,behavior,"
+                + "source,decision,result,SUM(raw_hit_count) AS raw_hit_count,"
+                + "SUM(event_count) AS event_count,SUM(blocked_count) AS blocked_count,"
+                + "SUM(fail_open_count) AS fail_open_count,"
+                + "SUM(identity_resolved_count) AS identity_resolved_count,"
+                + "SUM(latency_micros_total) AS latency_micros_total,"
+                + "MAX(latency_micros_max) AS latency_micros_max,"
+                + "MIN(first_at) AS first_at,MAX(last_at) AS last_at FROM "
+                + TABLE_AGGREGATES
+                + " WHERE package_name='' OR instr(package_name, ',')>0 GROUP BY "
+                + "bucket_start,uid,feature_id,hook_target_id,behavior,source,decision,result");
+        db.execSQL("DELETE FROM " + TABLE_AGGREGATES
+                + " WHERE package_name='' OR instr(package_name, ',')>0");
+        db.execSQL("INSERT INTO " + TABLE_AGGREGATES
+                + "(bucket_start,package_name,uid,feature_id,hook_target_id,behavior,source,"
+                + "decision,result,raw_hit_count,event_count,blocked_count,fail_open_count,"
+                + "identity_resolved_count,latency_micros_total,latency_micros_max,first_at,"
+                + "last_at) SELECT bucket_start,package_name,uid,feature_id,hook_target_id,"
+                + "behavior,source,decision,result,raw_hit_count,event_count,blocked_count,"
+                + "fail_open_count,identity_resolved_count,latency_micros_total,"
+                + "latency_micros_max,first_at,last_at FROM legacy_shared_uid_aggregates");
+        db.execSQL("DROP TABLE legacy_shared_uid_aggregates");
+        db.execSQL("UPDATE " + TABLE_FEATURE_TOTALS
+                + " SET last_package='' WHERE instr(last_package, ',')>0");
+    }
+
+    static void createVersionSixForTest(SQLiteDatabase db) {
+        createLatestSchema(db);
+    }
+
     private static void createEventTableLatest(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE IF NOT EXISTS " + TABLE_EVENTS + " ("
                 + "id INTEGER PRIMARY KEY AUTOINCREMENT,event_token TEXT NOT NULL DEFAULT '',"
@@ -1296,6 +1412,25 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
     private static boolean hasMetadata(SQLiteDatabase db, String name) {
         return DatabaseUtils.queryNumEntries(
                 db, TABLE_METADATA, "name=?", new String[] { name }) > 0L;
+    }
+
+    private static long metadataLong(SQLiteDatabase db, String name) {
+        try (Cursor cursor = db.query(
+                TABLE_METADATA,
+                new String[] { "value" },
+                "name=?",
+                new String[] { name },
+                null,
+                null,
+                null,
+                "1")) {
+            if (!cursor.moveToFirst()) return 0L;
+            try {
+                return Math.max(0L, Long.parseLong(cursor.getString(0)));
+            } catch (RuntimeException ignored) {
+                return 0L;
+            }
+        }
     }
 
     private static void putMetadataString(SQLiteDatabase db, String name, String value) {

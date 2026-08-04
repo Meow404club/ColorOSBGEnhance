@@ -161,7 +161,9 @@ public final class DiagnosticsQuery {
             source = DiagnosticsValues.id(builder.source);
             decision = DiagnosticsValues.id(builder.decision);
             result = DiagnosticsValues.id(builder.result);
-            limit = Math.max(1, Math.min(200, builder.limit));
+            limit = Math.max(1, Math.min(
+                    DiagnosticsRetentionPolicy.DEFAULT_AGGREGATE_ROW_LIMIT,
+                    builder.limit));
             offset = Math.max(0, builder.offset);
         }
 
@@ -273,13 +275,24 @@ public final class DiagnosticsQuery {
         public final List<AggregateRow> items;
         public final int nextOffset;
         public final boolean hasMore;
+        public final boolean historyTruncated;
         public final String errorCode;
 
         public AggregatePage(List<AggregateRow> items, int nextOffset,
                              boolean hasMore, String errorCode) {
+            this(items, nextOffset, hasMore, false, errorCode);
+        }
+
+        public AggregatePage(
+                List<AggregateRow> items,
+                int nextOffset,
+                boolean hasMore,
+                boolean historyTruncated,
+                String errorCode) {
             this.items = immutable(items);
             this.nextOffset = Math.max(0, nextOffset);
             this.hasMore = hasMore;
+            this.historyTruncated = historyTruncated;
             this.errorCode = DiagnosticsValues.id(errorCode);
         }
 
@@ -378,9 +391,9 @@ public final class DiagnosticsQuery {
                     FeatureStats value = entry.getValue();
                     if (key.isEmpty() || value == null) continue;
                     copy.put(key, value);
-                    observedTotal += value.observed;
-                    blockedTotal += value.blocked;
-                    failOpenTotal += value.failOpen;
+                    observedTotal = saturatingAdd(observedTotal, value.observed);
+                    blockedTotal = saturatingAdd(blockedTotal, value.blocked);
+                    failOpenTotal = saturatingAdd(failOpenTotal, value.failOpen);
                 }
             }
             this.features = Collections.unmodifiableMap(copy);
@@ -392,6 +405,10 @@ public final class DiagnosticsQuery {
 
         public static HomeStatsSnapshot empty(String errorCode) {
             return new HomeStatsSnapshot(Collections.emptyMap(), errorCode);
+        }
+
+        private static long saturatingAdd(long first, long second) {
+            return Long.MAX_VALUE - first < second ? Long.MAX_VALUE : first + second;
         }
     }
 
@@ -497,6 +514,7 @@ public final class DiagnosticsQuery {
         public final int returnedCount;
         public final int pagesRead;
         public final boolean hasMore;
+        public final boolean historyTruncated;
         public final boolean truncated;
         public final String errorCode;
 
@@ -506,11 +524,22 @@ public final class DiagnosticsQuery {
                 int pagesRead,
                 boolean hasMore,
                 String errorCode) {
+            this(requestedLimit, returnedCount, pagesRead, hasMore, false, errorCode);
+        }
+
+        public ExportCollectionStatus(
+                int requestedLimit,
+                int returnedCount,
+                int pagesRead,
+                boolean hasMore,
+                boolean historyTruncated,
+                String errorCode) {
             this.requestedLimit = Math.max(0, requestedLimit);
             this.returnedCount = Math.max(0, returnedCount);
             this.pagesRead = Math.max(0, pagesRead);
             this.hasMore = hasMore;
-            truncated = hasMore;
+            this.historyTruncated = historyTruncated;
+            truncated = hasMore || historyTruncated;
             this.errorCode = DiagnosticsValues.id(errorCode);
         }
 

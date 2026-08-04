@@ -1,5 +1,6 @@
 package com.frostwork.bgenhance.diagnostics;
 
+import com.frostwork.bgenhance.DiagnosticsResult;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -12,9 +13,11 @@ public final class RecentBehaviorStats {
     public final long observed;
     public final long blocked;
     public final long failOpen;
+    public final boolean historyTruncated;
     public final String errorCode;
 
-    private RecentBehaviorStats(List<Row> rows, String errorCode) {
+    private RecentBehaviorStats(
+            List<Row> rows, boolean historyTruncated, String errorCode) {
         ArrayList<Row> copy = new ArrayList<>();
         long observedTotal = 0L;
         long blockedTotal = 0L;
@@ -32,11 +35,18 @@ public final class RecentBehaviorStats {
         observed = observedTotal;
         blocked = blockedTotal;
         failOpen = failOpenTotal;
+        this.historyTruncated = historyTruncated;
         this.errorCode = DiagnosticsValues.id(errorCode);
     }
 
     public static RecentBehaviorStats fromAggregateRows(
             List<DiagnosticsQuery.AggregateRow> aggregateRows) {
+        return fromAggregateRows(aggregateRows, false);
+    }
+
+    public static RecentBehaviorStats fromAggregateRows(
+            List<DiagnosticsQuery.AggregateRow> aggregateRows,
+            boolean historyTruncated) {
         LinkedHashMap<String, MutableRow> grouped = new LinkedHashMap<>();
         if (aggregateRows != null) {
             for (DiagnosticsQuery.AggregateRow aggregate : aggregateRows) {
@@ -53,11 +63,11 @@ public final class RecentBehaviorStats {
         for (Map.Entry<String, MutableRow> entry : grouped.entrySet()) {
             rows.add(entry.getValue().build());
         }
-        return new RecentBehaviorStats(rows, "");
+        return new RecentBehaviorStats(rows, historyTruncated, "");
     }
 
     public static RecentBehaviorStats empty(String errorCode) {
-        return new RecentBehaviorStats(Collections.emptyList(), errorCode);
+        return new RecentBehaviorStats(Collections.emptyList(), false, errorCode);
     }
 
     public boolean isSuccessful() {
@@ -113,7 +123,10 @@ public final class RecentBehaviorStats {
         void add(DiagnosticsQuery.AggregateRow row) {
             rawHitCount = saturatingAdd(rawHitCount, row.rawHitCount);
             eventCount = saturatingAdd(eventCount, row.eventCount);
-            blockedCount = saturatingAdd(blockedCount, row.blockedCount);
+            long normalizedBlocked = DiagnosticsResult.CANDIDATE_FILTERED.equals(result)
+                    ? Math.max(row.blockedCount, row.eventCount)
+                    : row.blockedCount;
+            blockedCount = saturatingAdd(blockedCount, normalizedBlocked);
             failOpenCount = saturatingAdd(failOpenCount, row.failOpenCount);
             identityResolvedCount = saturatingAdd(
                     identityResolvedCount, row.identityResolvedCount);
