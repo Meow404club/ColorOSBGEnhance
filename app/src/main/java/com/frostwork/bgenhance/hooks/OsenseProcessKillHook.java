@@ -123,8 +123,9 @@ public final class OsenseProcessKillHook implements FeatureHook {
     static String status(int count, boolean accessorsPrepared) {
         if (count < 0) return "UNSUPPORTED_CLASS";
         if (count == 0) return "UNSUPPORTED_SIGNATURE";
+        if (count != 1) return "UNSUPPORTED_SIGNATURE:EXPECTED=1:FOUND=" + count;
         if (!accessorsPrepared) return "FAILED_FAIL_OPEN:ACCESSOR_PREPARE:INSTALLED=" + count;
-        return "INSTALLED:" + count;
+        return "INSTALLED:1";
     }
 
     private static HookEvent event(

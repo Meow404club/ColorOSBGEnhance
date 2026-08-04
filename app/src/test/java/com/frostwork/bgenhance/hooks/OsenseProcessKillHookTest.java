@@ -53,6 +53,9 @@ public final class OsenseProcessKillHookTest {
     public void reportsAccessorPreparationFailureAsFailOpenInstallation() {
         assertEquals("INSTALLED:1", OsenseProcessKillHook.status(1, true));
         assertEquals(
+                "UNSUPPORTED_SIGNATURE:EXPECTED=1:FOUND=2",
+                OsenseProcessKillHook.status(2, true));
+        assertEquals(
                 "FAILED_FAIL_OPEN:ACCESSOR_PREPARE:INSTALLED=1",
                 OsenseProcessKillHook.status(1, false));
     }

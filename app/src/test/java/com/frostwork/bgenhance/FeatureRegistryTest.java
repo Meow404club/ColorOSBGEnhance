@@ -4,6 +4,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import io.github.libxposed.api.XposedInterface;
+import java.lang.reflect.Executable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -67,6 +69,37 @@ public final class FeatureRegistryTest {
         assertEquals("FAILED_FAIL_OPEN:IllegalStateException",
                 FeatureRegistry.installationStatus(target).orElseThrow());
         assertFalse(FeatureRegistry.isInstalled(target));
+    }
+
+    @Test
+    public void unsupportedInstallationRollsBackEveryNewHandle() {
+        FakeHandle first = new FakeHandle("first");
+        FakeHandle second = new FakeHandle("second");
+
+        FeatureRegistry.install(hook("registry_test_rollback", () -> {
+            HookUtils.trackHandle(first);
+            HookUtils.trackHandle(second);
+            return "UNSUPPORTED_PARTIAL";
+        }), LOADER);
+
+        assertEquals(1, first.unhookCount.get());
+        assertEquals(1, second.unhookCount.get());
+        assertEquals(0, HookUtils.installedHookCount());
+        assertFalse(FeatureRegistry.isInstalled("registry_test_rollback"));
+    }
+
+    @Test
+    public void successfulInstallationCommitsNewHandles() {
+        FakeHandle handle = new FakeHandle("committed");
+
+        FeatureRegistry.install(hook("registry_test_commit", () -> {
+            HookUtils.trackHandle(handle);
+            return "INSTALLED:1";
+        }), LOADER);
+
+        assertEquals(0, handle.unhookCount.get());
+        assertEquals(1, HookUtils.installedHookCount());
+        assertTrue(FeatureRegistry.isInstalled("registry_test_commit"));
     }
 
     @Test
@@ -134,5 +167,20 @@ public final class FeatureRegistryTest {
 
     private interface Installer {
         String install();
+    }
+
+    private static final class FakeHandle implements XposedInterface.HookHandle {
+        private final String id;
+        private final AtomicInteger unhookCount = new AtomicInteger();
+
+        FakeHandle(String id) {
+            this.id = id;
+        }
+
+        @Override public Executable getExecutable() { return null; }
+        @Override public void unhook() { unhookCount.incrementAndGet(); }
+        @Override public String getId() { return id; }
+        @Override public XposedInterface.HookHandle replaceHook(
+                XposedInterface.Hooker hooker) { return this; }
     }
 }

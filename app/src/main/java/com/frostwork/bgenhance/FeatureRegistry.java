@@ -12,18 +12,28 @@ public final class FeatureRegistry {
             new ConcurrentHashMap<>();
     private static final Set<String> CLAIMED_TARGETS =
             ConcurrentHashMap.newKeySet();
+    private static final Object INSTALL_LOCK = new Object();
 
     public static void install(FeatureHook hook, ClassLoader classLoader) {
         String hookTargetId = hook.hookTargetId();
         if (!CLAIMED_TARGETS.add(hookTargetId)) return;
         String status;
         Throwable installError = null;
-        try {
-            status = hook.install(classLoader);
-            if (status == null) status = "UNKNOWN";
-        } catch (Throwable t) {
-            status = "FAILED_FAIL_OPEN:" + t.getClass().getSimpleName();
-            installError = t;
+        synchronized (INSTALL_LOCK) {
+            int checkpoint = HookUtils.installationCheckpoint();
+            try {
+                status = hook.install(classLoader);
+                if (status == null) status = "UNKNOWN";
+            } catch (Throwable t) {
+                status = "FAILED_FAIL_OPEN:" + t.getClass().getSimpleName();
+                installError = t;
+            }
+            if (!status.startsWith("INSTALLED") && !HookUtils.rollbackTo(checkpoint)) {
+                status = "FAILED_PARTIAL_HOOK:ROLLBACK_FAILED:" + status;
+                if (installError == null) {
+                    installError = new IllegalStateException("Hook rollback failed");
+                }
+            }
         }
 
         FINAL_INSTALLATION_STATUSES.put(hookTargetId, status);
@@ -46,6 +56,9 @@ public final class FeatureRegistry {
     static void resetForTests() {
         CLAIMED_TARGETS.clear();
         FINAL_INSTALLATION_STATUSES.clear();
+        synchronized (INSTALL_LOCK) {
+            HookUtils.rollbackTo(0);
+        }
     }
 
     private static void reportInstallation(

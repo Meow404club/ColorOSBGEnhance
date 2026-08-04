@@ -87,6 +87,9 @@ public final class DiagnosticsBridgeStartupHookTest {
         assertEquals("UNSUPPORTED_SIGNATURE", DiagnosticsBridgeStartupHook.status(0, true));
         assertEquals("INSTALLED:1", DiagnosticsBridgeStartupHook.status(1, true));
         assertEquals(
+                "UNSUPPORTED_SIGNATURE:EXPECTED=1:FOUND=2",
+                DiagnosticsBridgeStartupHook.status(2, true));
+        assertEquals(
                 "FAILED_FAIL_OPEN:PROVIDER_INFO_ACCESSOR:INSTALLED=1",
                 DiagnosticsBridgeStartupHook.status(1, false));
     }

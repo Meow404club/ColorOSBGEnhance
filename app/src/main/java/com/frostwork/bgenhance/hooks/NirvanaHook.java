@@ -46,9 +46,11 @@ public final class NirvanaHook implements FeatureHook {
         return null;
     }
 
-    private static String status(int count) {
-        return count < 0 ? "UNSUPPORTED_CLASS"
-                : count == 0 ? "UNSUPPORTED_SIGNATURE" : "INSTALLED:" + count;
+    static String status(int count) {
+        if (count < 0) return "UNSUPPORTED_CLASS";
+        if (count == 0) return "UNSUPPORTED_SIGNATURE";
+        if (count != 1) return "UNSUPPORTED_SIGNATURE:EXPECTED=1:FOUND=" + count;
+        return "INSTALLED:1";
     }
 
     private static final class Mapping {

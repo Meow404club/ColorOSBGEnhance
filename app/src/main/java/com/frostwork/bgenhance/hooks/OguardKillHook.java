@@ -49,8 +49,10 @@ public final class OguardKillHook implements FeatureHook {
                 && method.getReturnType() == boolean.class;
     }
 
-    private static String status(int count) {
-        return count < 0 ? "UNSUPPORTED_CLASS"
-                : count == 0 ? "UNSUPPORTED_SIGNATURE" : "INSTALLED:" + count;
+    static String status(int count) {
+        if (count < 0) return "UNSUPPORTED_CLASS";
+        if (count == 0) return "UNSUPPORTED_SIGNATURE";
+        if (count != 2) return "UNSUPPORTED_SIGNATURE:EXPECTED=2:FOUND=" + count;
+        return "INSTALLED:2";
     }
 }

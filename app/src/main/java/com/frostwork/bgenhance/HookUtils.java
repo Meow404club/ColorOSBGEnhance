@@ -16,6 +16,17 @@ public final class HookUtils {
 
     public interface MethodMatcher { boolean matches(Method method); }
 
+    interface MethodHookInstaller {
+        XposedInterface.HookHandle install(
+                Method method, XposedInterface.Hooker hooker) throws Throwable;
+    }
+
+    static final class HookInstallationException extends RuntimeException {
+        HookInstallationException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
     private static final List<XposedInterface.HookHandle> HANDLES = new CopyOnWriteArrayList<>();
     private static final ConcurrentHashMap<String, Field> FIELD_CACHE = new ConcurrentHashMap<>();
     private static volatile XposedModule sModule;
@@ -34,28 +45,110 @@ public final class HookUtils {
         } catch (ClassNotFoundException e) {
             return -1;
         } catch (Throwable t) {
-            ModuleLog.w("target class lookup failed " + className + ": " + t);
-            return -1;
+            safeLogWarning("target class lookup failed " + className + ": " + t);
+            throw new HookInstallationException(
+                    "target class lookup failed " + className, t);
         }
-        int count = 0;
+        return hookDeclaredMethods(
+                target,
+                matcher,
+                hooker,
+                (method, interceptor) -> module.hook(method)
+                        .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                        .intercept(interceptor));
+    }
+
+    static int hookDeclaredMethods(
+            Class<?> target,
+            MethodMatcher matcher,
+            XposedInterface.Hooker hooker,
+            MethodHookInstaller installer) {
+        List<Method> candidates = new ArrayList<>();
         for (Method method : target.getDeclaredMethods()) {
             try {
-                if (!matcher.matches(method)) continue;
-                XposedInterface.HookHandle handle = module.hook(method)
-                        .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                        .intercept(hooker);
-                HANDLES.add(handle);
-                count++;
-                ModuleLog.i("hooked " + className + "." + method.getName() + descriptor(method));
+                if (matcher.matches(method)) candidates.add(method);
             } catch (Throwable t) {
-                ModuleLog.w("hook candidate failed " + className + "." + method.getName() + ": " + t);
+                throw new HookInstallationException(
+                        "hook matcher failed " + target.getName() + "." + method.getName(), t);
             }
         }
-        return count;
+
+        int checkpoint = installationCheckpoint();
+        try {
+            for (Method method : candidates) {
+                XposedInterface.HookHandle handle = installer.install(method, hooker);
+                if (handle == null) {
+                    throw new IllegalStateException("hook installer returned null handle");
+                }
+                trackHandle(handle);
+                safeLogInstalled("hooked " + target.getName() + "." + method.getName()
+                        + descriptor(method));
+            }
+            return candidates.size();
+        } catch (Throwable error) {
+            boolean rolledBack = rollbackTo(checkpoint);
+            String suffix = rolledBack ? "" : "; rollback failed";
+            throw new HookInstallationException(
+                    "hook candidate install failed " + target.getName() + suffix, error);
+        }
     }
 
     public static int installedHookCount() {
         return HANDLES.size();
+    }
+
+    static int installationCheckpoint() {
+        return HANDLES.size();
+    }
+
+    static void trackHandle(XposedInterface.HookHandle handle) {
+        if (handle == null) throw new NullPointerException("handle");
+        HANDLES.add(handle);
+    }
+
+    static boolean rollbackTo(int checkpoint) {
+        if (checkpoint < 0 || checkpoint > HANDLES.size()) {
+            throw new IllegalArgumentException("invalid Hook checkpoint " + checkpoint);
+        }
+        List<XposedInterface.HookHandle> added = new ArrayList<>(
+                HANDLES.subList(checkpoint, HANDLES.size()));
+        boolean complete = true;
+        for (int index = added.size() - 1; index >= 0; index--) {
+            XposedInterface.HookHandle handle = added.get(index);
+            try {
+                handle.unhook();
+                HANDLES.remove(handle);
+            } catch (Throwable error) {
+                complete = false;
+                safeLogWarning(
+                        "hook rollback failed id=" + safeHandleId(handle) + ": " + error);
+            }
+        }
+        return complete;
+    }
+
+    private static String safeHandleId(XposedInterface.HookHandle handle) {
+        try {
+            return String.valueOf(handle.getId());
+        } catch (Throwable ignored) {
+            return "unknown";
+        }
+    }
+
+    private static void safeLogInstalled(String message) {
+        try {
+            ModuleLog.i(message);
+        } catch (Throwable ignored) {
+            // Hook installation must not depend on diagnostics logging.
+        }
+    }
+
+    private static void safeLogWarning(String message) {
+        try {
+            ModuleLog.w(message);
+        } catch (Throwable ignored) {
+            // Hook installation and rollback must not depend on diagnostics logging.
+        }
     }
 
     public static boolean deoptimize(Executable executable) {
