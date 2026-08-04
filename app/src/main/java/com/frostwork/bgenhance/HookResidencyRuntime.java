@@ -35,6 +35,8 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /** Process-local facade used by hooks; all platform identity work stays on a background thread. */
 public final class HookResidencyRuntime {
@@ -46,8 +48,14 @@ public final class HookResidencyRuntime {
         thread.setDaemon(true);
         return thread;
     });
+    private static final ResidencyRuntimeController.RetryScheduler IDENTITY_RETRY_SCHEDULER =
+            (command, delayMs) -> {
+        ScheduledFuture<?> future = IDENTITY_EXECUTOR.schedule(
+                command, delayMs, TimeUnit.MILLISECONDS);
+        return () -> future.cancel(false);
+    };
     private static final ResidencyRuntimeController CONTROLLER =
-            new ResidencyRuntimeController(IDENTITY_EXECUTOR);
+            new ResidencyRuntimeController(IDENTITY_EXECUTOR, IDENTITY_RETRY_SCHEDULER);
     private static final RetryingRegistration PACKAGE_RECEIVER_REGISTRATION =
             new RetryingRegistration(
                     IDENTITY_EXECUTOR::schedule,

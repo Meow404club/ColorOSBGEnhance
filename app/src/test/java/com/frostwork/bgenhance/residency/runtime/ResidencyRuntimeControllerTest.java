@@ -184,6 +184,68 @@ public final class ResidencyRuntimeControllerTest {
     }
 
     @Test
+    public void identityFailureRetriesWithBoundedBackoffAndRecovers() {
+        QueuedExecutor executor = new QueuedExecutor();
+        QueuedRetryScheduler retries = new QueuedRetryScheduler();
+        ResidencyRuntimeController controller = new ResidencyRuntimeController(
+                executor, Runnable::run, retries);
+        AtomicInteger attempts = new AtomicInteger();
+        controller.setPackageUidSource(source(packageName -> {
+            if (attempts.getAndIncrement() == 0) {
+                throw new SecurityException("temporarily unavailable");
+            }
+            return OptionalInt.of(UID);
+        }));
+        controller.updateConfig(snapshot(1L, 5L, true));
+
+        executor.runNext();
+
+        assertEquals(
+                ResidencyRuntimeState.Status.IDENTITY_REBUILD_FAILED,
+                controller.state().status());
+        assertEquals(List.of(
+                ResidencyRuntimeController.INITIAL_IDENTITY_RETRY_DELAY_MS),
+                retries.delays());
+        assertFailOpen(controller);
+
+        retries.runNext();
+        assertEquals(
+                ResidencyRuntimeState.Status.IDENTITY_REBUILD_PENDING,
+                controller.state().status());
+        executor.runNext();
+
+        assertTrue(controller.state().ready());
+        assertEquals(2, attempts.get());
+        assertTrue(retries.isEmpty());
+        assertTrue(controller.decideKill(killContext()).blocksAction());
+    }
+
+    @Test
+    public void configUpdateCancelsAnObsoleteIdentityRetry() {
+        QueuedExecutor executor = new QueuedExecutor();
+        QueuedRetryScheduler retries = new QueuedRetryScheduler();
+        ResidencyRuntimeController controller = new ResidencyRuntimeController(
+                executor, Runnable::run, retries);
+        AtomicBoolean fail = new AtomicBoolean(true);
+        controller.setPackageUidSource(source(packageName -> {
+            if (fail.get()) throw new SecurityException("temporarily unavailable");
+            return OptionalInt.of(UID);
+        }));
+        controller.updateConfig(snapshot(1L, 5L, true));
+        executor.runNext();
+        assertEquals(1, retries.size());
+
+        fail.set(false);
+        controller.updateConfig(snapshot(2L, 6L, true));
+        retries.runNext();
+        executor.runNext();
+
+        assertTrue(controller.state().ready());
+        assertEquals(6L, controller.state().identityIndex().policyRevision());
+        assertTrue(retries.isEmpty());
+    }
+
+    @Test
     public void packageInvalidationFailsOpenBeforeRebuildingNewAppId() {
         QueuedExecutor executor = new QueuedExecutor();
         ResidencyRuntimeController controller = new ResidencyRuntimeController(executor);
@@ -392,5 +454,41 @@ public final class ResidencyRuntimeControllerTest {
         }
 
         boolean isEmpty() { return tasks.isEmpty(); }
+    }
+
+    private static final class QueuedRetryScheduler
+            implements ResidencyRuntimeController.RetryScheduler {
+        private final ArrayDeque<RetryTask> tasks = new ArrayDeque<>();
+        private final List<Long> delays = new ArrayList<>();
+
+        @Override
+        public ResidencyRuntimeController.RetryHandle schedule(
+                Runnable command, long delayMs) {
+            RetryTask task = new RetryTask(command);
+            tasks.add(task);
+            delays.add(delayMs);
+            return () -> task.cancelled = true;
+        }
+
+        void runNext() {
+            RetryTask task = tasks.remove();
+            if (!task.cancelled) task.command.run();
+        }
+
+        int size() { return tasks.size(); }
+
+        boolean isEmpty() {
+            while (!tasks.isEmpty() && tasks.peek().cancelled) tasks.remove();
+            return tasks.isEmpty();
+        }
+
+        List<Long> delays() { return new ArrayList<>(delays); }
+
+        private static final class RetryTask {
+            final Runnable command;
+            boolean cancelled;
+
+            RetryTask(Runnable command) { this.command = command; }
+        }
     }
 }

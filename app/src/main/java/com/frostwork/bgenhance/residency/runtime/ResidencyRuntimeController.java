@@ -22,8 +22,12 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /** Coordinates config and package identity snapshots without doing platform work on hook threads. */
 public final class ResidencyRuntimeController {
+    static final long INITIAL_IDENTITY_RETRY_DELAY_MS = 2_000L;
+    static final long MAX_IDENTITY_RETRY_DELAY_MS = 60_000L;
     private static final StaleIdentityBuildException STALE_IDENTITY_BUILD =
             new StaleIdentityBuildException();
+    private static final RetryScheduler NO_RETRY_SCHEDULER =
+            (command, delayMs) -> null;
     private static final Executor DEFAULT_LISTENER_EXECUTOR =
             Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "BgEnhanceRuntimeObserver");
@@ -32,6 +36,7 @@ public final class ResidencyRuntimeController {
     });
     private final Executor identityExecutor;
     private final Executor listenerExecutor;
+    private final RetryScheduler retryScheduler;
     private final CopyOnWriteArrayList<ListenerRegistration> stateListeners =
             new CopyOnWriteArrayList<>();
     private final Object listenerLock = new Object();
@@ -44,14 +49,29 @@ public final class ResidencyRuntimeController {
                     0L,
                     "not_initialized"));
     private PackageUidSource packageUidSource;
+    private RetryHandle pendingIdentityRetry;
+    private long nextIdentityRetryDelayMs = INITIAL_IDENTITY_RETRY_DELAY_MS;
 
     public ResidencyRuntimeController(Executor identityExecutor) {
-        this(identityExecutor, DEFAULT_LISTENER_EXECUTOR);
+        this(identityExecutor, DEFAULT_LISTENER_EXECUTOR, NO_RETRY_SCHEDULER);
+    }
+
+    public ResidencyRuntimeController(
+            Executor identityExecutor, RetryScheduler retryScheduler) {
+        this(identityExecutor, DEFAULT_LISTENER_EXECUTOR, retryScheduler);
     }
 
     ResidencyRuntimeController(Executor identityExecutor, Executor listenerExecutor) {
+        this(identityExecutor, listenerExecutor, NO_RETRY_SCHEDULER);
+    }
+
+    ResidencyRuntimeController(
+            Executor identityExecutor,
+            Executor listenerExecutor,
+            RetryScheduler retryScheduler) {
         this.identityExecutor = Objects.requireNonNull(identityExecutor, "identityExecutor");
         this.listenerExecutor = Objects.requireNonNull(listenerExecutor, "listenerExecutor");
+        this.retryScheduler = Objects.requireNonNull(retryScheduler, "retryScheduler");
     }
 
     public void addStateListener(StateListener listener) {
@@ -81,6 +101,7 @@ public final class ResidencyRuntimeController {
 
     public synchronized void updateConfig(RuntimeConfigSnapshot snapshot) {
         RuntimeConfigSnapshot next = Objects.requireNonNull(snapshot, "snapshot");
+        cancelIdentityRetry(true);
         long token = generation.incrementAndGet();
         ResidencyRuntimeState current = state.get();
         if (!next.available()) {
@@ -101,6 +122,7 @@ public final class ResidencyRuntimeController {
     }
 
     public synchronized void setPackageUidSource(PackageUidSource source) {
+        cancelIdentityRetry(true);
         packageUidSource = Objects.requireNonNull(source, "source");
         RuntimeConfigSnapshot snapshot = state.get().snapshot();
         long token = generation.incrementAndGet();
@@ -114,6 +136,7 @@ public final class ResidencyRuntimeController {
     }
 
     public synchronized void invalidateIdentities() {
+        cancelIdentityRetry(true);
         RuntimeConfigSnapshot snapshot = state.get().snapshot();
         long token = generation.incrementAndGet();
         if (!snapshot.available()) {
@@ -129,6 +152,7 @@ public final class ResidencyRuntimeController {
         if (snapshot.policiesByPackage().isEmpty()) {
             ResidencyIdentityIndex empty = ResidencyIdentityIndex.build(
                     snapshot, Collections.emptyMap());
+            cancelIdentityRetry(true);
             publish(snapshot, empty, ResidencyRuntimeState.Status.READY, token, "");
             return;
         }
@@ -145,9 +169,7 @@ public final class ResidencyRuntimeController {
         try {
             identityExecutor.execute(() -> buildIdentities(snapshot, source, token));
         } catch (Throwable error) {
-            publishIfCurrent(snapshot, ResidencyIdentityIndex.invalidated(),
-                    ResidencyRuntimeState.Status.IDENTITY_REBUILD_FAILED,
-                    token, errorText(error));
+            failBuildIfCurrent(snapshot, source, token, error);
         }
     }
 
@@ -176,14 +198,11 @@ public final class ResidencyRuntimeController {
             };
             ResidencyIdentityIndex index = new ResidencyIdentityIndexBuilder(
                     guardedSource).build(snapshot);
-            publishIfCurrent(snapshot, index,
-                    ResidencyRuntimeState.Status.READY, token, "");
+            publishReadyIfCurrent(snapshot, index, token);
         } catch (StaleIdentityBuildException ignored) {
             // A newer generation already published fail-open state and owns the next rebuild.
         } catch (Throwable error) {
-            publishIfCurrent(snapshot, ResidencyIdentityIndex.invalidated(),
-                    ResidencyRuntimeState.Status.IDENTITY_REBUILD_FAILED,
-                    token, errorText(error));
+            failBuildIfCurrent(snapshot, source, token, error);
         }
     }
 
@@ -191,14 +210,72 @@ public final class ResidencyRuntimeController {
         if (generation.get() != token) throw STALE_IDENTITY_BUILD;
     }
 
-    private synchronized void publishIfCurrent(
+    private synchronized void publishReadyIfCurrent(
             RuntimeConfigSnapshot snapshot,
             ResidencyIdentityIndex index,
-            ResidencyRuntimeState.Status status,
-            long token,
-            String error) {
+            long token) {
         if (generation.get() != token) return;
-        publish(snapshot, index, status, token, error);
+        cancelIdentityRetry(true);
+        publish(snapshot, index, ResidencyRuntimeState.Status.READY, token, "");
+    }
+
+    private synchronized void failBuildIfCurrent(
+            RuntimeConfigSnapshot snapshot,
+            PackageUidSource source,
+            long token,
+            Throwable error) {
+        if (generation.get() != token || packageUidSource != source) return;
+        publish(snapshot, ResidencyIdentityIndex.invalidated(),
+                ResidencyRuntimeState.Status.IDENTITY_REBUILD_FAILED,
+                token, errorText(error));
+        scheduleIdentityRetry(snapshot, source, token);
+    }
+
+    private void scheduleIdentityRetry(
+            RuntimeConfigSnapshot snapshot,
+            PackageUidSource source,
+            long failedToken) {
+        if (pendingIdentityRetry != null) return;
+        long delayMs = nextIdentityRetryDelayMs;
+        nextIdentityRetryDelayMs = delayMs >= MAX_IDENTITY_RETRY_DELAY_MS
+                || delayMs > Long.MAX_VALUE / 2L
+                ? MAX_IDENTITY_RETRY_DELAY_MS
+                : Math.min(MAX_IDENTITY_RETRY_DELAY_MS, delayMs * 2L);
+        try {
+            pendingIdentityRetry = retryScheduler.schedule(
+                    () -> retryIdentityBuild(snapshot, source, failedToken), delayMs);
+        } catch (Throwable ignored) {
+            pendingIdentityRetry = null;
+        }
+    }
+
+    private synchronized void retryIdentityBuild(
+            RuntimeConfigSnapshot snapshot,
+            PackageUidSource source,
+            long failedToken) {
+        pendingIdentityRetry = null;
+        ResidencyRuntimeState current = state.get();
+        if (generation.get() != failedToken
+                || packageUidSource != source
+                || current.snapshot() != snapshot
+                || current.status() != ResidencyRuntimeState.Status.IDENTITY_REBUILD_FAILED) {
+            return;
+        }
+        long token = generation.incrementAndGet();
+        rebuild(snapshot, token);
+    }
+
+    private void cancelIdentityRetry(boolean resetBackoff) {
+        RetryHandle pending = pendingIdentityRetry;
+        pendingIdentityRetry = null;
+        if (pending != null) {
+            try {
+                pending.cancel();
+            } catch (Throwable ignored) {
+                // Cancellation is advisory; generation checks still reject stale retries.
+            }
+        }
+        if (resetBackoff) nextIdentityRetryDelayMs = INITIAL_IDENTITY_RETRY_DELAY_MS;
     }
 
     private void publish(
@@ -248,6 +325,14 @@ public final class ResidencyRuntimeController {
 
     public interface StateListener {
         void onStateChanged(ResidencyRuntimeState state);
+    }
+
+    public interface RetryScheduler {
+        RetryHandle schedule(Runnable command, long delayMs);
+    }
+
+    public interface RetryHandle {
+        void cancel();
     }
 
     private static final class ListenerRegistration {
