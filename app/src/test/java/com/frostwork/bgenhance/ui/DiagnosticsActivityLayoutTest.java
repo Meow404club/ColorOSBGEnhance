@@ -18,6 +18,7 @@ import android.content.res.Configuration;
 import android.view.ContextThemeWrapper;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import androidx.appcompat.app.AlertDialog;
@@ -33,6 +34,7 @@ import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
 import com.frostwork.bgenhance.ui.diagnostics.DiagnosticsViewModel;
 import com.frostwork.bgenhance.ui.diagnostics.FullDiagnosticsExportViewModel;
 import com.google.android.material.appbar.MaterialToolbar;
+import com.google.android.material.appbar.AppBarLayout;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.button.MaterialButtonToggleGroup;
 import com.google.android.material.materialswitch.MaterialSwitch;
@@ -131,7 +133,7 @@ public final class DiagnosticsActivityLayoutTest {
 
     @Test
     @Config(qualifiers = "land", sdk = 34, application = Application.class)
-    public void landscapeKeepsActionsTabsAndExpandedListAvailable() {
+    public void landscapeKeepsActionsTabsAndCollapsibleHeaderAvailable() {
         DiagnosticsActivity activity = Robolectric.buildActivity(DiagnosticsActivity.class)
                 .setup()
                 .get();
@@ -149,14 +151,14 @@ public final class DiagnosticsActivityLayoutTest {
                 activity.findViewById(R.id.diagnostics_loading_state)
                         .getAccessibilityLiveRegion());
         LinearLayout emptyState = activity.findViewById(R.id.diagnostics_empty_state);
-        assertEquals(LinearLayout.HORIZONTAL, emptyState.getOrientation());
+        assertEquals(LinearLayout.VERTICAL, emptyState.getOrientation());
         LinearLayout.LayoutParams summaryParams = (LinearLayout.LayoutParams)
                 activity.findViewById(R.id.diagnostics_empty_summary).getLayoutParams();
-        assertEquals(0, summaryParams.width);
-        assertEquals(1f, summaryParams.weight, 0.01f);
+        assertEquals(ViewGroup.LayoutParams.MATCH_PARENT, summaryParams.width);
+        assertEquals(0f, summaryParams.weight, 0.01f);
         TextView emptySummary = activity.findViewById(R.id.diagnostics_empty_summary);
-        assertEquals(2, emptySummary.getMaxLines());
-        assertEquals(TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM,
+        assertEquals(Integer.MAX_VALUE, emptySummary.getMaxLines());
+        assertEquals(TextView.AUTO_SIZE_TEXT_TYPE_NONE,
                 emptySummary.getAutoSizeTextType());
         assertHistoryNoticeLayout(activity);
         activity.finish();
@@ -203,7 +205,7 @@ public final class DiagnosticsActivityLayoutTest {
     }
 
     @Test
-    public void portraitAndLandscapeRetainListSpaceAtDoubleFontScale() {
+    public void portraitAndLandscapeHeadersCollapseAtDoubleFontScale() {
         assertListHasSpace(configuredContext(false), 360, 640, 72);
         assertListHasSpace(configuredContext(true), 640, 320, 48);
     }
@@ -441,6 +443,8 @@ public final class DiagnosticsActivityLayoutTest {
                 View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY));
         root.layout(0, 0, width, height);
+        AppBarLayout appBar = root.findViewById(R.id.diagnostics_app_bar);
+        assertTrue(appBar.getTotalScrollRange() > 0);
         assertTrue(root.findViewById(R.id.diagnostics_list).getMeasuredHeight()
                 >= dp(context, minimumListDp));
     }

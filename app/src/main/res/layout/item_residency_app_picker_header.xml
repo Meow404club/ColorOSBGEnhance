@@ -8,7 +8,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
+        android:layout_marginTop="@dimen/page_heading_top"
         android:gravity="center"
         android:text="@string/residency_picker_title"
         android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.PageTitle" />
@@ -16,8 +16,8 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:layout_marginBottom="20dp"
+        android:layout_marginTop="@dimen/page_heading_summary_top"
+        android:layout_marginBottom="@dimen/page_heading_bottom"
         android:gravity="center"
         android:text="@string/residency_picker_subtitle"
         android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />

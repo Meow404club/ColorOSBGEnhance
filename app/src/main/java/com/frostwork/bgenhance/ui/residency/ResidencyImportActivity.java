@@ -68,6 +68,7 @@ public final class ResidencyImportActivity extends AppCompatActivity {
     private MaterialButton selectAll;
     private MaterialButton apply;
     private MaterialSwitch killProtection;
+    private MaterialToolbar toolbar;
     private Uri currentUri;
     private LegacyHansImportResult legacyResult;
     private ResidencyLegacyImportPlan importPlan;
@@ -134,6 +135,7 @@ public final class ResidencyImportActivity extends AppCompatActivity {
         selectAll = findViewById(R.id.residency_import_select_all);
         apply = findViewById(R.id.residency_import_apply);
         killProtection = findViewById(R.id.residency_import_kill);
+        toolbar = findViewById(R.id.toolbar);
         RecyclerView list = findViewById(R.id.residency_import_list);
         adapter = new ResidencyImportAdapter(this::onSelectionChanged);
         list.setLayoutManager(new LinearLayoutManager(this));
@@ -141,7 +143,6 @@ public final class ResidencyImportActivity extends AppCompatActivity {
     }
 
     private void bindInteractions() {
-        MaterialToolbar toolbar = findViewById(R.id.toolbar);
         toolbar.setNavigationOnClickListener(view -> finish());
         findViewById(R.id.residency_import_choose).setOnClickListener(view -> chooseFile());
         findViewById(R.id.residency_import_reselect).setOnClickListener(view -> chooseFile());
@@ -386,6 +387,7 @@ public final class ResidencyImportActivity extends AppCompatActivity {
     private void showPageHeading(boolean visible) {
         pageTitle.setVisibility(visible ? View.VISIBLE : View.GONE);
         pageSubtitle.setVisibility(visible ? View.VISIBLE : View.GONE);
+        toolbar.setTitle(visible ? "" : getString(R.string.residency_import_title));
     }
 
     private void showStoreError(ResidencyRuleStore.Failure failure) {

@@ -41,7 +41,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
+                    android:layout_marginTop="@dimen/page_heading_top"
                     android:gravity="start"
                     android:text="@string/residency_apps_title"
                     android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.PageTitle" />
@@ -49,8 +49,8 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:layout_marginBottom="12dp"
+                    android:layout_marginTop="@dimen/page_heading_summary_top"
+                    android:layout_marginBottom="@dimen/page_heading_bottom"
                     android:gravity="start"
                     android:text="@string/residency_apps_subtitle"
                     android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />

@@ -159,12 +159,7 @@ final class ResidencyImportAdapter
             });
             itemView.setEnabled(enabled);
             itemView.setAlpha(enabled ? 1f : 0.58f);
-            itemView.setContentDescription(context.getString(
-                    R.string.residency_import_row_description,
-                    label,
-                    entry.packageName(),
-                    statusText,
-                    changeText));
+            itemView.setContentDescription(null);
             itemView.setOnClickListener(enabled ? view -> {
                 checkBox.setChecked(!selectedPackages.contains(entry.packageName()));
             } : null);

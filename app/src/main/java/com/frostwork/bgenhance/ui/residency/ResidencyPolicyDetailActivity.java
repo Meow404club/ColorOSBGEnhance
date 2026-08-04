@@ -134,8 +134,7 @@ public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
                 throw new AssertionError(section);
         }
         findViewById(visibleId).setVisibility(View.VISIBLE);
-        ((com.google.android.material.appbar.MaterialToolbar) findViewById(R.id.toolbar))
-                .setTitle(title);
+        ((android.widget.TextView) findViewById(R.id.residency_detail_title)).setText(title);
     }
 
     private void bindDraft() {

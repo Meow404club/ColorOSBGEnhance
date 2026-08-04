@@ -2,6 +2,7 @@ package com.frostwork.bgenhance.ui.residency;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.app.Activity;
@@ -29,11 +30,22 @@ import org.robolectric.annotation.Config;
 @Config(sdk = 34, application = Application.class)
 public final class ResidencyDynamicListTest {
     @Test
-    public void ordinaryFontShortListsStayCompact() {
+    public void managedPortraitAlwaysUsesOneFullHeightVirtualizedScroller() {
         ActivityController<ResidencyAppsActivity> appsController =
                 Robolectric.buildActivity(ResidencyAppsActivity.class).create();
         try {
-            assertShortListStaysCompact(appsController.get());
+            ResidencyAppsActivity activity = appsController.get();
+            RecyclerView list = activity.findViewById(R.id.residency_app_list);
+            measure(activity, 360, 640);
+
+            assertTrue(list.getAdapter() instanceof ConcatAdapter);
+            assertEquals(2, list.getAdapter().getItemCount());
+            assertTrue(list.isNestedScrollingEnabled());
+            assertEquals(0, ((LinearLayout.LayoutParams) list.getLayoutParams()).height);
+            assertEquals(1f,
+                    ((LinearLayout.LayoutParams) list.getLayoutParams()).weight, 0f);
+            assertNull(activity.findViewById(R.id.residency_page_scroll));
+            assertNull(activity.findViewById(R.id.residency_list_surface));
         } finally {
             appsController.destroy();
         }
@@ -60,7 +72,7 @@ public final class ResidencyDynamicListTest {
     }
 
     @Test
-    public void largeFontKeepsThePortraitListInsideTheWholePageScroller() {
+    public void largeFontDoesNotDisableManagedListRecycling() {
         assertFalse(ResidencyAppsActivity.shouldStartBoundedList(1f));
         assertTrue(ResidencyAppsActivity.shouldStartBoundedList(2f));
 
@@ -69,29 +81,30 @@ public final class ResidencyDynamicListTest {
         try {
             ResidencyAppsActivity apps = appsController.get();
             RecyclerView appsList = apps.findViewById(R.id.residency_app_list);
-            apps.applyListSurfaceMode(true, false);
-            assertEquals(dp(apps, 96), appsList.getPaddingBottom());
             setFontScale(apps, 2f);
             apps.setListSurfaceMode(true);
-            setFontScale(apps, 1f);
-            assertWholePageList(apps);
+            measure(apps, 360, 640);
+
+            assertTrue(appsList.getAdapter() instanceof ConcatAdapter);
+            assertTrue(appsList.isNestedScrollingEnabled());
             assertEquals(dp(apps, 96), appsList.getPaddingBottom());
-            assertFalse(appsList.isNestedScrollingEnabled());
         } finally {
             appsController.destroy();
         }
     }
 
     @Test
-    public void ordinaryFontLongListsUseThePageScrollerWhilePickerStaysBounded() {
+    public void managedAndPickerListsBothKeepRecyclerViewAsTheOnlyScroller() {
         ActivityController<ResidencyAppsActivity> appsController =
                 Robolectric.buildActivity(ResidencyAppsActivity.class).create();
         ActivityController<ResidencyAppPickerActivity> pickerController =
                 Robolectric.buildActivity(ResidencyAppPickerActivity.class).create();
         try {
             ResidencyAppsActivity apps = appsController.get();
-            apps.findViewById(R.id.residency_filters).setVisibility(View.VISIBLE);
-            assertLongListUsesWholePageScroller(apps);
+            RecyclerView appsList = apps.findViewById(R.id.residency_app_list);
+            measure(apps, 360, 640);
+            assertTrue(appsList.getAdapter() instanceof ConcatAdapter);
+            assertTrue(appsList.isNestedScrollingEnabled());
 
             ResidencyAppPickerActivity picker = pickerController.get();
             RecyclerView pickerList = picker.findViewById(R.id.residency_app_list);
@@ -143,45 +156,6 @@ public final class ResidencyDynamicListTest {
             adapter.unregisterAdapterDataObserver(observer);
             adapter.close();
         }
-    }
-
-    private static void assertShortListStaysCompact(Activity activity) {
-        assertEquals(1f, activity.getResources().getConfiguration().fontScale, 0f);
-        RecyclerView list = activity.findViewById(R.id.residency_app_list);
-        list.setAdapter(new FixedHeightAdapter(1));
-        setContentMode(activity);
-        measure(activity, 360, 640);
-        measure(activity, 360, 640);
-
-        LinearLayout.LayoutParams surfaceParams = surfaceParams(activity);
-        assertEquals(activity.getClass().getSimpleName(),
-                ViewGroup.LayoutParams.WRAP_CONTENT, surfaceParams.height);
-        assertEquals(0f, surfaceParams.weight, 0f);
-        assertEquals(ViewGroup.LayoutParams.WRAP_CONTENT, list.getLayoutParams().height);
-    }
-
-    private static void assertLongListUsesWholePageScroller(ResidencyAppsActivity activity) {
-        RecyclerView list = activity.findViewById(R.id.residency_app_list);
-        list.setAdapter(new FixedHeightAdapter(40));
-        setContentMode(activity);
-        measure(activity, 360, 640);
-        measure(activity, 360, 640);
-
-        assertWholePageList(activity);
-        assertFalse(list.isNestedScrollingEnabled());
-        assertTrue(activity.findViewById(R.id.residency_page_scroll).canScrollVertically(1));
-    }
-
-    private static void assertWholePageList(Activity activity) {
-        RecyclerView list = activity.findViewById(R.id.residency_app_list);
-        LinearLayout.LayoutParams surfaceParams = surfaceParams(activity);
-        assertEquals(ViewGroup.LayoutParams.WRAP_CONTENT, surfaceParams.height);
-        assertEquals(0f, surfaceParams.weight, 0f);
-        assertEquals(ViewGroup.LayoutParams.WRAP_CONTENT, list.getLayoutParams().height);
-    }
-
-    private static void setContentMode(Activity activity) {
-        ((ResidencyAppsActivity) activity).setListSurfaceMode(true);
     }
 
     private static void assertBounded(Activity activity, int expectedBottomPadding) {

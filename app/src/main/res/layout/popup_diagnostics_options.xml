@@ -61,7 +61,7 @@
                 android:foreground="?attr/selectableItemBackground"
                 android:gravity="center_vertical"
                 android:importantForAccessibility="no"
-                android:minHeight="82dp"
+                android:minHeight="@dimen/setting_row_min_height"
                 android:orientation="horizontal"
                 android:paddingStart="20dp"
                 android:paddingTop="10dp"

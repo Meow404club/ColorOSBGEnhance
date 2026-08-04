@@ -10,6 +10,7 @@ import android.widget.TextView;
 import android.widget.LinearLayout;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.widget.NestedScrollView;
+import androidx.recyclerview.widget.ConcatAdapter;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import com.frostwork.bgenhance.R;
@@ -23,9 +24,12 @@ import com.google.android.material.textfield.TextInputEditText;
 public final class ResidencyAppsActivity extends AppCompatActivity {
     private static final String STATE_MODE_FILTER = "mode_filter";
     private static final String STATE_STATUS_FILTER = "status_filter";
+    private static final String STATE_QUERY = "query";
 
     private ResidencyAppsViewModel viewModel;
     private ResidencyAppsAdapter adapter;
+    private ResidencyManagedHeaderAdapter headerAdapter;
+    private ResidencyManagedStateAdapter stateAdapter;
     private RecyclerView list;
     private TextInputEditText search;
     private MaterialAutoCompleteTextView modeFilterView;
@@ -42,14 +46,18 @@ public final class ResidencyAppsActivity extends AppCompatActivity {
     private boolean listContentMode;
     private int modeFilterIndex;
     private int statusFilterIndex;
+    private String query = "";
+    private boolean unifiedScroll;
     private ResidencyAppsViewModel.State currentState;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         if (savedInstanceState != null) {
-            modeFilterIndex = savedInstanceState.getInt(STATE_MODE_FILTER, 0);
-            statusFilterIndex = savedInstanceState.getInt(STATE_STATUS_FILTER, 0);
+            modeFilterIndex = clamp(savedInstanceState.getInt(STATE_MODE_FILTER, 0),
+                    ResidencyAppFilter.ModeFilter.values().length);
+            statusFilterIndex = clamp(savedInstanceState.getInt(STATE_STATUS_FILTER, 0), 3);
+            query = savedInstanceState.getString(STATE_QUERY, "");
         }
         setContentView(R.layout.activity_residency_apps);
         UiUtils.applyWindowStyle(this);
@@ -58,12 +66,9 @@ public final class ResidencyAppsActivity extends AppCompatActivity {
                 getApplicationContext(), ResidencyAppCatalog.Source.MANAGED);
         viewModel.setListener(this::render);
         bindInteractions();
+        viewModel.setQuery(query);
         viewModel.setModeFilter(ResidencyAppFilter.ModeFilter.values()[modeFilterIndex]);
-        viewModel.setStatusFilter(statusFilterIndex == 1
-                ? ResidencyAppFilter.StatusFilter.ENABLED
-                : statusFilterIndex == 2
-                        ? ResidencyAppFilter.StatusFilter.DISABLED
-                        : ResidencyAppFilter.StatusFilter.ALL);
+        viewModel.setStatusFilter(statusFilter(statusFilterIndex));
     }
 
     @Override
@@ -81,6 +86,14 @@ public final class ResidencyAppsActivity extends AppCompatActivity {
 
     @Override
     protected void onSaveInstanceState(Bundle outState) {
+        if (unifiedScroll && headerAdapter != null) {
+            query = headerAdapter.query();
+            modeFilterIndex = headerAdapter.modeFilterIndex();
+            statusFilterIndex = headerAdapter.statusFilterIndex();
+        } else if (search != null && search.getText() != null) {
+            query = search.getText().toString();
+        }
+        outState.putString(STATE_QUERY, query);
         outState.putInt(STATE_MODE_FILTER, modeFilterIndex);
         outState.putInt(STATE_STATUS_FILTER, statusFilterIndex);
         super.onSaveInstanceState(outState);
@@ -89,6 +102,15 @@ public final class ResidencyAppsActivity extends AppCompatActivity {
     private void bindViews() {
         list = findViewById(R.id.residency_app_list);
         listBottomPadding = list.getPaddingBottom();
+        unifiedScroll = findViewById(R.id.residency_list_surface) == null;
+        adapter = new ResidencyAppsAdapter(this, this::openPolicy, unifiedScroll);
+        list.setLayoutManager(new LinearLayoutManager(this));
+        if (unifiedScroll) {
+            bindUnifiedList();
+            addFab = findViewById(R.id.residency_add_fab);
+            return;
+        }
+
         search = findViewById(R.id.residency_search);
         modeFilterView = findViewById(R.id.residency_mode_filter);
         statusFilterView = findViewById(R.id.residency_status_filter);
@@ -112,9 +134,47 @@ public final class ResidencyAppsActivity extends AppCompatActivity {
         loadingState = findViewById(R.id.residency_loading_state);
         emptyState = findViewById(R.id.residency_empty_state);
         errorState = findViewById(R.id.residency_error_state);
-        adapter = new ResidencyAppsAdapter(this, this::openPolicy);
-        list.setLayoutManager(new LinearLayoutManager(this));
         list.setAdapter(adapter);
+    }
+
+    private void bindUnifiedList() {
+        headerAdapter = new ResidencyManagedHeaderAdapter(
+                query,
+                modeFilterIndex,
+                statusFilterIndex,
+                new ResidencyManagedHeaderAdapter.Listener() {
+                    @Override
+                    public void onQueryChanged(String replacement) {
+                        query = replacement;
+                        viewModel.setQuery(replacement);
+                    }
+
+                    @Override
+                    public void onModeFilterChanged(int position) {
+                        modeFilterIndex = position;
+                        viewModel.setModeFilter(ResidencyAppFilter.ModeFilter.values()[position]);
+                    }
+
+                    @Override
+                    public void onStatusFilterChanged(int position) {
+                        statusFilterIndex = position;
+                        viewModel.setStatusFilter(statusFilter(position));
+                    }
+                });
+        stateAdapter = new ResidencyManagedStateAdapter(
+                new ResidencyManagedStateAdapter.Listener() {
+                    @Override
+                    public void onRetry() {
+                        viewModel.load();
+                    }
+
+                    @Override
+                    public void onEmptyAction(boolean activeFilters) {
+                        if (activeFilters) clearFilters();
+                        else openPicker();
+                    }
+                });
+        list.setAdapter(new ConcatAdapter(headerAdapter, adapter, stateAdapter));
     }
 
     private void bindInteractions() {
@@ -127,40 +187,7 @@ public final class ResidencyAppsActivity extends AppCompatActivity {
             return true;
         });
         addFab.setOnClickListener(view -> openPicker());
-        findViewById(R.id.residency_retry).setOnClickListener(view -> viewModel.load());
-        findViewById(R.id.residency_empty_action).setOnClickListener(view -> {
-            if (hasActiveFilters()) clearFilters();
-            else openPicker();
-        });
-
-        search.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) {}
-            @Override public void onTextChanged(CharSequence text, int start, int before, int count) {
-                if (viewModel != null) viewModel.setQuery(text == null ? "" : text.toString());
-            }
-            @Override public void afterTextChanged(Editable editable) {}
-        });
-
-        String[] modes = getResources().getStringArray(R.array.residency_mode_filters);
-        ResidencyDropdowns.setItems(modeFilterView, modes);
-        modeFilterView.setText(modes[modeFilterIndex], false);
-        modeFilterView.setOnItemClickListener((parent, view, position, id) -> {
-            modeFilterIndex = position;
-            viewModel.setModeFilter(ResidencyAppFilter.ModeFilter.values()[position]);
-        });
-
-        String[] statuses = getResources().getStringArray(R.array.residency_status_filters);
-        ResidencyDropdowns.setItems(statusFilterView, statuses);
-        statusFilterView.setText(statuses[statusFilterIndex], false);
-        statusFilterView.setOnItemClickListener((parent, view, position, id) -> {
-            statusFilterIndex = position;
-            ResidencyAppFilter.StatusFilter filter = position == 1
-                    ? ResidencyAppFilter.StatusFilter.ENABLED
-                    : position == 2
-                            ? ResidencyAppFilter.StatusFilter.DISABLED
-                            : ResidencyAppFilter.StatusFilter.ALL;
-            viewModel.setStatusFilter(filter);
-        });
+        if (!unifiedScroll) bindSplitLayoutFilters();
 
         list.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
@@ -184,12 +211,62 @@ public final class ResidencyAppsActivity extends AppCompatActivity {
         }
     }
 
+    private void bindSplitLayoutFilters() {
+        findViewById(R.id.residency_retry).setOnClickListener(view -> viewModel.load());
+        findViewById(R.id.residency_empty_action).setOnClickListener(view -> {
+            if (hasActiveFilters()) clearFilters();
+            else openPicker();
+        });
+
+        search.setText(query);
+        search.setSelection(search.length());
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(
+                    CharSequence text, int start, int count, int after) {}
+
+            @Override public void onTextChanged(
+                    CharSequence text, int start, int before, int count) {
+                query = text == null ? "" : text.toString();
+                viewModel.setQuery(query);
+            }
+
+            @Override public void afterTextChanged(Editable editable) {}
+        });
+
+        String[] modes = getResources().getStringArray(R.array.residency_mode_filters);
+        ResidencyDropdowns.setItems(modeFilterView, modes);
+        modeFilterView.setText(modes[modeFilterIndex], false);
+        modeFilterView.setOnItemClickListener((parent, view, position, id) -> {
+            modeFilterIndex = position;
+            viewModel.setModeFilter(ResidencyAppFilter.ModeFilter.values()[position]);
+        });
+
+        String[] statuses = getResources().getStringArray(R.array.residency_status_filters);
+        ResidencyDropdowns.setItems(statusFilterView, statuses);
+        statusFilterView.setText(statuses[statusFilterIndex], false);
+        statusFilterView.setOnItemClickListener((parent, view, position, id) -> {
+            statusFilterIndex = position;
+            viewModel.setStatusFilter(statusFilter(position));
+        });
+    }
+
     private void render(ResidencyAppsViewModel.State state) {
         currentState = state;
         boolean loading = state.status() == ResidencyAppsViewModel.Status.LOADING;
         boolean content = state.status() == ResidencyAppsViewModel.Status.CONTENT;
         boolean empty = state.status() == ResidencyAppsViewModel.Status.EMPTY;
         boolean error = state.status() == ResidencyAppsViewModel.Status.ERROR;
+        if (unifiedScroll) {
+            boolean activeFilters = hasActiveFilters();
+            headerAdapter.setPresentation(
+                    content || empty && activeFilters,
+                    content ? getString(R.string.residency_count, state.filteredCount()) : null);
+            stateAdapter.setState(state.status(), activeFilters);
+            adapter.submitList(content
+                    ? state.items() : java.util.Collections.emptyList());
+            addFab.setVisibility(content ? View.VISIBLE : View.GONE);
+            return;
+        }
         setListSurfaceMode(content);
         listSurface.setCardBackgroundColor(getColor(
                 content ? R.color.card_bg : R.color.page_bg));
@@ -212,6 +289,7 @@ public final class ResidencyAppsActivity extends AppCompatActivity {
 
     /** Keeps short lists grouped, then bounds the surface when its content actually overflows. */
     void setListSurfaceMode(boolean content) {
+        if (unifiedScroll) return;
         int generation = ++listSurfaceGeneration;
         listContentMode = content;
         boolean bounded = content && shouldStartBoundedList(
@@ -276,6 +354,7 @@ public final class ResidencyAppsActivity extends AppCompatActivity {
     }
 
     void applyListSurfaceMode(boolean content, boolean bounded) {
+        if (unifiedScroll) return;
         if (!list.isNestedScrollingEnabled()) {
             applyWholePageListSurfaceMode(content);
             return;
@@ -353,13 +432,19 @@ public final class ResidencyAppsActivity extends AppCompatActivity {
     }
 
     private boolean hasActiveFilters() {
-        return search.getText() != null && search.getText().length() > 0
+        if (unifiedScroll) return headerAdapter != null && headerAdapter.hasActiveFilters();
+        return !query.isEmpty()
                 || modeFilterIndex != 0
                 || statusFilterIndex != 0;
     }
 
     private void clearFilters() {
+        if (unifiedScroll) {
+            headerAdapter.resetFilters();
+            return;
+        }
         search.setText("");
+        query = "";
         modeFilterIndex = 0;
         statusFilterIndex = 0;
         String[] modes = getResources().getStringArray(R.array.residency_mode_filters);
@@ -368,6 +453,16 @@ public final class ResidencyAppsActivity extends AppCompatActivity {
         statusFilterView.setText(statuses[0], false);
         viewModel.setModeFilter(ResidencyAppFilter.ModeFilter.ALL);
         viewModel.setStatusFilter(ResidencyAppFilter.StatusFilter.ALL);
+    }
+
+    private static ResidencyAppFilter.StatusFilter statusFilter(int position) {
+        if (position == 1) return ResidencyAppFilter.StatusFilter.ENABLED;
+        if (position == 2) return ResidencyAppFilter.StatusFilter.DISABLED;
+        return ResidencyAppFilter.StatusFilter.ALL;
+    }
+
+    private static int clamp(int value, int size) {
+        return value < 0 || value >= size ? 0 : value;
     }
 
     private void openPicker() {

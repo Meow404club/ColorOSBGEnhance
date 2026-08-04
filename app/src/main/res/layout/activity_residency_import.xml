@@ -25,7 +25,7 @@
             android:id="@+id/residency_import_page_title"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="@dimen/page_heading_top"
             android:gravity="center"
             android:text="@string/residency_import_title"
             android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.PageTitle" />
@@ -34,8 +34,8 @@
             android:id="@+id/residency_import_page_subtitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:layout_marginBottom="18dp"
+            android:layout_marginTop="@dimen/page_heading_summary_top"
+            android:layout_marginBottom="@dimen/page_heading_bottom"
             android:gravity="center"
             android:text="@string/residency_import_subtitle"
             android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
@@ -99,7 +99,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
-                    android:minHeight="82dp"
+                    android:minHeight="@dimen/setting_row_min_height"
                     android:orientation="horizontal"
                     android:paddingStart="18dp"
                     android:paddingTop="12dp"

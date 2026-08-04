@@ -73,10 +73,11 @@ public final class ResidencyUiLayoutTest {
                 policy.findViewById(R.id.residency_policy_error_state)
                         .getAccessibilityLiveRegion());
 
-        View portrait = inflate(portraitContext(1f), R.layout.activity_residency_apps);
+        View portrait = inflate(
+                portraitContext(1f), R.layout.item_residency_app_picker_state);
         View landscape = inflate(landscapeContext(1f), R.layout.activity_residency_apps);
         assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE,
-                portrait.findViewById(R.id.residency_loading_state)
+                portrait.findViewById(R.id.residency_picker_state)
                         .getAccessibilityLiveRegion());
         assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE,
                 landscape.findViewById(R.id.residency_loading_state)
@@ -101,8 +102,21 @@ public final class ResidencyUiLayoutTest {
     }
 
     @Test
+    public void importRowsExposeOnlyTheCheckboxAsAnAccessibilityAction() {
+        View row = inflate(R.layout.item_residency_import);
+        View checkBox = row.findViewById(R.id.residency_import_check);
+
+        assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO,
+                row.getImportantForAccessibility());
+        assertTrue(checkBox.isClickable());
+        assertTrue(checkBox.getImportantForAccessibility()
+                != View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+    }
+
+    @Test
     public void residencyFiltersExposeTheirVisibleLabelsToAccessibilityServices() {
-        View portrait = inflate(portraitContext(1f), R.layout.activity_residency_apps);
+        View portrait = inflate(
+                portraitContext(1f), R.layout.item_residency_apps_header);
         assertEquals(R.id.residency_mode_filter,
                 portrait.findViewById(R.id.residency_mode_filter_label).getLabelFor());
         assertEquals(R.id.residency_status_filter,
@@ -143,6 +157,30 @@ public final class ResidencyUiLayoutTest {
     }
 
     @Test
+    public void directionalNavigationIconsMirrorInRtlLayouts() {
+        ContextThemeWrapper context = themedContext();
+        assertTrue(context.getDrawable(R.drawable.ic_arrow_back).isAutoMirrored());
+        assertTrue(context.getDrawable(R.drawable.ic_chevron_right).isAutoMirrored());
+    }
+
+    @Test
+    public void primarySwitchRowsUseTheSharedMinimumHeight() {
+        ContextThemeWrapper context = themedContext();
+        int minimum = context.getResources().getDimensionPixelSize(
+                R.dimen.setting_row_min_height);
+        View home = inflate(context, R.layout.activity_settings);
+        View popup = inflate(context, R.layout.popup_diagnostics_options);
+        View importer = inflate(context, R.layout.activity_residency_import);
+
+        assertEquals(minimum, home.findViewById(R.id.row_master).getMinimumHeight());
+        assertEquals(minimum, home.findViewById(R.id.row_dry_run).getMinimumHeight());
+        assertEquals(minimum,
+                popup.findViewById(R.id.diagnostics_popup_verbose_row).getMinimumHeight());
+        View importRow = (View) importer.findViewById(R.id.residency_import_kill).getParent();
+        assertEquals(minimum, importRow.getMinimumHeight());
+    }
+
+    @Test
     public void summaryTextMeetsNormalTextContrastOnPageAndCards() {
         ContextThemeWrapper context = themedContext();
         int summary = context.getColor(R.color.item_summary);
@@ -170,7 +208,7 @@ public final class ResidencyUiLayoutTest {
 
     @Test
     public void residencyInputsShareFilledMaterialStyling() {
-        View apps = inflate(R.layout.activity_residency_apps);
+        View apps = inflate(R.layout.item_residency_apps_header);
         View picker = inflate(R.layout.item_residency_app_picker_header);
         View policy = inflate(R.layout.activity_residency_policy);
 
@@ -186,9 +224,9 @@ public final class ResidencyUiLayoutTest {
         assertDropdownValue(
                 portrait, R.layout.activity_residency_policy, R.id.residency_mode_selector);
         assertDropdownValue(
-                portrait, R.layout.activity_residency_apps, R.id.residency_mode_filter);
+                portrait, R.layout.item_residency_apps_header, R.id.residency_mode_filter);
         assertDropdownValue(
-                portrait, R.layout.activity_residency_apps, R.id.residency_status_filter);
+                portrait, R.layout.item_residency_apps_header, R.id.residency_status_filter);
         ContextThemeWrapper landscape = landscapeContext(1f);
         assertDropdownValue(
                 landscape, R.layout.activity_residency_apps, R.id.residency_mode_filter);
@@ -208,9 +246,9 @@ public final class ResidencyUiLayoutTest {
     public void everyDropdownLabelUsesTheSettingTitleHierarchy() {
         ContextThemeWrapper portrait = portraitContext(1f);
         assertDropdownLabel(
-                portrait, R.layout.activity_residency_apps, R.id.residency_mode_filter_label);
+                portrait, R.layout.item_residency_apps_header, R.id.residency_mode_filter_label);
         assertDropdownLabel(
-                portrait, R.layout.activity_residency_apps, R.id.residency_status_filter_label);
+                portrait, R.layout.item_residency_apps_header, R.id.residency_status_filter_label);
         ContextThemeWrapper landscape = landscapeContext(1f);
         assertDropdownLabel(
                 landscape, R.layout.activity_residency_apps, R.id.residency_mode_filter_label);
@@ -229,7 +267,7 @@ public final class ResidencyUiLayoutTest {
     @Test
     public void enlargedTextStacksCompactFilterRowsAboveFullWidthDropdowns() {
         ContextThemeWrapper context = portraitContext(2f);
-        View apps = inflate(context, R.layout.activity_residency_apps);
+        View apps = inflate(context, R.layout.item_residency_apps_header);
         ResidencyFilterRows.stackForLargeText(
                 apps,
                 2f,
@@ -271,7 +309,7 @@ public final class ResidencyUiLayoutTest {
                 >= context.getResources().getDimensionPixelSize(R.dimen.field_min_height));
 
         MaterialAutoCompleteTextView field = inflate(
-                context, R.layout.activity_residency_apps)
+                context, R.layout.item_residency_apps_header)
                 .findViewById(R.id.residency_mode_filter);
         Drawable background = field.getDropDownBackground();
         assertNotNull(background);
@@ -280,7 +318,7 @@ public final class ResidencyUiLayoutTest {
 
     @Test
     public void primarySwitchRowsAreClickableAndCountsAnnounceUpdates() {
-        View apps = inflate(R.layout.activity_residency_apps);
+        View apps = inflate(R.layout.item_residency_apps_header);
         View picker = inflate(R.layout.item_residency_app_picker_header);
         View policy = inflate(R.layout.activity_residency_policy);
 
@@ -294,13 +332,13 @@ public final class ResidencyUiLayoutTest {
 
     @Test
     public void asynchronousResidencyStatesUsePoliteLiveRegions() {
-        View portraitApps = inflate(portraitContext(1f), R.layout.activity_residency_apps);
+        View portraitApps = inflate(
+                portraitContext(1f), R.layout.item_residency_app_picker_state);
         View landscapeApps = inflate(landscapeContext(1f), R.layout.activity_residency_apps);
         View policy = inflate(R.layout.activity_residency_policy);
         View detail = inflate(R.layout.activity_residency_policy_detail);
 
-        assertPolite(portraitApps, R.id.residency_empty_state);
-        assertPolite(portraitApps, R.id.residency_error_state);
+        assertPolite(portraitApps, R.id.residency_picker_state);
         assertPolite(landscapeApps, R.id.residency_empty_state);
         assertPolite(landscapeApps, R.id.residency_error_state);
         assertPolite(policy, R.id.residency_policy_apply_notice);
@@ -402,7 +440,7 @@ public final class ResidencyUiLayoutTest {
     @Test
     public void doubleFontScaleKeepsLongestFilterValuesVisible() {
         ContextThemeWrapper context = portraitContext(2f);
-        View apps = inflate(context, R.layout.activity_residency_apps);
+        View apps = inflate(context, R.layout.item_residency_apps_header);
         apps.findViewById(R.id.residency_filters).setVisibility(View.VISIBLE);
         assertNoEllipsis(
                 apps, context, R.id.residency_mode_filter, "系统管理");

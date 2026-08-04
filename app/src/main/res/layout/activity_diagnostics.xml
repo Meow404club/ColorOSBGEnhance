@@ -1,97 +1,116 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:paddingStart="@dimen/screen_horizontal"
-    android:paddingEnd="@dimen/screen_horizontal">
+    android:background="@color/page_bg">
 
-    <com.google.android.material.appbar.MaterialToolbar
-        android:id="@+id/toolbar"
-        android:layout_width="match_parent"
-        android:layout_height="56dp"
-        android:background="@android:color/transparent"
-        app:navigationContentDescription="@string/back"
-        app:navigationIcon="@drawable/ic_arrow_back"
-        app:title="" />
-
-    <TextView
+    <com.google.android.material.appbar.AppBarLayout
+        android:id="@+id/diagnostics_app_bar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:gravity="center"
-        android:text="@string/diagnostics_title"
-        android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.PageTitle" />
+        android:background="@color/page_bg"
+        app:elevation="0dp"
+        app:liftOnScroll="false">
 
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:gravity="center"
-        android:text="@string/diagnostics_summary"
-        android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
-
-    <com.google.android.material.button.MaterialButtonToggleGroup
-        android:id="@+id/diagnostics_tabs"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="18dp"
-        app:checkedButton="@id/diagnostics_tab_applications"
-        app:selectionRequired="true"
-        app:singleSelection="true">
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/diagnostics_tab_applications"
-            style="@style/Widget.ColorOSBgEnhance.SegmentedButton"
-            android:layout_width="0dp"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:minLines="2"
-            android:text="@string/diagnostics_tab_applications" />
+            android:orientation="vertical"
+            android:paddingStart="@dimen/screen_horizontal"
+            android:paddingEnd="@dimen/screen_horizontal"
+            app:layout_scrollFlags="scroll">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/diagnostics_tab_behaviors"
-            style="@style/Widget.ColorOSBgEnhance.SegmentedButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:minLines="2"
-            android:text="@string/diagnostics_tab_behaviors" />
+            <com.google.android.material.appbar.MaterialToolbar
+                android:id="@+id/toolbar"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:background="@android:color/transparent"
+                app:navigationContentDescription="@string/back"
+                app:navigationIcon="@drawable/ic_arrow_back"
+                app:title="" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/diagnostics_tab_hooks"
-            style="@style/Widget.ColorOSBgEnhance.SegmentedButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:minLines="2"
-            android:text="@string/diagnostics_tab_hooks" />
-    </com.google.android.material.button.MaterialButtonToggleGroup>
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/page_heading_top"
+                android:gravity="center"
+                android:text="@string/diagnostics_title"
+                android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.PageTitle" />
 
-    <TextView
-        android:id="@+id/diagnostics_result_count"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:accessibilityLiveRegion="polite"
-        android:layout_marginTop="12dp"
-        android:layout_marginBottom="8dp"
-        android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/page_heading_summary_top"
+                android:gravity="center"
+                android:text="@string/diagnostics_summary"
+                android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
 
-    <TextView
-        android:id="@+id/diagnostics_history_notice"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="6dp"
-        android:accessibilityLiveRegion="polite"
-        android:text="@string/diagnostics_history_truncated"
-        android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary"
-        android:visibility="gone" />
+            <com.google.android.material.button.MaterialButtonToggleGroup
+                android:id="@+id/diagnostics_tabs"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/page_heading_bottom"
+                app:checkedButton="@id/diagnostics_tab_applications"
+                app:selectionRequired="true"
+                app:singleSelection="true">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/diagnostics_tab_applications"
+                    style="@style/Widget.ColorOSBgEnhance.SegmentedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:minLines="2"
+                    android:text="@string/diagnostics_tab_applications" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/diagnostics_tab_behaviors"
+                    style="@style/Widget.ColorOSBgEnhance.SegmentedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:minLines="2"
+                    android:text="@string/diagnostics_tab_behaviors" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/diagnostics_tab_hooks"
+                    style="@style/Widget.ColorOSBgEnhance.SegmentedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:minLines="2"
+                    android:text="@string/diagnostics_tab_hooks" />
+            </com.google.android.material.button.MaterialButtonToggleGroup>
+
+            <TextView
+                android:id="@+id/diagnostics_result_count"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="8dp"
+                android:accessibilityLiveRegion="polite"
+                android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
+
+            <TextView
+                android:id="@+id/diagnostics_history_notice"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="6dp"
+                android:accessibilityLiveRegion="polite"
+                android:text="@string/diagnostics_history_truncated"
+                android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary"
+                android:visibility="gone" />
+        </LinearLayout>
+    </com.google.android.material.appbar.AppBarLayout>
 
     <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1">
+        android:layout_height="match_parent"
+        android:paddingStart="@dimen/screen_horizontal"
+        android:paddingEnd="@dimen/screen_horizontal"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
 
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/diagnostics_list"
@@ -128,9 +147,9 @@
             android:id="@+id/diagnostics_empty_state"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
+            android:accessibilityLiveRegion="polite"
             android:gravity="center"
             android:orientation="vertical"
-            android:accessibilityLiveRegion="polite"
             android:padding="24dp"
             android:visibility="gone">
 
@@ -156,9 +175,9 @@
             android:id="@+id/diagnostics_error_state"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
+            android:accessibilityLiveRegion="polite"
             android:gravity="center"
             android:orientation="vertical"
-            android:accessibilityLiveRegion="polite"
             android:padding="24dp"
             android:visibility="gone">
 
@@ -186,5 +205,4 @@
                 android:text="@string/residency_retry" />
         </LinearLayout>
     </FrameLayout>
-
-</LinearLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>
