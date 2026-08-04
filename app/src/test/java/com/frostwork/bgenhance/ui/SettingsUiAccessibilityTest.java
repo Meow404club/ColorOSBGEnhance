@@ -92,6 +92,17 @@ public final class SettingsUiAccessibilityTest {
     }
 
     @Test
+    public void dynamicRowsMirrorStartAndEndPaddingInRtl() {
+        ContextThemeWrapper context = themedContext(1f);
+        SettingSwitchRow switchRow = new SettingSwitchRow(context);
+        StatsOverviewView overview = new StatsOverviewView(context);
+        View statsHintRow = overview.getChildAt(3);
+
+        assertRtlRelativePadding(switchRow, 20, 16);
+        assertRtlRelativePadding(statsHintRow, 20, 14);
+    }
+
+    @Test
     public void riskNoticeSummaryUsesTheSharedSummaryTextAppearance() {
         ContextThemeWrapper context = themedContext(1f);
         RiskNoticeView notice = new RiskNoticeView(context);
@@ -369,5 +380,15 @@ public final class SettingsUiAccessibilityTest {
 
     private static int dp(Context context, int value) {
         return Math.round(value * context.getResources().getDisplayMetrics().density);
+    }
+
+    private static void assertRtlRelativePadding(View view, int startDp, int endDp) {
+        view.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        int expectedStart = dp(view.getContext(), startDp);
+        int expectedEnd = dp(view.getContext(), endDp);
+        assertEquals(expectedStart, view.getPaddingStart());
+        assertEquals(expectedEnd, view.getPaddingEnd());
+        assertEquals(expectedEnd, view.getPaddingLeft());
+        assertEquals(expectedStart, view.getPaddingRight());
     }
 }

@@ -31,7 +31,7 @@ public final class SettingSwitchRow extends LinearLayout {
         setGravity(Gravity.CENTER_VERTICAL);
         setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         setMinimumHeight(UiUtils.dp(context, 92));
-        setPadding(UiUtils.dp(context, 20), UiUtils.dp(context, 14),
+        setPaddingRelative(UiUtils.dp(context, 20), UiUtils.dp(context, 14),
                 UiUtils.dp(context, 16), UiUtils.dp(context, 14));
         TypedArray selectable = context.obtainStyledAttributes(
                 new int[]{android.R.attr.selectableItemBackground});

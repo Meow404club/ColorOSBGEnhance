@@ -65,7 +65,7 @@ public final class StatsOverviewView extends LinearLayout {
         LinearLayout hintRow = new LinearLayout(context);
         hintRow.setOrientation(HORIZONTAL);
         hintRow.setGravity(Gravity.CENTER_VERTICAL);
-        hintRow.setPadding(UiUtils.dp(context, 20), UiUtils.dp(context, 10),
+        hintRow.setPaddingRelative(UiUtils.dp(context, 20), UiUtils.dp(context, 10),
                 UiUtils.dp(context, 14), UiUtils.dp(context, 12));
 
         hint = new TextView(context);
