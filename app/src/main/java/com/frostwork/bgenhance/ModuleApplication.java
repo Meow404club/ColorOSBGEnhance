@@ -80,6 +80,7 @@ public final class ModuleApplication extends Application
     @Override
     public void onServiceBind(@NonNull XposedService service) {
         sService = service;
+        sSyncedRevision = -1;
         try {
             sServiceApi = service.getApiVersion();
             sSyncError = "";
@@ -96,6 +97,7 @@ public final class ModuleApplication extends Application
         if (sService == service) {
             sService = null;
             sServiceApi = -1;
+            sSyncedRevision = -1;
             sSyncError = "service_disconnected";
             notifyStateChanged();
         }
@@ -203,8 +205,11 @@ public final class ModuleApplication extends Application
                 syncConfigNow();
             } finally {
                 SYNC_QUEUED.set(false);
-                if (sService != null
-                        && sSyncedRevision < ModuleSettings.getConfigRevision(this)) {
+                if (shouldRetryConfigSync(
+                        sService != null,
+                        sSyncedRevision,
+                        ModuleSettings.getConfigRevision(this),
+                        sSyncError)) {
                     scheduleConfigSync(5_000L);
                 }
             }
@@ -267,5 +272,15 @@ public final class ModuleApplication extends Application
         String message = error.getMessage();
         return error.getClass().getSimpleName()
                 + (message == null || message.isEmpty() ? "" : ":" + message);
+    }
+
+    static boolean shouldRetryConfigSync(
+            boolean serviceConnected,
+            int syncedRevision,
+            int localRevision,
+            String syncError) {
+        return serviceConnected
+                && (syncedRevision < localRevision
+                        || syncError != null && !syncError.isEmpty());
     }
 }
