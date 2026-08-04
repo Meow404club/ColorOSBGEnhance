@@ -12,6 +12,7 @@ import android.content.Context;
 import android.database.Cursor;
 import android.database.DatabaseUtils;
 import android.database.sqlite.SQLiteDatabase;
+import android.os.SystemClock;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -783,6 +784,7 @@ public final class ResidencyDiagnosticsDbTest {
         long now = System.currentTimeMillis();
         database.writeBatch(versionedBatch(
                 0L, 0L, event(now, "before", "pkg.before", 1, "FREEZE", "blocked")));
+        long beforeClearElapsedNanos = SystemClock.elapsedRealtimeNanos();
 
         DiagnosticsQuery.ClearResult clear =
                 database.clear(DiagnosticsQuery.ClearScope.USER_ACTIVITY);
@@ -793,11 +795,32 @@ public final class ResidencyDiagnosticsDbTest {
                 event(now + 2L, "current", "pkg.current", 3, "FREEZE", "blocked")));
 
         assertEquals(1L, clear.epoch);
+        assertTrue(clear.epochCutoffElapsedNanos >= beforeClearElapsedNanos);
         assertEquals(clear.epoch, database.currentEpoch());
+        assertEquals(clear.epochCutoffElapsedNanos,
+                database.currentEpochCutoffElapsedNanos());
         DiagnosticsQuery.EventPage events = database.queryEvents(
                 DiagnosticsQuery.EventFilter.builder().limit(20).build());
         assertEquals(1, events.items.size());
         assertEquals("pkg.current", events.items.get(0).packageName);
+    }
+
+    @Test
+    public void epochCutoffIsRetainedOnlyForTheBootThatRecordedIt() {
+        DiagnosticsRetentionPolicy value = policy(20, 20, 20, 60_000L);
+        database = open(value, "boot-old");
+        DiagnosticsQuery.ClearResult clear =
+                database.clear(DiagnosticsQuery.ClearScope.USER_ACTIVITY);
+        assertTrue(clear.epochCutoffElapsedNanos >= 0L);
+        database.close();
+
+        database = open(value, "boot-old");
+        assertEquals(clear.epochCutoffElapsedNanos,
+                database.currentEpochCutoffElapsedNanos());
+        database.close();
+
+        database = open(value, "boot-new");
+        assertEquals(0L, database.currentEpochCutoffElapsedNanos());
     }
 
     @Test

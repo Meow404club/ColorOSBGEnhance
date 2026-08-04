@@ -496,22 +496,31 @@ public final class HookDiagnosticsTest {
     }
 
     @Test
-    public void epochChangeDropsOldStateAndStartsFreshDeduplicationScope() throws Exception {
+    public void epochChangeDropsPreClearAndRebasesPostClearEvents()
+            throws Exception {
         setEpoch(EPOCH);
-        provider.enqueue(request -> epochMismatch(EPOCH + 1L, request));
+        AtomicLong elapsedNanos = new AtomicLong(100L);
+        setElapsedRealtimeNanos(elapsedNanos);
+        provider.enqueue(request -> {
+            elapsedNanos.set(300L);
+            HookDiagnostics.recordEventFromLockedPath(event(3), DiagnosticsResult.PASSED);
+            return epochMismatch(EPOCH + 1L, 150L, request);
+        });
         provider.enqueue(request -> acceptedAck(request, EPOCH + 1L));
         HookDiagnostics.recordEventFromLockedPath(event(1), DiagnosticsResult.PASSED);
+        // The Provider clears epoch N here, before this event and the first request.
+        elapsedNanos.set(200L);
+        HookDiagnostics.recordEventFromLockedPath(event(2), DiagnosticsResult.PASSED);
 
         flushSnapshot();
 
         assertEquals(EPOCH + 1L, epoch());
         assertEquals(0L, nextBatchSequence());
-        assertEquals(0, pendingItemCount());
-        assertEquals(0, outboxSize());
+        assertEquals(4, pendingItemCount());
+        assertEquals(4, outboxSize());
         assertNull(staticValue(HookDiagnostics.class, "sInFlight"));
         assertEquals(-1L, reportedStickyGeneration().get());
 
-        HookDiagnostics.recordEventFromLockedPath(event(1), DiagnosticsResult.PASSED);
         flushSnapshot();
 
         DiagnosticsWriteBatch oldBatch = parse(provider.requests.get(0));
@@ -520,8 +529,32 @@ public final class HookDiagnosticsTest {
         assertEquals(0L, oldBatch.batchIdentity.batchSequence);
         assertEquals(EPOCH + 1L, newBatch.batchIdentity.epoch);
         assertEquals(0L, newBatch.batchIdentity.batchSequence);
-        assertEquals("example.app1", newBatch.events.get(0).packageName);
+        assertEquals(2, oldBatch.events.size());
+        assertEquals(2, newBatch.rawHits.size());
+        assertEquals(2, newBatch.events.size());
+        assertEquals("example.app2", newBatch.events.get(0).packageName);
+        assertEquals("example.app3", newBatch.events.get(1).packageName);
         assertEquals(1L, nextBatchSequence());
+        assertEquals(0, pendingItemCount());
+    }
+
+    @Test
+    public void initialEpochSyncFiltersEventsAgainstRemoteClearCutoff() throws Exception {
+        AtomicLong elapsedNanos = new AtomicLong(100L);
+        setElapsedRealtimeNanos(elapsedNanos);
+        provider.enqueue(request -> baseResponse(true, EPOCH, 150L));
+        provider.enqueue(request -> acceptedAck(request, EPOCH));
+        HookDiagnostics.recordEventFromLockedPath(event(1), DiagnosticsResult.PASSED);
+        elapsedNanos.set(200L);
+        HookDiagnostics.recordEventFromLockedPath(event(2), DiagnosticsResult.PASSED);
+
+        flushSnapshot();
+
+        assertEquals(EPOCH, epoch());
+        assertEquals(1, provider.requests.size());
+        DiagnosticsWriteBatch current = parse(provider.requests.get(0));
+        assertEquals(1, current.events.size());
+        assertEquals("example.app2", current.events.get(0).packageName);
         assertEquals(0, pendingItemCount());
     }
 
@@ -821,7 +854,11 @@ public final class HookDiagnosticsTest {
     }
 
     private static Bundle epochMismatch(long epoch, Bundle request) {
-        Bundle response = baseResponse(false, epoch);
+        return epochMismatch(epoch, 150L, request);
+    }
+
+    private static Bundle epochMismatch(long epoch, long cutoffElapsedNanos, Bundle request) {
+        Bundle response = baseResponse(false, epoch, cutoffElapsedNanos);
         response.putString(BridgeContract.EXTRA_ERROR, "epoch_mismatch");
         response.putInt(BridgeContract.EXTRA_ACCEPTED_ITEMS, 0);
         response.putInt(BridgeContract.EXTRA_DROPPED_ITEMS, parse(request).size());
@@ -829,10 +866,17 @@ public final class HookDiagnosticsTest {
     }
 
     private static Bundle baseResponse(boolean ok, long epoch) {
+        return baseResponse(ok, epoch, 0L);
+    }
+
+    private static Bundle baseResponse(boolean ok, long epoch, long cutoffElapsedNanos) {
         Bundle response = new Bundle();
         response.putBoolean(BridgeContract.EXTRA_OK, ok);
         response.putInt(BridgeContract.EXTRA_BRIDGE_VERSION, BridgeContract.BRIDGE_VERSION);
         response.putLong(BridgeContract.EXTRA_DIAGNOSTICS_EPOCH, epoch);
+        response.putLong(
+                BridgeContract.EXTRA_DIAGNOSTICS_EPOCH_CUTOFF_ELAPSED_NANOS,
+                cutoffElapsedNanos);
         response.putString(BridgeContract.EXTRA_BOOT_ID, bootId());
         return response;
     }
@@ -852,6 +896,13 @@ public final class HookDiagnosticsTest {
 
     private static void setEpoch(long value) throws Exception {
         setStaticField(HookDiagnostics.class, "sEpoch", value);
+    }
+
+    private static void setElapsedRealtimeNanos(AtomicLong value) throws Exception {
+        setStaticField(
+                HookDiagnostics.class,
+                "sElapsedRealtimeNanosProbe",
+                (HookDiagnostics.ElapsedRealtimeNanosProbe) value::get);
     }
 
     private static void markEventBatchDue() throws Exception {
@@ -1015,6 +1066,11 @@ public final class HookDiagnosticsTest {
         setStaticField(HookDiagnostics.class, "sDrainContinuationPending", false);
         setStaticField(HookDiagnostics.class, "sLastTransportLogAt", 0L);
         setUserUnlocked(true);
+        setStaticField(
+                HookDiagnostics.class,
+                "sElapsedRealtimeNanosProbe",
+                (HookDiagnostics.ElapsedRealtimeNanosProbe)
+                        android.os.SystemClock::elapsedRealtimeNanos);
     }
 
     private static void clearMap(String fieldName) throws Exception {
@@ -1072,8 +1128,9 @@ public final class HookDiagnosticsTest {
         @Override
         public Bundle call(String method, String arg, Bundle extras) {
             methods.add(method);
-            if (!BridgeContract.METHOD_REPORT_BATCH.equals(method)) return null;
-            requests.add(extras);
+            if (!BridgeContract.METHOD_REPORT_BATCH.equals(method)
+                    && !BridgeContract.METHOD_PING.equals(method)) return null;
+            if (BridgeContract.METHOD_REPORT_BATCH.equals(method)) requests.add(extras);
             Function<Bundle, Bundle> response = responses.pollFirst();
             return response == null ? null : response.apply(extras);
         }

@@ -443,16 +443,27 @@ public final class DiagnosticsQuery {
         public final boolean success;
         public final int deletedRows;
         public final long epoch;
+        public final long epochCutoffElapsedNanos;
         public final String errorCode;
 
         public ClearResult(boolean success, int deletedRows, String errorCode) {
-            this(success, deletedRows, -1L, errorCode);
+            this(success, deletedRows, -1L, -1L, errorCode);
         }
 
         public ClearResult(boolean success, int deletedRows, long epoch, String errorCode) {
+            this(success, deletedRows, epoch, -1L, errorCode);
+        }
+
+        public ClearResult(
+                boolean success,
+                int deletedRows,
+                long epoch,
+                long epochCutoffElapsedNanos,
+                String errorCode) {
             this.success = success;
             this.deletedRows = Math.max(0, deletedRows);
             this.epoch = Math.max(-1L, epoch);
+            this.epochCutoffElapsedNanos = Math.max(-1L, epochCutoffElapsedNanos);
             this.errorCode = DiagnosticsValues.id(errorCode);
         }
 

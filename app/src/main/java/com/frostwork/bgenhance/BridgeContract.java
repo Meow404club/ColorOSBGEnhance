@@ -10,7 +10,7 @@ public final class BridgeContract {
     public static final String AUTHORITY = "com.frostwork.bgenhance.bridge";
     public static final Uri URI = Uri.parse("content://" + AUTHORITY);
 
-    public static final int BRIDGE_VERSION = 3;
+    public static final int BRIDGE_VERSION = 4;
 
     public static final String METHOD_PING = "ping";
     public static final String METHOD_REPORT_BATCH = "report_diagnostics_batch";
@@ -48,6 +48,8 @@ public final class BridgeContract {
     public static final String EXTRA_ACCEPTED_ITEMS = "accepted_items";
     public static final String EXTRA_DROPPED_ITEMS = "dropped_items";
     public static final String EXTRA_DIAGNOSTICS_EPOCH = "diagnostics_epoch";
+    public static final String EXTRA_DIAGNOSTICS_EPOCH_CUTOFF_ELAPSED_NANOS =
+            "diagnostics_epoch_cutoff_elapsed_realtime_nanos";
     public static final String EXTRA_BOOT_ID = "diagnostics_boot_id";
 
     public static final String PROCESS_SYSTEM_SERVER = "system_server";

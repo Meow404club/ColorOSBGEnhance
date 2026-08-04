@@ -57,6 +57,7 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
     private final AtomicLong writeGeneration = new AtomicLong();
     private final AtomicLong appliedClearGeneration = new AtomicLong();
     private final AtomicLong admissionEpoch = new AtomicLong(-1L);
+    private final AtomicLong admissionEpochCutoffElapsedNanos = new AtomicLong(-1L);
     private final AtomicLong acceptedWrites = new AtomicLong();
     private final AtomicLong droppedWrites = new AtomicLong();
     private final AtomicLong committedWrites = new AtomicLong();
@@ -307,13 +308,16 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 try {
                     drainUntil(appliedClearGeneration.get());
                     long epoch = storage().currentEpoch();
-                    if (epoch < 0L) {
+                    long epochCutoffElapsedNanos =
+                            storage().currentEpochCutoffElapsedNanos();
+                    if (epoch < 0L || epochCutoffElapsedNanos < 0L) {
                         throw new IllegalStateException("diagnostics epoch unavailable");
                     }
                     synchronized (stateLock) {
                         if (!closed.get()
                                 && writeGeneration.get() == requestedGeneration
                                 && appliedClearGeneration.get() >= requestedGeneration) {
+                            admissionEpochCutoffElapsedNanos.set(epochCutoffElapsedNanos);
                             admissionEpoch.set(epoch);
                         }
                     }
@@ -337,6 +341,10 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
         return admissionEpoch.get();
     }
 
+    public long admissionEpochCutoffElapsedNanos() {
+        return admissionEpochCutoffElapsedNanos.get();
+    }
+
     public CompletableFuture<DiagnosticsQuery.ExportSnapshot> exportAsync(
             DiagnosticsQuery.ExportOptions requestedOptions,
             Iterable<String> homepageFeatureIds) {
@@ -353,6 +361,7 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
         long clearGeneration;
         long previousGeneration;
         long previousAdmissionEpoch;
+        long previousAdmissionEpochCutoffElapsedNanos;
         boolean submitted;
         synchronized (stateLock) {
             if (closed.get() || pendingCommands >= commandCapacity) {
@@ -360,9 +369,13 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 clearGeneration = -1L;
                 previousGeneration = writeGeneration.get();
                 previousAdmissionEpoch = admissionEpoch.get();
+                previousAdmissionEpochCutoffElapsedNanos =
+                        admissionEpochCutoffElapsedNanos.get();
             } else {
                 previousGeneration = writeGeneration.get();
                 previousAdmissionEpoch = admissionEpoch.getAndSet(-1L);
+                previousAdmissionEpochCutoffElapsedNanos =
+                        admissionEpochCutoffElapsedNanos.get();
                 clearGeneration = previousGeneration + 1L;
                 writeGeneration.set(clearGeneration);
                 submitted = submitCommandLocked(() -> {
@@ -391,6 +404,8 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                 });
                 if (!submitted) {
                     writeGeneration.set(previousGeneration);
+                    admissionEpochCutoffElapsedNanos.set(
+                            previousAdmissionEpochCutoffElapsedNanos);
                     admissionEpoch.set(previousAdmissionEpoch);
                 }
             }
@@ -404,9 +419,12 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
 
     private void publishAdmissionAfterClear(
             long clearGeneration, DiagnosticsQuery.ClearResult result) {
-        if (result != null && result.success && result.epoch >= 0L) {
+        if (result != null && result.success && result.epoch >= 0L
+                && result.epochCutoffElapsedNanos >= 0L) {
             synchronized (stateLock) {
                 if (!closed.get() && writeGeneration.get() == clearGeneration) {
+                    admissionEpochCutoffElapsedNanos.set(
+                            result.epochCutoffElapsedNanos);
                     admissionEpoch.set(result.epoch);
                 }
             }
@@ -417,14 +435,20 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
 
     private void restoreAdmissionAfterFailedClear(long clearGeneration) {
         long restored = -1L;
+        long restoredCutoffElapsedNanos = -1L;
         try {
             long storedEpoch = storage().currentEpoch();
-            if (storedEpoch >= 0L) restored = storedEpoch;
+            long storedCutoffElapsedNanos = storage().currentEpochCutoffElapsedNanos();
+            if (storedEpoch >= 0L && storedCutoffElapsedNanos >= 0L) {
+                restored = storedEpoch;
+                restoredCutoffElapsedNanos = storedCutoffElapsedNanos;
+            }
         } catch (Throwable ignored) {
             // An uncertain clear must keep wire admission closed.
         }
         synchronized (stateLock) {
             if (!closed.get() && writeGeneration.get() == clearGeneration) {
+                admissionEpochCutoffElapsedNanos.set(restoredCutoffElapsedNanos);
                 admissionEpoch.set(restored);
             }
         }
@@ -456,6 +480,7 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
         synchronized (stateLock) {
             if (!closed.compareAndSet(false, true)) return closeCompletion;
             admissionEpoch.set(-1L);
+            admissionEpochCutoffElapsedNanos.set(-1L);
             ScheduledFuture<?> periodic = maintenanceFuture;
             if (periodic != null) periodic.cancel(false);
             try {

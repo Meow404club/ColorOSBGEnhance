@@ -63,6 +63,8 @@ interface ResidencyDiagnosticsStorage extends AutoCloseable {
 
     long currentEpoch();
 
+    long currentEpochCutoffElapsedNanos();
+
     int schemaVersion();
 
     @Override

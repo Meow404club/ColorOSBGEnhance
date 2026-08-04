@@ -6,6 +6,7 @@ import android.database.Cursor;
 import android.database.DatabaseUtils;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
+import android.os.SystemClock;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -28,6 +29,10 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
     static final String TABLE_METADATA = "diagnostics_metadata";
 
     private static final String METADATA_EPOCH = "epoch";
+    private static final String METADATA_EPOCH_CUTOFF_ELAPSED_NANOS =
+            "epoch_cutoff_elapsed_realtime_nanos";
+    private static final String METADATA_EPOCH_CUTOFF_BOOT_ID =
+            "epoch_cutoff_boot_id";
     private static final String METADATA_LEGACY_MIGRATION = "legacy_hook_diagnostics_v1";
     private static final String METADATA_AGGREGATE_HISTORY_TRUNCATED =
             "aggregate_history_truncated";
@@ -380,10 +385,17 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         SQLiteDatabase db = getWritableDatabase();
         int deleted = 0;
         long epoch;
+        long epochCutoffElapsedNanos;
         db.beginTransactionNonExclusive();
         try {
             epoch = currentEpoch(db) + 1L;
+            epochCutoffElapsedNanos = Math.max(0L, SystemClock.elapsedRealtimeNanos());
             putMetadataLong(db, METADATA_EPOCH, epoch);
+            putMetadataLong(
+                    db,
+                    METADATA_EPOCH_CUTOFF_ELAPSED_NANOS,
+                    epochCutoffElapsedNanos);
+            putMetadataString(db, METADATA_EPOCH_CUTOFF_BOOT_ID, currentBootId);
             deleted += db.delete(TABLE_BATCH_CURSORS, null, null);
             if (scope == DiagnosticsQuery.ClearScope.RECENT_EVENTS
                     || scope == DiagnosticsQuery.ClearScope.USER_ACTIVITY
@@ -413,7 +425,8 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         } finally {
             db.endTransaction();
         }
-        return new DiagnosticsQuery.ClearResult(true, deleted, epoch, "");
+        return new DiagnosticsQuery.ClearResult(
+                true, deleted, epoch, epochCutoffElapsedNanos, "");
     }
 
     private static void resetHookActivity(SQLiteDatabase db, boolean clearEventTime) {
@@ -430,6 +443,15 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
     @Override
     public long currentEpoch() {
         return currentEpoch(getReadableDatabase());
+    }
+
+    @Override
+    public long currentEpochCutoffElapsedNanos() {
+        SQLiteDatabase db = getReadableDatabase();
+        if (!currentBootId.equals(metadataString(db, METADATA_EPOCH_CUTOFF_BOOT_ID))) {
+            return 0L;
+        }
+        return metadataLong(db, METADATA_EPOCH_CUTOFF_ELAPSED_NANOS);
     }
 
     @Override
@@ -1233,17 +1255,17 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         createIndexes(db);
     }
 
-    private static void migrateVersionFourToFive(SQLiteDatabase db) {
+    private void migrateVersionFourToFive(SQLiteDatabase db) {
         createMetadataTable(db);
-        putMetadataLong(db, METADATA_EPOCH, currentEpoch(db) + 1L);
+        advanceEpochMetadata(db);
         db.execSQL("DROP TABLE IF EXISTS " + TABLE_BATCH_CURSORS);
         createBatchCursorTable(db);
         createIndexes(db);
     }
 
-    private static void migrateVersionFiveToSix(SQLiteDatabase db) {
+    private void migrateVersionFiveToSix(SQLiteDatabase db) {
         createMetadataTable(db);
-        putMetadataLong(db, METADATA_EPOCH, currentEpoch(db) + 1L);
+        advanceEpochMetadata(db);
         db.execSQL("DROP TABLE IF EXISTS " + TABLE_BATCH_CURSORS);
         createBatchCursorTable(db);
         createIndexes(db);
@@ -1264,6 +1286,15 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                 + " AND result='candidate_filtered'),0)");
         db.execSQL("UPDATE " + TABLE_AGGREGATES
                 + " SET blocked_count=event_count WHERE result='candidate_filtered'");
+    }
+
+    private void advanceEpochMetadata(SQLiteDatabase db) {
+        putMetadataLong(db, METADATA_EPOCH, currentEpoch(db) + 1L);
+        putMetadataLong(
+                db,
+                METADATA_EPOCH_CUTOFF_ELAPSED_NANOS,
+                Math.max(0L, SystemClock.elapsedRealtimeNanos()));
+        putMetadataString(db, METADATA_EPOCH_CUTOFF_BOOT_ID, currentBootId);
     }
 
     private static void migrateVersionSevenToEight(SQLiteDatabase db) {
@@ -1445,6 +1476,11 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                 + "(name,value) VALUES('format','residency-diagnostics-v1')");
         db.execSQL("INSERT OR IGNORE INTO " + TABLE_METADATA
                 + "(name,value) VALUES('" + METADATA_EPOCH + "','0')");
+        db.execSQL("INSERT OR IGNORE INTO " + TABLE_METADATA
+                + "(name,value) VALUES('"
+                + METADATA_EPOCH_CUTOFF_ELAPSED_NANOS + "','0')");
+        db.execSQL("INSERT OR IGNORE INTO " + TABLE_METADATA
+                + "(name,value) VALUES('" + METADATA_EPOCH_CUTOFF_BOOT_ID + "','')");
     }
 
     private static long currentEpoch(SQLiteDatabase db) {
@@ -1487,6 +1523,20 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
             } catch (RuntimeException ignored) {
                 return 0L;
             }
+        }
+    }
+
+    private static String metadataString(SQLiteDatabase db, String name) {
+        try (Cursor cursor = db.query(
+                TABLE_METADATA,
+                new String[] { "value" },
+                "name=?",
+                new String[] { name },
+                null,
+                null,
+                null,
+                "1")) {
+            return cursor.moveToFirst() ? cursor.getString(0) : "";
         }
     }
 

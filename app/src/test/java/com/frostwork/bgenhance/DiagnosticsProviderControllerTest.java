@@ -39,6 +39,7 @@ public final class DiagnosticsProviderControllerTest {
     private static final int SYSTEM_UID = Process.SYSTEM_UID;
     private static final int ATHENA_UID = 23_456;
     private static final long EPOCH = 7L;
+    private static final long EPOCH_CUTOFF_ELAPSED_NANOS = 123_456L;
 
     @Test
     public void onlyModuleSystemAndResolvedAthenaUidsAreAllowed() {
@@ -67,6 +68,8 @@ public final class DiagnosticsProviderControllerTest {
                 response.getInt(BridgeContract.EXTRA_BRIDGE_VERSION));
         assertEquals("boot", response.getString(BridgeContract.EXTRA_BOOT_ID));
         assertEquals(EPOCH, response.getLong(BridgeContract.EXTRA_DIAGNOSTICS_EPOCH));
+        assertEquals(EPOCH_CUTOFF_ELAPSED_NANOS, response.getLong(
+                BridgeContract.EXTRA_DIAGNOSTICS_EPOCH_CUTOFF_ELAPSED_NANOS));
     }
 
     @Test
@@ -149,8 +152,10 @@ public final class DiagnosticsProviderControllerTest {
                 new CompletableFuture<>();
         CountDownLatch invoked = new CountDownLatch(1);
         AtomicLong epoch = new AtomicLong(EPOCH);
+        AtomicLong cutoffElapsedNanos = new AtomicLong(EPOCH_CUTOFF_ELAPSED_NANOS);
         DiagnosticsProviderController controller = new DiagnosticsProviderController(
                 MODULE_UID, SYSTEM_UID, ATHENA_UID, "boot", epoch::get,
+                cutoffElapsedNanos::get,
                 batch -> {
                     invoked.countDown();
                     return persistence;
@@ -167,6 +172,7 @@ public final class DiagnosticsProviderControllerTest {
                     DiagnosticsWireEncoder.encodeTyped(batch)));
             assertTrue(invoked.await(5, TimeUnit.SECONDS));
 
+            cutoffElapsedNanos.set(EPOCH_CUTOFF_ELAPSED_NANOS + 1L);
             epoch.set(EPOCH + 1L);
             persistence.complete(accepted(batch.size()));
             Bundle response = pending.get(5, TimeUnit.SECONDS);
@@ -175,6 +181,8 @@ public final class DiagnosticsProviderControllerTest {
             assertEquals("epoch_mismatch", response.getString(BridgeContract.EXTRA_ERROR));
             assertEquals(EPOCH + 1L,
                     response.getLong(BridgeContract.EXTRA_DIAGNOSTICS_EPOCH));
+            assertEquals(EPOCH_CUTOFF_ELAPSED_NANOS + 1L, response.getLong(
+                    BridgeContract.EXTRA_DIAGNOSTICS_EPOCH_CUTOFF_ELAPSED_NANOS));
             assertEquals(0, response.getInt(BridgeContract.EXTRA_ACCEPTED_ITEMS));
         } finally {
             caller.shutdownNow();
@@ -503,6 +511,8 @@ public final class DiagnosticsProviderControllerTest {
         assertFalse(epoch.getBoolean(BridgeContract.EXTRA_OK));
         assertEquals("epoch_mismatch", epoch.getString(BridgeContract.EXTRA_ERROR));
         assertEquals(EPOCH, epoch.getLong(BridgeContract.EXTRA_DIAGNOSTICS_EPOCH));
+        assertEquals(EPOCH_CUTOFF_ELAPSED_NANOS, epoch.getLong(
+                BridgeContract.EXTRA_DIAGNOSTICS_EPOCH_CUTOFF_ELAPSED_NANOS));
     }
 
     @Test
@@ -545,6 +555,7 @@ public final class DiagnosticsProviderControllerTest {
             Function<DiagnosticsWriteBatch, DiagnosticsProviderController.BatchResult> sink) {
         return new DiagnosticsProviderController(
                 MODULE_UID, SYSTEM_UID, ATHENA_UID, "boot", () -> EPOCH,
+                () -> EPOCH_CUTOFF_ELAPSED_NANOS,
                 batch -> CompletableFuture.completedFuture(sink.apply(batch)),
                 new DiagnosticsWireParser());
     }

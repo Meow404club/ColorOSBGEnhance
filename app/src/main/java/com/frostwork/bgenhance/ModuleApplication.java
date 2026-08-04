@@ -190,6 +190,11 @@ public final class ModuleApplication extends Application
         return DIAGNOSTICS_EPOCH.get();
     }
 
+    public static long diagnosticsEpochCutoffElapsedNanos() {
+        ResidencyDiagnosticsBackend backend = sDiagnosticsBackend;
+        return backend == null ? -1L : backend.admissionEpochCutoffElapsedNanos();
+    }
+
     public static void publishDiagnosticsEpoch(long epoch) {
         if (epoch >= 0L) DIAGNOSTICS_EPOCH.set(epoch);
     }

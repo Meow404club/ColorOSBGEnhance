@@ -34,6 +34,7 @@ public final class ModuleBridgeProvider extends ContentProvider {
                 athenaUid,
                 ModuleApplication.diagnosticsBootId(),
                 backend::admissionEpoch,
+                backend::admissionEpochCutoffElapsedNanos,
                 batch -> backend.enqueueDurable(batch).thenApply(result ->
                         result.persisted
                                 ? new DiagnosticsProviderController.BatchResult(
@@ -80,6 +81,9 @@ public final class ModuleBridgeProvider extends ContentProvider {
         out.putLong(
                 BridgeContract.EXTRA_DIAGNOSTICS_EPOCH,
                 ModuleApplication.diagnosticsEpoch());
+        out.putLong(
+                BridgeContract.EXTRA_DIAGNOSTICS_EPOCH_CUTOFF_ELAPSED_NANOS,
+                ModuleApplication.diagnosticsEpochCutoffElapsedNanos());
         out.putString(BridgeContract.EXTRA_BOOT_ID, ModuleApplication.diagnosticsBootId());
         out.putString(BridgeContract.EXTRA_ERROR, errorCode);
         return out;

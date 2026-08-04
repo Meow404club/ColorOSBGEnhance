@@ -49,6 +49,10 @@ public final class HookDiagnostics {
         boolean isUserUnlocked();
     }
 
+    interface ElapsedRealtimeNanosProbe {
+        long elapsedRealtimeNanos();
+    }
+
     private static final long PERIODIC_FLUSH_INTERVAL_MS = TimeUnit.MINUTES.toMillis(5L);
     private static final long FLUSH_PROBE_INTERVAL_MS = TimeUnit.SECONDS.toMillis(5L);
     private static final long INITIAL_TRANSPORT_RETRY_INTERVAL_MS =
@@ -103,6 +107,8 @@ public final class HookDiagnostics {
     private static volatile boolean sDrainContinuationPending;
     private static volatile long sLastTransportLogAt;
     private static volatile UserUnlockProbe sUserUnlockProbe = HookConfig::isUserUnlocked;
+    private static volatile ElapsedRealtimeNanosProbe sElapsedRealtimeNanosProbe =
+            SystemClock::elapsedRealtimeNanos;
 
     static {
         EXECUTOR.setRemoveOnCancelPolicy(true);
@@ -225,7 +231,10 @@ public final class HookDiagnostics {
                     .identityResolved(identityResolved)
                     .errorCode(errorCode)
                     .build();
-            if (!OUTBOX.get().offerRawHit(rawHit)) markQueueUnavailable("raw");
+            OutboxState outbox = OUTBOX.get();
+            OfferResult offered = outbox.offerRawHit(
+                    rawHit, elapsedRealtimeNanos());
+            if (offered == OfferResult.UNAVAILABLE) markQueueUnavailable("raw");
         } catch (Throwable ignored) {
             markRecordFailure();
         }
@@ -250,6 +259,7 @@ public final class HookDiagnostics {
                     || stableId(event.feature, "").isEmpty()) return;
             String stableResult = stableId(result, DiagnosticsResult.PASSED);
             long timestamp = System.currentTimeMillis();
+            long recordedAtElapsedNanos = elapsedRealtimeNanos();
             String processId = safeCurrentProcessId();
             RevisionPair revisions = currentRevisions(trace);
             String hookTarget = safeHookTargetFor(event, trace);
@@ -269,14 +279,17 @@ public final class HookDiagnostics {
                     .errorCode(failOpen)
                     .build();
             OutboxState outbox = OUTBOX.get();
-            if (!outbox.offerRawHit(rawHit)) markQueueUnavailable("raw");
+            OfferResult rawOffered = outbox.offerRawHit(
+                    rawHit, recordedAtElapsedNanos);
+            if (rawOffered == OfferResult.UNAVAILABLE) markQueueUnavailable("raw");
             try {
                 DiagnosticsEventNormalizer.DecisionData decision =
                         normalizedDecision(event, stableResult, trace, failOpen);
                 DiagnosticsEventNormalizer.Result normalized =
                         DiagnosticsEventNormalizer.normalize(rawHit, decision);
                 if (normalized.accepted()) {
-                    OfferResult offered = outbox.offerNormalizedEvent(normalized.event);
+                    OfferResult offered = outbox.offerNormalizedEvent(
+                            normalized.event, recordedAtElapsedNanos);
                     if (offered == OfferResult.UNAVAILABLE) markQueueUnavailable("event");
                 }
             } catch (Throwable ignored) {
@@ -475,15 +488,18 @@ public final class HookDiagnostics {
                         sEpoch,
                         sNextBatchSequence)
                 .countingMode(DiagnosticsWriteBatch.CountingMode.TYPED);
-        for (RawHookHit rawHit : snapshot.rawHits) batch.addRawHit(rawHit);
-        for (NormalizedDiagnosticsEvent event : snapshot.events) batch.addEvent(event);
+        for (OutboxItem<RawHookHit> rawHit : snapshot.rawHits) {
+            batch.addRawHit(rawHit.value);
+        }
+        for (OutboxItem<NormalizedDiagnosticsEvent> event : snapshot.events) {
+            batch.addEvent(event.value);
+        }
         for (DiagnosticsHookState state : states) batch.addHookState(state);
         DiagnosticsWriteBatch payload = batch.build();
         return new InFlightBatch(
                 DiagnosticsWireEncoder.encodeTyped(payload),
                 outbox,
-                snapshot.rawHits.size(),
-                snapshot.events.size(),
+                snapshot,
                 includeSticky ? stickyGeneration : -1L,
                 payload.size(),
                 sEpoch,
@@ -509,7 +525,14 @@ public final class HookDiagnostics {
             return;
         }
         if (remoteEpoch != inFlight.epoch) {
-            resetForEpoch(remoteEpoch);
+            long cutoffElapsedNanos = response.getLong(
+                    BridgeContract.EXTRA_DIAGNOSTICS_EPOCH_CUTOFF_ELAPSED_NANOS,
+                    -1L);
+            if (cutoffElapsedNanos < 0L) {
+                sTransportError = "bridge_epoch_cutoff_missing";
+                return;
+            }
+            advanceToEpoch(remoteEpoch, cutoffElapsedNanos);
             return;
         }
         boolean accepted = response.getBoolean(BridgeContract.EXTRA_OK, false)
@@ -522,7 +545,7 @@ public final class HookDiagnostics {
                     "bridge_rejected");
             return;
         }
-        inFlight.outbox.commit(inFlight.rawHitCount, inFlight.normalizedEventCount);
+        inFlight.outbox.commit(inFlight.snapshot);
         if (inFlight.stickyGeneration >= 0L) {
             REPORTED_STICKY_GENERATION.accumulateAndGet(
                     inFlight.stickyGeneration, Math::max);
@@ -551,7 +574,24 @@ public final class HookDiagnostics {
             return false;
         }
         if (sEpoch >= 0L && sEpoch != remoteEpoch) {
-            resetForEpoch(remoteEpoch);
+            long cutoffElapsedNanos = response.getLong(
+                    BridgeContract.EXTRA_DIAGNOSTICS_EPOCH_CUTOFF_ELAPSED_NANOS,
+                    -1L);
+            if (cutoffElapsedNanos < 0L) {
+                sTransportError = "bridge_epoch_cutoff_missing";
+                return false;
+            }
+            advanceToEpoch(remoteEpoch, cutoffElapsedNanos);
+        } else if (sEpoch < 0L) {
+            long cutoffElapsedNanos = response.getLong(
+                    BridgeContract.EXTRA_DIAGNOSTICS_EPOCH_CUTOFF_ELAPSED_NANOS,
+                    -1L);
+            if (cutoffElapsedNanos < 0L) {
+                sTransportError = "bridge_epoch_cutoff_missing";
+                return false;
+            }
+            OUTBOX.get().discardAtOrBefore(cutoffElapsedNanos);
+            sEpoch = remoteEpoch;
         } else {
             sEpoch = remoteEpoch;
         }
@@ -560,6 +600,15 @@ public final class HookDiagnostics {
 
     private static void resetForEpoch(long epoch) {
         OUTBOX.set(new OutboxState());
+        resetEpochState(epoch);
+    }
+
+    private static void advanceToEpoch(long epoch, long cutoffElapsedNanos) {
+        OUTBOX.get().discardAtOrBefore(cutoffElapsedNanos);
+        resetEpochState(epoch);
+    }
+
+    private static void resetEpochState(long epoch) {
         sInFlight = null;
         sEpoch = Math.max(0L, epoch);
         sNextBatchSequence = 0L;
@@ -917,6 +966,15 @@ public final class HookDiagnostics {
         return error.getClass().getSimpleName() + (message == null ? "" : ":" + message);
     }
 
+    private static long elapsedRealtimeNanos() {
+        try {
+            return Math.max(0L, sElapsedRealtimeNanosProbe.elapsedRealtimeNanos());
+        } catch (Throwable ignored) {
+            return TimeUnit.MILLISECONDS.toNanos(
+                    Math.max(0L, SystemClock.elapsedRealtime()));
+        }
+    }
+
     private static void logTransportFailure(String operation, Throwable error) {
         long now = SystemClock.elapsedRealtime();
         if (now - sLastTransportLogAt < 60_000L) return;
@@ -925,28 +983,25 @@ public final class HookDiagnostics {
     }
 
     private static final class OutboxState {
-        private final ConcurrentLinkedQueue<RawHookHit> rawHits =
+        private final ConcurrentLinkedQueue<OutboxItem<RawHookHit>> rawHits =
                 new ConcurrentLinkedQueue<>();
-        private final ConcurrentLinkedQueue<NormalizedDiagnosticsEvent> events =
+        private final ConcurrentLinkedQueue<OutboxItem<NormalizedDiagnosticsEvent>> events =
                 new ConcurrentLinkedQueue<>();
         private final AtomicInteger rawHitCount = new AtomicInteger();
         private final AtomicInteger eventCount = new AtomicInteger();
+        private final AtomicLong minimumRecordedAtElapsedNanos = new AtomicLong(-1L);
 
-        private boolean offerRawHit(RawHookHit rawHit) {
+        private OfferResult offerRawHit(RawHookHit rawHit, long recordedAtElapsedNanos) {
             if (rawHit == null || !rawHit.isStorable()
                     || !reserve(rawHitCount, MAX_PENDING_RAW_HITS)) {
-                return false;
+                return OfferResult.UNAVAILABLE;
             }
-            try {
-                if (rawHits.offer(rawHit)) return true;
-            } catch (Throwable ignored) {
-                // Diagnostics admission is fail-open and never changes Hook behavior.
-            }
-            rawHitCount.decrementAndGet();
-            return false;
+            return offerItem(rawHits, rawHitCount,
+                    new OutboxItem<>(recordedAtElapsedNanos, rawHit));
         }
 
-        private OfferResult offerNormalizedEvent(NormalizedDiagnosticsEvent event) {
+        private OfferResult offerNormalizedEvent(
+                NormalizedDiagnosticsEvent event, long recordedAtElapsedNanos) {
             if (event == null || !event.isStorable()
                     || !reserve(eventCount, MAX_PENDING_NORMALIZED_EVENTS)) {
                 return OfferResult.UNAVAILABLE;
@@ -956,7 +1011,8 @@ public final class HookDiagnostics {
                         .eventToken(SENDER_INSTANCE_ID + ":"
                                 + EVENT_SEQUENCE.getAndIncrement())
                         .build();
-                if (events.offer(accepted)) return OfferResult.ACCEPTED;
+                return offerItem(events, eventCount,
+                        new OutboxItem<>(recordedAtElapsedNanos, accepted));
             } catch (Throwable ignored) {
                 // Diagnostics admission is fail-open and never changes Hook behavior.
             }
@@ -984,9 +1040,16 @@ public final class HookDiagnostics {
                     snapshotQueue(events, eventLimit));
         }
 
-        private void commit(int rawCount, int normalizedCount) {
-            commitQueue(rawHits, rawHitCount, rawCount);
-            commitQueue(events, eventCount, normalizedCount);
+        private void commit(Snapshot snapshot) {
+            commitQueue(rawHits, rawHitCount, snapshot.rawHits);
+            commitQueue(events, eventCount, snapshot.events);
+        }
+
+        private void discardAtOrBefore(long cutoffElapsedNanos) {
+            minimumRecordedAtElapsedNanos.accumulateAndGet(
+                    cutoffElapsedNanos, Math::max);
+            discardQueue(rawHits, rawHitCount, cutoffElapsedNanos);
+            discardQueue(events, eventCount, cutoffElapsedNanos);
         }
 
         private static boolean reserve(AtomicInteger count, int capacity) {
@@ -998,10 +1061,31 @@ public final class HookDiagnostics {
             return false;
         }
 
-        private static <T> List<T> snapshotQueue(ConcurrentLinkedQueue<T> queue, int limit) {
+        private <T> OfferResult offerItem(
+                ConcurrentLinkedQueue<OutboxItem<T>> queue,
+                AtomicInteger count,
+                OutboxItem<T> item) {
+            try {
+                if (!queue.offer(item)) {
+                    count.decrementAndGet();
+                    return OfferResult.UNAVAILABLE;
+                }
+            } catch (Throwable ignored) {
+                count.decrementAndGet();
+                return OfferResult.UNAVAILABLE;
+            }
+            if (item.recordedAtElapsedNanos > minimumRecordedAtElapsedNanos.get()) {
+                return OfferResult.ACCEPTED;
+            }
+            if (queue.remove(item)) count.decrementAndGet();
+            return OfferResult.STALE_CUTOFF;
+        }
+
+        private static <T> List<OutboxItem<T>> snapshotQueue(
+                ConcurrentLinkedQueue<OutboxItem<T>> queue, int limit) {
             if (limit <= 0) return Collections.emptyList();
-            ArrayList<T> values = new ArrayList<>(limit);
-            for (T value : queue) {
+            ArrayList<OutboxItem<T>> values = new ArrayList<>(limit);
+            for (OutboxItem<T> value : queue) {
                 if (values.size() >= limit) break;
                 values.add(value);
             }
@@ -1009,15 +1093,44 @@ public final class HookDiagnostics {
         }
 
         private static <T> void commitQueue(
-                ConcurrentLinkedQueue<T> queue, AtomicInteger count, int limit) {
+                ConcurrentLinkedQueue<OutboxItem<T>> queue,
+                AtomicInteger count,
+                List<OutboxItem<T>> items) {
             int removed = 0;
-            while (removed < limit && queue.poll() != null) removed++;
+            for (OutboxItem<T> item : items) {
+                if (queue.remove(item)) removed++;
+            }
             if (removed > 0) count.addAndGet(-removed);
+        }
+
+        private static <T> void discardQueue(
+                ConcurrentLinkedQueue<OutboxItem<T>> queue,
+                AtomicInteger count,
+                long cutoffElapsedNanos) {
+            int removed = 0;
+            for (OutboxItem<T> item : queue) {
+                if (item.recordedAtElapsedNanos <= cutoffElapsedNanos
+                        && queue.remove(item)) {
+                    removed++;
+                }
+            }
+            if (removed > 0) count.addAndGet(-removed);
+        }
+    }
+
+    private static final class OutboxItem<T> {
+        final long recordedAtElapsedNanos;
+        final T value;
+
+        OutboxItem(long recordedAtElapsedNanos, T value) {
+            this.recordedAtElapsedNanos = Math.max(0L, recordedAtElapsedNanos);
+            this.value = value;
         }
     }
 
     private enum OfferResult {
         ACCEPTED,
+        STALE_CUTOFF,
         UNAVAILABLE
     }
 
@@ -1033,10 +1146,12 @@ public final class HookDiagnostics {
     }
 
     private static final class Snapshot {
-        final List<RawHookHit> rawHits;
-        final List<NormalizedDiagnosticsEvent> events;
+        final List<OutboxItem<RawHookHit>> rawHits;
+        final List<OutboxItem<NormalizedDiagnosticsEvent>> events;
 
-        Snapshot(List<RawHookHit> rawHits, List<NormalizedDiagnosticsEvent> events) {
+        Snapshot(
+                List<OutboxItem<RawHookHit>> rawHits,
+                List<OutboxItem<NormalizedDiagnosticsEvent>> events) {
             this.rawHits = rawHits;
             this.events = events;
         }
@@ -1069,19 +1184,20 @@ public final class HookDiagnostics {
         final int itemCount;
         final long epoch;
         final long sequence;
+        final Snapshot snapshot;
 
         InFlightBatch(
-                Bundle payload, OutboxState outbox,
-                int rawHitCount, int normalizedEventCount,
+                Bundle payload, OutboxState outbox, Snapshot snapshot,
                 long stickyGeneration, int itemCount, long epoch, long sequence) {
             this.payload = payload;
             this.outbox = outbox;
-            this.rawHitCount = rawHitCount;
-            this.normalizedEventCount = normalizedEventCount;
+            this.rawHitCount = snapshot.rawHits.size();
+            this.normalizedEventCount = snapshot.events.size();
             this.stickyGeneration = stickyGeneration;
             this.itemCount = itemCount;
             this.epoch = epoch;
             this.sequence = sequence;
+            this.snapshot = snapshot;
         }
     }
 

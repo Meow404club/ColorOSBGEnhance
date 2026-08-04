@@ -390,6 +390,7 @@ public final class ResidencyDiagnosticsBackendTest {
         ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 4, 60_000L));
         assertEquals(7L, backend.currentEpochAsync().get(5, TimeUnit.SECONDS).longValue());
         assertEquals(7L, backend.admissionEpoch());
+        assertEquals(0L, backend.admissionEpochCutoffElapsedNanos());
 
         storage.blockQueries();
         CompletableFuture<DiagnosticsQuery.EventPage> blocker =
@@ -409,7 +410,13 @@ public final class ResidencyDiagnosticsBackendTest {
         DiagnosticsQuery.ClearResult clear = clearing.get(5, TimeUnit.SECONDS);
         assertTrue(clear.success);
         assertEquals(8L, clear.epoch);
+        assertEquals(1L, clear.epochCutoffElapsedNanos);
+        assertTrue(clear.epochCutoffElapsedNanos >= 0L);
+        assertEquals(clear.epochCutoffElapsedNanos,
+                storage.currentEpochCutoffElapsedNanos());
         assertEquals(8L, backend.admissionEpoch());
+        assertEquals(clear.epochCutoffElapsedNanos,
+                backend.admissionEpochCutoffElapsedNanos());
 
         ResidencyDiagnosticsBackend.EnqueueResult current = backend.enqueue(
                 versionedEventBatch(8L, 0L, "current"));
@@ -451,8 +458,10 @@ public final class ResidencyDiagnosticsBackendTest {
     public void failedClearRestoresLastPersistedWireEpoch() throws Exception {
         FakeStorage storage = new FakeStorage();
         storage.epoch = 9L;
+        storage.epochCutoffElapsedNanos = 42L;
         ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 4, 60_000L));
         assertEquals(9L, backend.currentEpochAsync().get(5, TimeUnit.SECONDS).longValue());
+        assertEquals(42L, backend.admissionEpochCutoffElapsedNanos());
         storage.failClears = true;
 
         DiagnosticsQuery.ClearResult failed = backend.clearAsync(
@@ -460,6 +469,7 @@ public final class ResidencyDiagnosticsBackendTest {
 
         assertFalse(failed.success);
         assertEquals(9L, backend.admissionEpoch());
+        assertEquals(42L, backend.admissionEpochCutoffElapsedNanos());
         assertEquals(1, backend.enqueue(versionedEventBatch(9L, 0L, "retained")).accepted);
         backend.flushAsync().get(5, TimeUnit.SECONDS);
         assertEquals(1, storage.events.size());
@@ -1273,6 +1283,7 @@ public final class ResidencyDiagnosticsBackendTest {
         volatile boolean clearCommitsThenFails;
         volatile boolean failEpochReadsAfterClear;
         volatile long epoch;
+        volatile long epochCutoffElapsedNanos;
         volatile boolean alwaysFull;
         volatile boolean closed;
         volatile int fullWriteFailures;
@@ -1483,19 +1494,28 @@ public final class ResidencyDiagnosticsBackendTest {
             }
             if (clearCommitsThenFails) {
                 epoch++;
+                epochCutoffElapsedNanos++;
                 if (failEpochReadsAfterClear) failEpochReads = true;
                 throw new IllegalStateException("clear result unavailable");
             }
             int deleted = events.size();
             events.clear();
             epoch++;
-            return new DiagnosticsQuery.ClearResult(true, deleted, epoch, "");
+            epochCutoffElapsedNanos++;
+            return new DiagnosticsQuery.ClearResult(
+                    true, deleted, epoch, epochCutoffElapsedNanos, "");
         }
 
         @Override
         public long currentEpoch() {
             if (failEpochReads) throw new IllegalStateException("epoch read failed");
             return epoch;
+        }
+
+        @Override
+        public long currentEpochCutoffElapsedNanos() {
+            if (failEpochReads) throw new IllegalStateException("epoch read failed");
+            return epochCutoffElapsedNanos;
         }
 
         synchronized List<String> operationSnapshot() {
