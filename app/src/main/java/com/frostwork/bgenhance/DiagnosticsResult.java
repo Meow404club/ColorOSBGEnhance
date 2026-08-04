@@ -16,14 +16,31 @@ public final class DiagnosticsResult {
     public static final String RECOVERED = "recovered";
     public static final String NO_ACTION_NEEDED = "no_action_needed";
     public static final String SAFETY_ABORTED = "safety_aborted";
+    public static final String APPLIED = "applied";
 
     public static boolean countsAsBlocked(String result) {
-        return BLOCKED.equals(result) || THROTTLE_BLOCKED.equals(result);
+        return BLOCKED.equals(result)
+                || CANDIDATE_FILTERED.equals(result)
+                || THROTTLE_BLOCKED.equals(result);
     }
 
     public static boolean countsAsFailOpen(String result) {
         return CONFIG_UNAVAILABLE.equals(result)
                 || FAIL_OPEN.equals(result)
                 || RUNTIME_FAIL_OPEN.equals(result);
+    }
+
+    public static boolean isKnown(String result) {
+        return PASSED.equals(result)
+                || BLOCKED.equals(result)
+                || OBSERVED.equals(result)
+                || CANDIDATE_FILTERED.equals(result)
+                || countsAsFailOpen(result)
+                || THROTTLE_ALLOWED.equals(result)
+                || THROTTLE_BLOCKED.equals(result)
+                || RECOVERED.equals(result)
+                || NO_ACTION_NEEDED.equals(result)
+                || SAFETY_ABORTED.equals(result)
+                || APPLIED.equals(result);
     }
 }

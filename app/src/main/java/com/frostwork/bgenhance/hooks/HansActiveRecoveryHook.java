@@ -339,9 +339,9 @@ public final class HansActiveRecoveryHook implements FeatureHook {
         }
 
         static String packageLabel(java.util.Set<String> packages) {
-            return packages == null
-                    ? ""
-                    : String.join(",", new java.util.TreeSet<>(packages));
+            if (packages == null || packages.size() != 1) return "";
+            String packageName = packages.iterator().next();
+            return packageName == null ? "" : packageName;
         }
 
         static String resultFor(HansActiveRecoveryCoordinator.TerminalOutcome outcome) {

@@ -74,11 +74,10 @@ public final class OsenseProcessKillHookTest {
                         unavailable.call(), unavailableDecision()));
         assertEquals(1, unavailable.proceedCount);
 
-        ChainRecorder featureDisabled = new ChainRecorder();
-        assertSame(featureDisabled.result,
-                OsenseProcessKillHook.complete(
-                        featureDisabled.call(), featureDisabledDecision()));
-        assertEquals(1, featureDisabled.proceedCount);
+        ChainRecorder globalFeatureDisabled = new ChainRecorder();
+        assertNull(OsenseProcessKillHook.complete(
+                globalFeatureDisabled.call(), globalFeatureDisabledDecision()));
+        assertEquals(0, globalFeatureDisabled.proceedCount);
     }
 
     private static Method method(Class<?> owner) throws Exception {
@@ -106,7 +105,7 @@ public final class OsenseProcessKillHookTest {
                         KillContext.Path.OSENSE_PER_PROCESS));
     }
 
-    private static KillDecision featureDisabledDecision() {
+    private static KillDecision globalFeatureDisabledDecision() {
         AppResidencyPolicy policy = ResidencyPresets.create(
                 PACKAGE_NAME, ResidencyMode.BALANCED);
         RuntimeConfigSnapshot snapshot = RuntimeConfigSnapshot.available(

@@ -48,20 +48,33 @@ public final class ResidencyDecisionEngine {
     public KillDecision decideKill(
             KillContext context, String featureKey, boolean defaultEnabled) {
         Objects.requireNonNull(context, "context");
-        Evaluation evaluation = evaluate(context, featureKey, defaultEnabled);
+        boolean globalProtection = featureKey != null
+                && !featureKey.isEmpty()
+                && snapshot.featureEnabled(featureKey, defaultEnabled);
+        Evaluation evaluation = evaluate(context);
         if (!evaluation.active()) {
+            if (globalProtection && globalProtectionCanApply(evaluation.trace().reason())) {
+                return finishKill(
+                        context,
+                        evaluation,
+                        KillDecision.Action.BLOCK_ACTION,
+                        DecisionReason.GLOBAL_FEATURE_PROTECTS_KILL);
+            }
             return new KillDecision(
                     KillDecision.Action.ALLOW_SYSTEM,
                     KillDecision.Action.ALLOW_SYSTEM,
                     evaluation.trace());
         }
 
-        boolean protectedPath = protects(evaluation.policy().killPolicy(), context.path());
+        boolean protectedPath = globalProtection
+                || protects(evaluation.policy().killPolicy(), context.path());
         KillDecision.Action policyAction = protectedPath
                 ? KillDecision.Action.BLOCK_ACTION
                 : KillDecision.Action.ALLOW_SYSTEM;
         DecisionReason reason = protectedPath
-                ? DecisionReason.POLICY_PROTECTS_KILL
+                ? (globalProtection
+                        ? DecisionReason.GLOBAL_FEATURE_PROTECTS_KILL
+                        : DecisionReason.POLICY_PROTECTS_KILL)
                 : DecisionReason.POLICY_ALLOWS_KILL;
         return finishKill(context, evaluation, policyAction, reason);
     }
@@ -600,6 +613,13 @@ public final class ResidencyDecisionEngine {
             case OSENSE_PER_PROCESS: return policy.protectOsensePerProcess();
             default: throw new AssertionError(path);
         }
+    }
+
+    private static boolean globalProtectionCanApply(DecisionReason reason) {
+        return reason == DecisionReason.RESIDENCY_DISABLED
+                || reason == DecisionReason.UNMANAGED_APPLICATION
+                || reason == DecisionReason.RULE_DISABLED
+                || reason == DecisionReason.SYSTEM_MODE;
     }
 
     private static long cooldownFor(AppResidencyPolicy policy, WakeSource source) {

@@ -13,7 +13,8 @@ public final class DiagnosticsResultTest {
         assertFalse(DiagnosticsResult.countsAsBlocked(DiagnosticsResult.PASSED));
         assertFalse(DiagnosticsResult.countsAsBlocked(DiagnosticsResult.THROTTLE_ALLOWED));
         assertFalse(DiagnosticsResult.countsAsBlocked(DiagnosticsResult.RECOVERED));
-        assertFalse(DiagnosticsResult.countsAsBlocked(
+        assertFalse(DiagnosticsResult.countsAsBlocked(DiagnosticsResult.APPLIED));
+        assertTrue(DiagnosticsResult.countsAsBlocked(
                 DiagnosticsResult.CANDIDATE_FILTERED));
     }
 
@@ -26,7 +27,13 @@ public final class DiagnosticsResultTest {
         assertFalse(DiagnosticsResult.countsAsFailOpen(DiagnosticsResult.THROTTLE_BLOCKED));
         assertFalse(DiagnosticsResult.countsAsFailOpen(DiagnosticsResult.NO_ACTION_NEEDED));
         assertFalse(DiagnosticsResult.countsAsFailOpen(DiagnosticsResult.SAFETY_ABORTED));
+        assertFalse(DiagnosticsResult.countsAsFailOpen(DiagnosticsResult.APPLIED));
         assertFalse(DiagnosticsResult.countsAsFailOpen(
                 DiagnosticsResult.CANDIDATE_FILTERED));
+    }
+
+    @Test
+    public void appliedIsAStableKnownResult() {
+        assertTrue(DiagnosticsResult.isKnown(DiagnosticsResult.APPLIED));
     }
 }

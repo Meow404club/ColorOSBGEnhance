@@ -194,6 +194,28 @@ public final class HansTimingHookTest {
     }
 
     @Test
+    public void onlyProductionTimingEventsReplaceTheRawOnlyDiagnostic() {
+        ResidencyTarget target = new ResidencyTarget(
+                PACKAGE, UID, ResidencyTarget.UNKNOWN_PID);
+        FreezeTimingDecision decision = decision(
+                FreezeTimingContext.Transition.R_TO_M,
+                false,
+                true,
+                false,
+                5_000L,
+                7_000L);
+
+        assertTrue(HansTimingHook.producesStandardEvent(
+                FreezeTimingContext.Transition.R_TO_M, target, decision));
+        assertFalse(HansTimingHook.producesStandardEvent(
+                FreezeTimingContext.Transition.M_TO_F, target, decision));
+        assertFalse(HansTimingHook.producesStandardEvent(
+                FreezeTimingContext.Transition.R_TO_M, null, decision));
+        assertFalse(HansTimingHook.producesStandardEvent(
+                FreezeTimingContext.Transition.R_TO_M, target, null));
+    }
+
+    @Test
     public void delayBoundsAreInclusiveAndInvalidTargetsAreRejected() {
         assertTrue(HansTimingHook.isValidDelay(HansTimingHook.MIN_DELAY_MS));
         assertTrue(HansTimingHook.isValidDelay(HansTimingHook.MAX_DELAY_MS));

@@ -176,6 +176,27 @@ public final class HansExemptionHookTest {
     }
 
     @Test
+    public void onlyProductionExemptionEventsReplaceTheRawOnlyDiagnostic() {
+        ResidencyTarget target = new ResidencyTarget(
+                PACKAGE, UID, ResidencyTarget.UNKNOWN_PID);
+        FreezeExemptionDecision decision = decision(
+                FreezeExemptionContext.Kind.LCD_ON,
+                false,
+                false,
+                false,
+                true);
+
+        assertTrue(HansExemptionHook.producesStandardEvent(
+                FreezeExemptionContext.Kind.LCD_ON, target, decision));
+        assertFalse(HansExemptionHook.producesStandardEvent(
+                FreezeExemptionContext.Kind.CORE, target, decision));
+        assertFalse(HansExemptionHook.producesStandardEvent(
+                FreezeExemptionContext.Kind.LCD_ON, null, decision));
+        assertFalse(HansExemptionHook.producesStandardEvent(
+                FreezeExemptionContext.Kind.LCD_ON, target, null));
+    }
+
+    @Test
     public void targetParsingRequiresExactUidAndPackageTypes() {
         ResidencyTarget expected = new ResidencyTarget(
                 PACKAGE, UID, ResidencyTarget.UNKNOWN_PID);

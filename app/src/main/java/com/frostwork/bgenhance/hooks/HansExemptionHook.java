@@ -1,10 +1,13 @@
 package com.frostwork.bgenhance.hooks;
 
 import com.frostwork.bgenhance.FeatureHook;
+import com.frostwork.bgenhance.FeatureIds;
 import com.frostwork.bgenhance.HookDiagnostics;
+import com.frostwork.bgenhance.HookEvent;
 import com.frostwork.bgenhance.HookResidencyRuntime;
 import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.HookUtils;
+import com.frostwork.bgenhance.ResidencyDecisionReporter;
 import com.frostwork.bgenhance.hooks.hans.HansRuntime;
 import com.frostwork.bgenhance.residency.decision.FreezeExemptionContext;
 import com.frostwork.bgenhance.residency.decision.FreezeExemptionDecision;
@@ -62,8 +65,19 @@ public final class HansExemptionHook implements FeatureHook {
 
     private Object intercept(XposedInterface.Chain chain) throws Throwable {
         ResidencyTarget target = target(chain);
-        recordRawHit(target);
-        return complete(chain::proceed, () -> decide(target));
+        FreezeExemptionDecision[] evaluated = { null };
+        Object result;
+        try {
+            result = complete(chain::proceed, () -> {
+                evaluated[0] = decide(target);
+                return evaluated[0];
+            });
+        } catch (Throwable error) {
+            recordRawHit(target);
+            throw error;
+        }
+        if (!recordDecision(target, evaluated[0])) recordRawHit(target);
+        return result;
     }
 
     private FreezeExemptionDecision decide(ResidencyTarget target) {
@@ -89,6 +103,33 @@ public final class HansExemptionHook implements FeatureHook {
         } catch (Throwable ignored) {
             // Diagnostics must not change a HANS exemption query.
         }
+    }
+
+    private boolean recordDecision(ResidencyTarget target, FreezeExemptionDecision decision) {
+        if (!producesStandardEvent(kind, target, decision)) return false;
+        try {
+            ResidencyDecisionReporter.recordFreezeExemptionFromLockedPath(
+                    new HookEvent(
+                            FeatureIds.HANS_FREEZE_EXEMPTION,
+                            0,
+                            target.uid(),
+                            target.packageName(),
+                            target.packageName(),
+                            "lcd_on_exemption"),
+                    decision);
+        } catch (Throwable ignored) {
+            // Diagnostics must not change a HANS exemption query.
+        }
+        return true;
+    }
+
+    static boolean producesStandardEvent(
+            FreezeExemptionContext.Kind kind,
+            ResidencyTarget target,
+            FreezeExemptionDecision decision) {
+        return kind == FreezeExemptionContext.Kind.LCD_ON
+                && target != null
+                && decision != null;
     }
 
     HansRuntime.Capability capability() {

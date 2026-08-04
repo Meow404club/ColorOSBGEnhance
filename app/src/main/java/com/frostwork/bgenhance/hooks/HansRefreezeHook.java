@@ -331,6 +331,13 @@ public final class HansRefreezeHook implements FeatureHook {
         } catch (Throwable ignored) {
             return original;
         }
+        if (timing != null) {
+            try {
+                diagnosticsRecorder.recordTimingDecision(timingEvent(target), timing);
+            } catch (Throwable ignored) {
+                // Diagnostics must not change a HANS timing query.
+            }
+        }
         return applyTimingDelay(original, timing);
     }
 
@@ -1041,6 +1048,16 @@ public final class HansRefreezeHook implements FeatureHook {
                 reason == null ? "" : reason);
     }
 
+    private static HookEvent timingEvent(ResidencyTarget target) {
+        return new HookEvent(
+                FeatureIds.HANS_FREEZE_TIMING,
+                0,
+                target == null ? ResidencyTarget.UNKNOWN_UID : target.uid(),
+                target == null ? "" : target.packageName(),
+                target == null ? "" : target.packageName(),
+                "m_to_f_timing");
+    }
+
     static int sourceCode(WakeSource source) {
         if (source == null) return UNKNOWN_SOURCE_CODE;
         switch (source) {
@@ -1123,6 +1140,7 @@ public final class HansRefreezeHook implements FeatureHook {
 
     interface RefreezeDiagnosticsRecorder {
         void recordDecision(HookEvent event, RefreezeDecision decision);
+        void recordTimingDecision(HookEvent event, FreezeTimingDecision decision);
         void recordFailOpen(HookEvent event);
     }
 
@@ -1253,6 +1271,12 @@ public final class HansRefreezeHook implements FeatureHook {
         @Override
         public void recordDecision(HookEvent event, RefreezeDecision decision) {
             ResidencyDecisionReporter.recordRefreezeFromLockedPath(event, decision);
+        }
+
+        @Override
+        public void recordTimingDecision(
+                HookEvent event, FreezeTimingDecision decision) {
+            ResidencyDecisionReporter.recordFreezeTimingFromLockedPath(event, decision);
         }
 
         @Override

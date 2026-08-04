@@ -3,6 +3,8 @@ package com.frostwork.bgenhance;
 import com.frostwork.bgenhance.residency.decision.DecisionDisposition;
 import com.frostwork.bgenhance.residency.decision.DecisionTrace;
 import com.frostwork.bgenhance.residency.decision.FreezeDecision;
+import com.frostwork.bgenhance.residency.decision.FreezeExemptionDecision;
+import com.frostwork.bgenhance.residency.decision.FreezeTimingDecision;
 import com.frostwork.bgenhance.residency.decision.KillDecision;
 import com.frostwork.bgenhance.residency.decision.ResourceDecision;
 import com.frostwork.bgenhance.residency.decision.RefreezeDecision;
@@ -79,6 +81,30 @@ public final class ResidencyDecisionReporter {
         }
     }
 
+    /** Records a custom freeze timing query without scheduling work from a HANS callback. */
+    public static void recordFreezeTimingFromLockedPath(
+            HookEvent event, FreezeTimingDecision decision) {
+        if (event == null || decision == null) return;
+        try {
+            HookDiagnostics.recordDecisionFromLockedPath(
+                    event, resultFor(decision), decision.trace());
+        } catch (Throwable ignored) {
+            // Diagnostics must never delay or change a HANS timing callback.
+        }
+    }
+
+    /** Records a freeze exemption query without scheduling work from a HANS callback. */
+    public static void recordFreezeExemptionFromLockedPath(
+            HookEvent event, FreezeExemptionDecision decision) {
+        if (event == null || decision == null) return;
+        try {
+            HookDiagnostics.recordDecisionFromLockedPath(
+                    event, resultFor(decision), decision.trace());
+        } catch (Throwable ignored) {
+            // Diagnostics must never delay or change a HANS exemption callback.
+        }
+    }
+
     private static void recordKill(
             HookEvent event, KillDecision decision, boolean writeLog) {
         if (event == null || decision == null) return;
@@ -110,6 +136,7 @@ public final class ResidencyDecisionReporter {
 
     static String resultFor(KillDecision decision) {
         DecisionDisposition disposition = decision.trace().disposition();
+        if (isUserDisabled(decision.trace())) return DiagnosticsResult.PASSED;
         if (disposition == DecisionDisposition.FAIL_OPEN) return DiagnosticsResult.FAIL_OPEN;
         if (disposition == DecisionDisposition.DRY_RUN) return DiagnosticsResult.OBSERVED;
         return decision.blocksAction()
@@ -118,6 +145,7 @@ public final class ResidencyDecisionReporter {
 
     static String resultFor(FreezeDecision decision) {
         DecisionDisposition disposition = decision.trace().disposition();
+        if (isUserDisabled(decision.trace())) return DiagnosticsResult.PASSED;
         if (disposition == DecisionDisposition.FAIL_OPEN) return DiagnosticsResult.FAIL_OPEN;
         if (disposition == DecisionDisposition.DRY_RUN) return DiagnosticsResult.OBSERVED;
         return decision.blocksFreeze()
@@ -127,6 +155,7 @@ public final class ResidencyDecisionReporter {
     static String resultFor(
             WakeDecision decision, WakeRuntimeOutcome runtimeOutcome) {
         DecisionDisposition disposition = decision.trace().disposition();
+        if (isUserDisabled(decision.trace())) return DiagnosticsResult.PASSED;
         if (disposition == DecisionDisposition.FAIL_OPEN) return DiagnosticsResult.FAIL_OPEN;
         if (disposition == DecisionDisposition.DRY_RUN) return DiagnosticsResult.OBSERVED;
         if (runtimeOutcome == WakeRuntimeOutcome.FAIL_OPEN) {
@@ -149,6 +178,7 @@ public final class ResidencyDecisionReporter {
 
     static String resultFor(ResourceDecision decision) {
         DecisionDisposition disposition = decision.trace().disposition();
+        if (isUserDisabled(decision.trace())) return DiagnosticsResult.PASSED;
         if (disposition == DecisionDisposition.FAIL_OPEN) return DiagnosticsResult.FAIL_OPEN;
         if (disposition == DecisionDisposition.DRY_RUN) return DiagnosticsResult.OBSERVED;
         return decision.keepsResource()
@@ -157,9 +187,35 @@ public final class ResidencyDecisionReporter {
 
     static String resultFor(RefreezeDecision decision) {
         DecisionDisposition disposition = decision.trace().disposition();
+        if (isUserDisabled(decision.trace())) return DiagnosticsResult.PASSED;
         if (disposition == DecisionDisposition.FAIL_OPEN) return DiagnosticsResult.FAIL_OPEN;
         if (disposition == DecisionDisposition.DRY_RUN) return DiagnosticsResult.OBSERVED;
         return decision.effectiveAction() == RefreezeDecision.Action.DISABLE_REFREEZE
                 ? DiagnosticsResult.BLOCKED : DiagnosticsResult.PASSED;
+    }
+
+    static String resultFor(FreezeTimingDecision decision) {
+        DecisionDisposition disposition = decision.trace().disposition();
+        if (isUserDisabled(decision.trace())) return DiagnosticsResult.PASSED;
+        if (disposition == DecisionDisposition.FAIL_OPEN) return DiagnosticsResult.FAIL_OPEN;
+        if (disposition == DecisionDisposition.DRY_RUN) return DiagnosticsResult.OBSERVED;
+        return decision.appliesCustomTiming()
+                ? DiagnosticsResult.APPLIED : DiagnosticsResult.PASSED;
+    }
+
+    static String resultFor(FreezeExemptionDecision decision) {
+        DecisionDisposition disposition = decision.trace().disposition();
+        if (isUserDisabled(decision.trace())) return DiagnosticsResult.PASSED;
+        if (disposition == DecisionDisposition.FAIL_OPEN) return DiagnosticsResult.FAIL_OPEN;
+        if (disposition == DecisionDisposition.DRY_RUN) return DiagnosticsResult.OBSERVED;
+        return decision.grantsExemption()
+                ? DiagnosticsResult.APPLIED : DiagnosticsResult.PASSED;
+    }
+
+    private static boolean isUserDisabled(DecisionTrace trace) {
+        return trace.reason()
+                == com.frostwork.bgenhance.residency.decision.DecisionReason.MASTER_DISABLED
+                || trace.reason()
+                == com.frostwork.bgenhance.residency.decision.DecisionReason.RESIDENCY_DISABLED;
     }
 }

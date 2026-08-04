@@ -334,9 +334,13 @@ public final class HansFreezeHookTest {
     public void unmanagedTargetsMayUseLegacyGlobalButManagedRulesTakePrecedence() {
         FreezeDecision unmanaged = decisionFor(
                 FreezePolicy.followSystem(), false, Map.of());
+        FreezeDecision disabled = decisionForRuleState(false, ResidencyMode.CUSTOM);
+        FreezeDecision system = decisionForRuleState(true, ResidencyMode.SYSTEM);
         FreezeDecision managed = decision(false, false, false, false);
 
         assertTrue(HansFreezeHook.shouldUseLegacyGlobal(unmanaged));
+        assertTrue(HansFreezeHook.shouldUseLegacyGlobal(disabled));
+        assertTrue(HansFreezeHook.shouldUseLegacyGlobal(system));
         assertFalse(HansFreezeHook.shouldUseLegacyGlobal(managed));
     }
 
@@ -576,6 +580,29 @@ public final class HansFreezeHookTest {
                 new ResidencyTarget(PACKAGE, UID, ResidencyTarget.UNKNOWN_PID),
                 source,
                 "hans_freeze",
+                HookTargetIds.HANS_FREEZE_DISPATCH));
+    }
+
+    private static FreezeDecision decisionForRuleState(
+            boolean enabled, ResidencyMode mode) {
+        AppResidencyPolicy base = ResidencyPresets.create(PACKAGE, ResidencyMode.CUSTOM);
+        AppResidencyPolicy policy = new AppResidencyPolicy(
+                PACKAGE,
+                enabled,
+                mode,
+                base.killPolicy(),
+                base.freezePolicy(),
+                base.wakePolicy(),
+                base.resourcePolicy(),
+                base.refreezePolicy());
+        RuntimeConfigSnapshot snapshot = RuntimeConfigSnapshot.available(
+                1L, true, true, false, 2L, Map.of(PACKAGE, policy));
+        ResidencyIdentityIndex index = ResidencyIdentityIndex.build(
+                snapshot, Map.of(PACKAGE, UID));
+        return new ResidencyDecisionEngine(snapshot, index).decideFreeze(new FreezeContext(
+                new ResidencyTarget(PACKAGE, UID, ResidencyTarget.UNKNOWN_PID),
+                FreezeSource.NORMAL,
+                FeatureIds.HANS,
                 HookTargetIds.HANS_FREEZE_DISPATCH));
     }
 

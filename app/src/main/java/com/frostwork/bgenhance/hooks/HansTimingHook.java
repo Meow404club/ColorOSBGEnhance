@@ -1,10 +1,13 @@
 package com.frostwork.bgenhance.hooks;
 
 import com.frostwork.bgenhance.FeatureHook;
+import com.frostwork.bgenhance.FeatureIds;
 import com.frostwork.bgenhance.HookDiagnostics;
+import com.frostwork.bgenhance.HookEvent;
 import com.frostwork.bgenhance.HookResidencyRuntime;
 import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.HookUtils;
+import com.frostwork.bgenhance.ResidencyDecisionReporter;
 import com.frostwork.bgenhance.hooks.hans.HansRuntime;
 import com.frostwork.bgenhance.residency.decision.FreezeTimingContext;
 import com.frostwork.bgenhance.residency.decision.FreezeTimingDecision;
@@ -63,8 +66,19 @@ public final class HansTimingHook implements FeatureHook {
 
     private Object intercept(XposedInterface.Chain chain) throws Throwable {
         ResidencyTarget target = target(chain);
-        recordRawHit(target);
-        return complete(chain::proceed, () -> decide(target));
+        FreezeTimingDecision[] evaluated = { null };
+        Object result;
+        try {
+            result = complete(chain::proceed, () -> {
+                evaluated[0] = decide(target);
+                return evaluated[0];
+            });
+        } catch (Throwable error) {
+            recordRawHit(target);
+            throw error;
+        }
+        if (!recordDecision(target, evaluated[0])) recordRawHit(target);
+        return result;
     }
 
     private FreezeTimingDecision decide(ResidencyTarget target) {
@@ -90,6 +104,33 @@ public final class HansTimingHook implements FeatureHook {
         } catch (Throwable ignored) {
             // Diagnostics must not change a HANS timing query.
         }
+    }
+
+    private boolean recordDecision(ResidencyTarget target, FreezeTimingDecision decision) {
+        if (!producesStandardEvent(transition, target, decision)) return false;
+        try {
+            ResidencyDecisionReporter.recordFreezeTimingFromLockedPath(
+                    new HookEvent(
+                            FeatureIds.HANS_FREEZE_TIMING,
+                            0,
+                            target.uid(),
+                            target.packageName(),
+                            target.packageName(),
+                            "r_to_m_timing"),
+                    decision);
+        } catch (Throwable ignored) {
+            // Diagnostics must not change a HANS timing query.
+        }
+        return true;
+    }
+
+    static boolean producesStandardEvent(
+            FreezeTimingContext.Transition transition,
+            ResidencyTarget target,
+            FreezeTimingDecision decision) {
+        return transition == FreezeTimingContext.Transition.R_TO_M
+                && target != null
+                && decision != null;
     }
 
     HansRuntime.Capability capability() {

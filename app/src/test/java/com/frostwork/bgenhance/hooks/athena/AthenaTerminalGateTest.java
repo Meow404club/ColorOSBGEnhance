@@ -418,7 +418,7 @@ public final class AthenaTerminalGateTest {
     }
 
     @Test
-    public void disabledLegacyFeaturePassesBeforeApplyingPerAppPolicy() throws Throwable {
+    public void disabledGlobalFeatureStillAppliesExplicitPerAppPolicy() throws Throwable {
         RuntimeConfigSnapshot snapshot = snapshot(
                 true,
                 false,
@@ -435,8 +435,8 @@ public final class AthenaTerminalGateTest {
                 process(PROTECTED, UID, PID),
                 new ClearRecord());
 
-        assertSame(ORIGINAL, gate.interceptPeriodicSingle(chain));
-        assertEquals(1, chain.proceedCalls());
+        assertNull(gate.interceptPeriodicSingle(chain));
+        assertEquals(0, chain.proceedCalls());
     }
 
     @Test

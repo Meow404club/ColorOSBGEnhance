@@ -47,8 +47,9 @@ public final class DiagnosticsBehaviorClassifier {
                 FeatureIds.OSENSE_PER_PROCESS);
         register(values, FREEZE,
                 FeatureIds.HANS,
-                FeatureIds.SUPER_FREEZE,
-                FeatureIds.ANDROID_FREEZE);
+                FeatureIds.HANS_FREEZE_TIMING,
+                FeatureIds.HANS_FREEZE_EXEMPTION,
+                FeatureIds.SUPER_FREEZE);
         register(values, WAKE, FeatureIds.HANS_WAKE);
         register(values, RESOURCE, FeatureIds.HANS_RESOURCE);
         register(values, REFREEZE, FeatureIds.HANS_REFREEZE);

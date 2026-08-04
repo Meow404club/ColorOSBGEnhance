@@ -14,7 +14,7 @@ import com.frostwork.bgenhance.ResidencyDecisionReporter;
 import com.frostwork.bgenhance.hooks.hans.HansObjectAdapter;
 import com.frostwork.bgenhance.hooks.hans.HansRuntime;
 import com.frostwork.bgenhance.hooks.hans.HansSourceClassifier;
-import com.frostwork.bgenhance.residency.decision.DecisionDisposition;
+import com.frostwork.bgenhance.residency.decision.DecisionReason;
 import com.frostwork.bgenhance.residency.decision.FreezeContext;
 import com.frostwork.bgenhance.residency.decision.FreezeDecision;
 import com.frostwork.bgenhance.residency.model.FreezeSource;
@@ -320,8 +320,11 @@ public final class HansFreezeHook implements FeatureHook {
 
     static boolean shouldUseLegacyGlobal(FreezeDecision decision) {
         if (decision == null) return false;
-        if (decision.trace().disposition() == DecisionDisposition.FAIL_OPEN) return false;
-        return !decision.trace().identity().hasManagedPolicy();
+        DecisionReason reason = decision.trace().reason();
+        return reason == DecisionReason.RESIDENCY_DISABLED
+                || reason == DecisionReason.UNMANAGED_APPLICATION
+                || reason == DecisionReason.RULE_DISABLED
+                || reason == DecisionReason.SYSTEM_MODE;
     }
 
     private static Object completeLegacy(

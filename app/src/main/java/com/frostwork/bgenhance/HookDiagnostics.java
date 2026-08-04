@@ -7,7 +7,6 @@ import android.os.Process;
 import android.os.SystemClock;
 import android.util.Log;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsBootId;
-import com.frostwork.bgenhance.diagnostics.DiagnosticsEventDeduplicator;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsEventNormalizer;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsBehaviorClassifier;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
@@ -737,7 +736,14 @@ public final class HookDiagnostics {
         if (HookTargetIds.HANS_WAKE_DISPATCH.equals(target)
                 || HookTargetIds.ALARM_WAKE_DELIVERY.equals(target)) return FeatureIds.HANS_WAKE;
         if (HookTargetIds.HANS_RESOURCE_DISPATCH.equals(target)) return FeatureIds.HANS_RESOURCE;
+        if (HookTargetIds.HANS_R_TO_M_TIMING.equals(target)) {
+            return FeatureIds.HANS_FREEZE_TIMING;
+        }
         if (HookTargetIds.HANS_M_TO_F_TIMING.equals(target)) return FeatureIds.HANS_REFREEZE;
+        if (HookTargetIds.HANS_CORE_EXEMPTION.equals(target)
+                || HookTargetIds.HANS_LCD_ON_EXEMPTION.equals(target)) {
+            return FeatureIds.HANS_FREEZE_EXEMPTION;
+        }
         if (HookTargetIds.HANS_ACTIVE_RECOVERY.equals(target)) return FeatureIds.HANS_RECOVERY;
         return "";
     }
@@ -769,13 +775,19 @@ public final class HookDiagnostics {
         if (FeatureIds.NIRVANA.equals(feature)
                 || FeatureIds.CAMERA_LOW_FREE.equals(feature)
                 || FeatureIds.GAME_LOW_FREE.equals(feature)) {
-            return HookTargetIds.OSENSE_GROUP_CLEAN;
+            return HookTargetIds.OSENSE_PROCESS_KILL;
         }
         if (FeatureIds.OSENSE_PER_PROCESS.equals(feature)) {
             return HookTargetIds.OSENSE_PROCESS_KILL;
         }
         if (FeatureIds.SUPER_FREEZE.equals(feature)) {
             return HookTargetIds.HANS_FREEZE_DISPATCH;
+        }
+        if (FeatureIds.HANS_FREEZE_TIMING.equals(feature)) {
+            return HookTargetIds.HANS_R_TO_M_TIMING;
+        }
+        if (FeatureIds.HANS_FREEZE_EXEMPTION.equals(feature)) {
+            return HookTargetIds.HANS_LCD_ON_EXEMPTION;
         }
         if (FeatureIds.HANS.equals(feature)) {
             return event.scene.contains("cgroup_v2")
@@ -799,6 +811,13 @@ public final class HookDiagnostics {
 
     static String sourceFor(HookEvent event) {
         if (FeatureIds.ATHENA_OTHER.equals(event.feature)) return "OTHER";
+        if (FeatureIds.SUPER_FREEZE.equals(event.feature)) {
+            return FreezeSource.SUPER.name();
+        }
+        if (FeatureIds.HANS_FREEZE_TIMING.equals(event.feature)) {
+            return "m_to_f_timing".equals(event.scene) ? "M_TO_F" : "R_TO_M";
+        }
+        if (FeatureIds.HANS_FREEZE_EXEMPTION.equals(event.feature)) return "LCD_ON";
         if (FeatureIds.HANS.equals(event.feature)) {
             FreezeSource[] values = FreezeSource.values();
             if (event.code >= 0 && event.code < values.length) return values[event.code].name();
@@ -806,6 +825,7 @@ public final class HookDiagnostics {
         if (FeatureIds.HANS_WAKE.equals(event.feature)) {
             WakeSource[] values = WakeSource.values();
             if (event.code >= 0 && event.code < values.length) return values[event.code].name();
+            return WakeSource.OTHER.name();
         }
         if (FeatureIds.HANS_RESOURCE.equals(event.feature)) {
             if (event.code == 100) return "NETWORK";
@@ -819,6 +839,7 @@ public final class HookDiagnostics {
             if (event.code >= 1 && event.code <= values.length) {
                 return values[event.code - 1].name();
             }
+            return WakeSource.OTHER.name();
         }
         return "";
     }
@@ -910,8 +931,6 @@ public final class HookDiagnostics {
                 new ConcurrentLinkedQueue<>();
         private final AtomicInteger rawHitCount = new AtomicInteger();
         private final AtomicInteger eventCount = new AtomicInteger();
-        private final DiagnosticsEventDeduplicator deduplicator =
-                new DiagnosticsEventDeduplicator();
 
         private boolean offerRawHit(RawHookHit rawHit) {
             if (rawHit == null || !rawHit.isStorable()
@@ -933,10 +952,6 @@ public final class HookDiagnostics {
                 return OfferResult.UNAVAILABLE;
             }
             try {
-                if (!deduplicator.shouldRecord(event)) {
-                    eventCount.decrementAndGet();
-                    return OfferResult.DUPLICATE;
-                }
                 NormalizedDiagnosticsEvent accepted = event.copyBuilder()
                         .eventToken(SENDER_INSTANCE_ID + ":"
                                 + EVENT_SEQUENCE.getAndIncrement())
@@ -1003,7 +1018,6 @@ public final class HookDiagnostics {
 
     private enum OfferResult {
         ACCEPTED,
-        DUPLICATE,
         UNAVAILABLE
     }
 

@@ -265,9 +265,11 @@ public final class HansActiveRecoveryHookTest {
     }
 
     @Test
-    public void diagnosticsAttributeSharedUidRecoveryToEveryPackage() {
-        assertEquals(
-                "com.example.first,com.example.second",
+    public void diagnosticsOnlyAttributeRecoveryWhenThePackageIsUnambiguous() {
+        assertEquals("com.example.first",
+                HansActiveRecoveryHook.DefaultDiagnosticsRecorder.packageLabel(
+                        Set.of("com.example.first")));
+        assertEquals("",
                 HansActiveRecoveryHook.DefaultDiagnosticsRecorder.packageLabel(
                         Set.of("com.example.first", "com.example.second")));
     }

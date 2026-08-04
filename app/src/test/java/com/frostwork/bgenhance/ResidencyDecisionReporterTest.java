@@ -6,6 +6,10 @@ import com.frostwork.bgenhance.residency.decision.KillContext;
 import com.frostwork.bgenhance.residency.decision.KillDecision;
 import com.frostwork.bgenhance.residency.decision.FreezeContext;
 import com.frostwork.bgenhance.residency.decision.FreezeDecision;
+import com.frostwork.bgenhance.residency.decision.FreezeExemptionContext;
+import com.frostwork.bgenhance.residency.decision.FreezeExemptionDecision;
+import com.frostwork.bgenhance.residency.decision.FreezeTimingContext;
+import com.frostwork.bgenhance.residency.decision.FreezeTimingDecision;
 import com.frostwork.bgenhance.residency.decision.ResidencyDecisionEngine;
 import com.frostwork.bgenhance.residency.decision.ResourceContext;
 import com.frostwork.bgenhance.residency.decision.ResourceDecision;
@@ -14,6 +18,7 @@ import com.frostwork.bgenhance.residency.decision.RefreezeDecision;
 import com.frostwork.bgenhance.residency.decision.WakeContext;
 import com.frostwork.bgenhance.residency.decision.WakeDecision;
 import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
+import com.frostwork.bgenhance.residency.model.FreezePolicy;
 import com.frostwork.bgenhance.residency.model.FreezeSource;
 import com.frostwork.bgenhance.residency.model.ResidencyMode;
 import com.frostwork.bgenhance.residency.model.ResidencyPresets;
@@ -50,6 +55,16 @@ public final class ResidencyDecisionReporterTest {
                 decision(enabled, index(enabled), "com.example.reporter.unmanaged")));
         assertEquals("fail_open", ResidencyDecisionReporter.resultFor(
                 decision(enabled, ResidencyIdentityIndex.invalidated(), PACKAGE)));
+    }
+
+    @Test
+    public void mapsUserDisabledControlsAsNormalPassThrough() {
+        RuntimeConfigSnapshot masterDisabled = snapshot(false, false);
+
+        assertEquals(DiagnosticsResult.PASSED, ResidencyDecisionReporter.resultFor(
+                decision(masterDisabled, index(masterDisabled), PACKAGE)));
+        assertEquals(DiagnosticsResult.PASSED, ResidencyDecisionReporter.resultFor(
+                freezeTimingDecision(masterDisabled, index(masterDisabled))));
     }
 
     @Test
@@ -134,6 +149,38 @@ public final class ResidencyDecisionReporterTest {
                 refreezeDecision(disabled, ResidencyIdentityIndex.invalidated())));
     }
 
+    @Test
+    public void mapsFreezeTimingAppliedDryRunSystemAndFailOpenResults() {
+        RuntimeConfigSnapshot applied = freezeControlSnapshot(false, true, false);
+        RuntimeConfigSnapshot dryRun = freezeControlSnapshot(true, true, false);
+        RuntimeConfigSnapshot system = freezeControlSnapshot(false, false, false);
+
+        assertEquals(DiagnosticsResult.APPLIED, ResidencyDecisionReporter.resultFor(
+                freezeTimingDecision(applied, index(applied))));
+        assertEquals(DiagnosticsResult.OBSERVED, ResidencyDecisionReporter.resultFor(
+                freezeTimingDecision(dryRun, index(dryRun))));
+        assertEquals(DiagnosticsResult.PASSED, ResidencyDecisionReporter.resultFor(
+                freezeTimingDecision(system, index(system))));
+        assertEquals(DiagnosticsResult.FAIL_OPEN, ResidencyDecisionReporter.resultFor(
+                freezeTimingDecision(applied, ResidencyIdentityIndex.invalidated())));
+    }
+
+    @Test
+    public void mapsFreezeExemptionAppliedDryRunSystemAndFailOpenResults() {
+        RuntimeConfigSnapshot applied = freezeControlSnapshot(false, false, true);
+        RuntimeConfigSnapshot dryRun = freezeControlSnapshot(true, false, true);
+        RuntimeConfigSnapshot system = freezeControlSnapshot(false, false, false);
+
+        assertEquals(DiagnosticsResult.APPLIED, ResidencyDecisionReporter.resultFor(
+                freezeExemptionDecision(applied, index(applied))));
+        assertEquals(DiagnosticsResult.OBSERVED, ResidencyDecisionReporter.resultFor(
+                freezeExemptionDecision(dryRun, index(dryRun))));
+        assertEquals(DiagnosticsResult.PASSED, ResidencyDecisionReporter.resultFor(
+                freezeExemptionDecision(system, index(system))));
+        assertEquals(DiagnosticsResult.FAIL_OPEN, ResidencyDecisionReporter.resultFor(
+                freezeExemptionDecision(applied, ResidencyIdentityIndex.invalidated())));
+    }
+
     private static KillDecision decision(
             RuntimeConfigSnapshot snapshot,
             ResidencyIdentityIndex index,
@@ -191,6 +238,26 @@ public final class ResidencyDecisionReporterTest {
                         HookTargetIds.HANS_M_TO_F_TIMING));
     }
 
+    private static FreezeTimingDecision freezeTimingDecision(
+            RuntimeConfigSnapshot snapshot, ResidencyIdentityIndex index) {
+        return new ResidencyDecisionEngine(snapshot, index).decideFreezeTiming(
+                new FreezeTimingContext(
+                        new ResidencyTarget(PACKAGE, UID, -1),
+                        FreezeTimingContext.Transition.R_TO_M,
+                        FeatureIds.HANS_FREEZE_TIMING,
+                        HookTargetIds.HANS_R_TO_M_TIMING));
+    }
+
+    private static FreezeExemptionDecision freezeExemptionDecision(
+            RuntimeConfigSnapshot snapshot, ResidencyIdentityIndex index) {
+        return new ResidencyDecisionEngine(snapshot, index).decideFreezeExemption(
+                new FreezeExemptionContext(
+                        new ResidencyTarget(PACKAGE, UID, -1),
+                        FreezeExemptionContext.Kind.LCD_ON,
+                        FeatureIds.HANS_FREEZE_EXEMPTION,
+                        HookTargetIds.HANS_LCD_ON_EXEMPTION));
+    }
+
     private static RuntimeConfigSnapshot snapshot(boolean master, boolean dryRun) {
         AppResidencyPolicy policy = ResidencyPresets.create(PACKAGE, ResidencyMode.BALANCED);
         return RuntimeConfigSnapshot.available(
@@ -246,6 +313,33 @@ public final class ResidencyDecisionReporterTest {
                 base.wakePolicy(),
                 base.resourcePolicy(),
                 new RefreezePolicy(mode, 0L, 0L, 0L, 0L, 0L, 0L, 0L));
+        return RuntimeConfigSnapshot.available(
+                1L, true, true, dryRun, 2L, Map.of(PACKAGE, policy));
+    }
+
+    private static RuntimeConfigSnapshot freezeControlSnapshot(
+            boolean dryRun, boolean customTiming, boolean lcdOnExemption) {
+        AppResidencyPolicy base = ResidencyPresets.create(PACKAGE, ResidencyMode.CUSTOM);
+        FreezePolicy freezePolicy = new FreezePolicy(
+                true,
+                true,
+                true,
+                true,
+                customTiming,
+                5_000L,
+                7_000L,
+                false,
+                false,
+                lcdOnExemption);
+        AppResidencyPolicy policy = new AppResidencyPolicy(
+                PACKAGE,
+                true,
+                ResidencyMode.CUSTOM,
+                base.killPolicy(),
+                freezePolicy,
+                base.wakePolicy(),
+                base.resourcePolicy(),
+                base.refreezePolicy());
         return RuntimeConfigSnapshot.available(
                 1L, true, true, dryRun, 2L, Map.of(PACKAGE, policy));
     }

@@ -565,6 +565,7 @@ public final class HansRefreezeHookTest {
     @Test
     public void ordinaryMtoFUsesFreezeTimingAndNeverAStaleWakeReason() throws Throwable {
         AtomicInteger refreezeCalls = new AtomicInteger();
+        RecordingDiagnostics diagnostics = new RecordingDiagnostics();
         HansRefreezeHook hook = hook(
                 target -> timingDecision(target, 7_000L, false),
                 (target, source) -> {
@@ -572,18 +573,23 @@ public final class HansRefreezeHookTest {
                     return refreezeDecision(
                             target, source, RefreezeMode.DISABLED, 0L, false);
                 },
-                new RecordingDiagnostics(),
+                diagnostics,
                 new HansRefreezeRegistry(8));
 
         FakeChain emptyReason = FakeChain.returning(
                 2_222L, null, UID, PACKAGE, 0, 0L, "");
         assertEquals(Long.valueOf(7_000L), hook.interceptTiming(emptyReason));
         assertEquals(0, refreezeCalls.get());
+        assertEquals(1, diagnostics.timingDecisions.size());
+        assertEquals(FeatureIds.HANS_FREEZE_TIMING,
+                diagnostics.timingEvents.get(0).feature);
+        assertEquals("m_to_f_timing", diagnostics.timingEvents.get(0).scene);
 
         FakeChain nonNestedOldReason = FakeChain.returning(
                 2_222L, null, UID, PACKAGE, 0, 0L, "Packet");
         assertEquals(Long.valueOf(2_222L), hook.interceptTiming(nonNestedOldReason));
         assertEquals(0, refreezeCalls.get());
+        assertEquals(1, diagnostics.timingDecisions.size());
     }
 
     @Test
@@ -1612,12 +1618,21 @@ public final class HansRefreezeHookTest {
             implements HansRefreezeHook.RefreezeDiagnosticsRecorder {
         private final List<HookEvent> events = new ArrayList<>();
         private final List<RefreezeDecision> decisions = new ArrayList<>();
+        private final List<HookEvent> timingEvents = new ArrayList<>();
+        private final List<FreezeTimingDecision> timingDecisions = new ArrayList<>();
         private final List<HookEvent> failures = new ArrayList<>();
 
         @Override
         public void recordDecision(HookEvent event, RefreezeDecision decision) {
             events.add(event);
             decisions.add(decision);
+        }
+
+        @Override
+        public void recordTimingDecision(
+                HookEvent event, FreezeTimingDecision decision) {
+            timingEvents.add(event);
+            timingDecisions.add(decision);
         }
 
         @Override
@@ -1629,6 +1644,12 @@ public final class HansRefreezeHookTest {
     private static final class ThrowingDiagnostics extends RecordingDiagnostics {
         @Override
         public void recordDecision(HookEvent event, RefreezeDecision decision) {
+            throw new IllegalStateException("diagnostics");
+        }
+
+        @Override
+        public void recordTimingDecision(
+                HookEvent event, FreezeTimingDecision decision) {
             throw new IllegalStateException("diagnostics");
         }
 

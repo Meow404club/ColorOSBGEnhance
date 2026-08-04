@@ -649,7 +649,8 @@ public final class HookDiagnosticsTest {
     }
 
     @Test
-    public void semanticDuplicatesAcrossHooksAndThreadsKeepEveryRawHit() throws Exception {
+    public void concurrentDecisionsKeepEveryNormalizedEventAndRawHit()
+            throws Exception {
         setEpoch(EPOCH);
         provider.enqueue(request -> acceptedAck(request, EPOCH));
         int workers = 16;
@@ -688,7 +689,7 @@ public final class HookDiagnosticsTest {
 
         DiagnosticsWriteBatch batch = parse(provider.requests.get(0));
         assertEquals(workers, batch.rawHits.size());
-        assertEquals(1, batch.events.size());
+        assertEquals(workers, batch.events.size());
         assertEquals(0, pendingItemCount());
     }
 
@@ -738,16 +739,26 @@ public final class HookDiagnosticsTest {
         HookEvent athenaOther = new HookEvent(
                 FeatureIds.ATHENA_OTHER, 9_999, 10_002,
                 "example.athena", "", "memory_guard_unknown");
+        HookEvent nirvana = new HookEvent(
+                FeatureIds.NIRVANA, 1, 10_003,
+                "example.nirvana", "", "nirvana");
 
         assertEquals(HookTargetIds.HANS_FREEZE_DISPATCH,
                 HookDiagnostics.hookTargetFor(superFreeze, null));
         assertEquals(HookTargetIds.MEMORY_GUARD_DISPATCH,
                 HookDiagnostics.hookTargetFor(athenaOther, null));
+        assertEquals(HookTargetIds.OSENSE_PROCESS_KILL,
+                HookDiagnostics.hookTargetFor(nirvana, null));
+        assertEquals("SUPER", HookDiagnostics.sourceFor(superFreeze));
         assertEquals("OTHER", HookDiagnostics.sourceFor(athenaOther));
     }
 
     @Test
     public void resourceAndRefreezeSourcesUseStableCodesInsteadOfFreeText() {
+        assertEquals("R_TO_M", HookDiagnostics.sourceFor(new HookEvent(
+                FeatureIds.HANS_FREEZE_TIMING, 0, 10001, "pkg", "", "r_to_m_timing")));
+        assertEquals("M_TO_F", HookDiagnostics.sourceFor(new HookEvent(
+                FeatureIds.HANS_FREEZE_TIMING, 0, 10001, "pkg", "", "m_to_f_timing")));
         assertEquals("SERVICE", HookDiagnostics.sourceFor(new HookEvent(
                 FeatureIds.HANS_RESOURCE, 1, 10001, "pkg", "", "private:text")));
         assertEquals("BLUETOOTH_SCAN", HookDiagnostics.sourceFor(new HookEvent(
@@ -758,6 +769,8 @@ public final class HookDiagnosticsTest {
                 FeatureIds.HANS_REFREEZE, 1, 10001, "pkg", "", "private:text")));
         assertEquals("OTHER", HookDiagnostics.sourceFor(new HookEvent(
                 FeatureIds.HANS_REFREEZE, 17, 10001, "pkg", "", "private:text")));
+        assertEquals("OTHER", HookDiagnostics.sourceFor(new HookEvent(
+                FeatureIds.HANS_REFREEZE, -1, 10001, "pkg", "", "private:text")));
         assertEquals("", HookDiagnostics.sourceFor(new HookEvent(
                 FeatureIds.HANS_RESOURCE, -1, 10001, "pkg", "", "private:text")));
     }
