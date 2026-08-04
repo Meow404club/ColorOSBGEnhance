@@ -121,18 +121,14 @@ public final class HookUtils {
             } catch (Throwable error) {
                 complete = false;
                 safeLogWarning(
-                        "hook rollback failed id=" + safeHandleId(handle) + ": " + error);
+                        "hook rollback failed handle=" + handleIdentity(handle) + ": " + error);
             }
         }
         return complete;
     }
 
-    private static String safeHandleId(XposedInterface.HookHandle handle) {
-        try {
-            return String.valueOf(handle.getId());
-        } catch (Throwable ignored) {
-            return "unknown";
-        }
+    private static String handleIdentity(XposedInterface.HookHandle handle) {
+        return Integer.toHexString(System.identityHashCode(handle));
     }
 
     private static void safeLogInstalled(String message) {
