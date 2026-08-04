@@ -31,6 +31,7 @@ import com.frostwork.bgenhance.residency.runtime.ResidencyRuntimeController;
 import com.frostwork.bgenhance.residency.runtime.ResidencyRuntimeState;
 import com.frostwork.bgenhance.residency.runtime.RuntimeConfigSnapshot;
 import java.util.Collections;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ScheduledFuture;
@@ -65,18 +66,18 @@ public final class HookResidencyRuntime {
         return executor;
     }
 
-    private static final RetryingRegistration PACKAGE_RECEIVER_REGISTRATION =
+    private static final RetryingRegistration HOST_INITIALIZATION =
             new RetryingRegistration(
                     IDENTITY_EXECUTOR::schedule,
                     new RetryingRegistration.Observer() {
                         @Override
                         public void onFirstFailure(Throwable error) {
-                            ModuleLog.w("package change receiver registration deferred: " + error);
+                            ModuleLog.w("residency host initialization deferred: " + error);
                         }
 
                         @Override
                         public void onRecovery() {
-                            ModuleLog.i("package change receiver registration recovered");
+                            ModuleLog.i("residency host initialization recovered");
                         }
                     },
                     2_000L,
@@ -103,21 +104,22 @@ public final class HookResidencyRuntime {
         if (context == null) return;
         Context application = context.getApplicationContext();
         Context host = application != null ? application : context;
+        HOST_INITIALIZATION.ensure(() -> initializeHost(host));
+    }
+
+    private static void initializeHost(Context host) {
         attachPackageUidSource(host);
-        PACKAGE_RECEIVER_REGISTRATION.ensure(() -> registerPackageReceiver(host));
+        registerPackageReceiver(host);
     }
 
     private static void attachPackageUidSource(Context host) {
-        try {
-            PackageManager packageManager = host.getPackageManager();
-            if (packageManager == sPackageManager) return;
-            PackageUidSource source = new AndroidPackageUidSource(packageManager);
-            sPackageUidSource = source;
-            CONTROLLER.setPackageUidSource(source);
-            sPackageManager = packageManager;
-        } catch (Throwable error) {
-            ModuleLog.w("residency identity source attach failed: " + error);
-        }
+        PackageManager packageManager = Objects.requireNonNull(
+                host.getPackageManager(), "packageManager");
+        if (packageManager == sPackageManager && sPackageUidSource != null) return;
+        PackageUidSource source = new AndroidPackageUidSource(packageManager);
+        sPackageUidSource = source;
+        CONTROLLER.setPackageUidSource(source);
+        sPackageManager = packageManager;
     }
 
     private static void registerPackageReceiver(Context context) {

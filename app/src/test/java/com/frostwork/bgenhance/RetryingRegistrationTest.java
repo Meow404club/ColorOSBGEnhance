@@ -87,6 +87,39 @@ public final class RetryingRegistrationTest {
     }
 
     @Test
+    public void multiStepInitializationRetriesUntilEveryStepSucceeds() {
+        ManualScheduler scheduler = new ManualScheduler();
+        RecordingObserver observer = new RecordingObserver();
+        RetryingRegistration registration = new RetryingRegistration(
+                scheduler, observer, 2L, 8L);
+        AtomicInteger sourceAttempts = new AtomicInteger();
+        AtomicInteger receiverAttempts = new AtomicInteger();
+
+        registration.ensure(() -> {
+            if (sourceAttempts.incrementAndGet() == 1) {
+                throw new NullPointerException("package manager unavailable");
+            }
+            if (receiverAttempts.incrementAndGet() == 1) {
+                throw new NullPointerException("activity manager unavailable");
+            }
+        });
+
+        scheduler.runNext();
+        assertEquals(2, sourceAttempts.get());
+        assertEquals(1, receiverAttempts.get());
+        assertTrue(registration.hasPendingRetry());
+        assertFalse(registration.isRegistered());
+
+        scheduler.runNext();
+        assertEquals(3, sourceAttempts.get());
+        assertEquals(2, receiverAttempts.get());
+        assertEquals(1, observer.failures);
+        assertEquals(1, observer.recoveries);
+        assertFalse(registration.hasPendingRetry());
+        assertTrue(registration.isRegistered());
+    }
+
+    @Test
     public void invalidDelayBoundsAreRejected() {
         ManualScheduler scheduler = new ManualScheduler();
         RecordingObserver observer = new RecordingObserver();
