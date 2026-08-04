@@ -59,7 +59,7 @@ public final class AtomicSafDiagnosticsExporterTest {
     }
 
     @Test
-    public void finalNameWritesAndVerifiesWithoutRename() {
+    public void finalNameIsRejectedBeforeWriteBecauseRenameIsRequired() {
         FakeStore store = new FakeStore();
         store.displayName = FINAL_NAME;
 
@@ -67,11 +67,11 @@ public final class AtomicSafDiagnosticsExporterTest {
                 AtomicSafDiagnosticsExporter.export(
                         store, DESTINATION, FINAL_NAME, REPORT);
 
-        assertTrue(result.successful());
-        assertEquals(DESTINATION, result.documentUri);
+        assertFalse(result.successful());
+        assertEquals("invalid_filename", result.errorCode);
+        assertTrue(result.incompleteDocumentDeleted);
         assertNull(store.renamedTo);
-        assertEquals("name,open:rwt,write,flush,sync,close,verify",
-                store.operations.toString());
+        assertEquals("delete", store.operations.toString());
     }
 
     @Test

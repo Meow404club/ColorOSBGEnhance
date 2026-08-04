@@ -101,9 +101,6 @@ public final class AtomicSafDiagnosticsExporter {
                 throw new IllegalStateException("written report did not verify");
             }
             checkInterrupted();
-            if (expectedDisplayName.equals(finalDisplayName)) {
-                return Result.succeeded(destinationUri, fsyncApplied);
-            }
             failure = "commit_failed";
             Uri committed = store.rename(destinationUri, finalDisplayName);
             if (committed == null) {
@@ -148,9 +145,7 @@ public final class AtomicSafDiagnosticsExporter {
                 return null;
             }
             value = partialName.substring(0, marker);
-        } else {
-            value = partialName;
-        }
+        } else return null;
         if (!value.toLowerCase(Locale.ROOT).endsWith(".json")) return null;
         for (int index = 0; index < value.length(); index++) {
             char current = value.charAt(index);

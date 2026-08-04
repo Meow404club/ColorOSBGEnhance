@@ -47,7 +47,7 @@ public final class FullDiagnosticsExportViewModelTest {
         FullDiagnosticsExportViewModel.DestinationRequest request =
                 fixture.viewModel.takeDestinationRequest();
         assertNotNull(request);
-        assertEquals("BgEnhance-diagnostics-20260803-023000-123Z.json",
+        assertEquals("BgEnhance-diagnostics-20260803-023000-123Z.partial.json",
                 request.displayName);
         assertNull(fixture.viewModel.takeDestinationRequest());
         assertEquals(FullDiagnosticsExportViewModel.Status.AWAITING_URI,

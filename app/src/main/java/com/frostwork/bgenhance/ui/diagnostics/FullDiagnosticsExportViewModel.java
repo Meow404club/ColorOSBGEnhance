@@ -430,7 +430,7 @@ public final class FullDiagnosticsExportViewModel extends ViewModel {
             displayName = "BgEnhance-diagnostics-"
                     + EXPORT_FILE_TIME.format(Instant.ofEpochMilli(
                             currentTimeMillis.getAsLong()))
-                    + ".json";
+                    + AtomicSafDiagnosticsExporter.PICKER_PARTIAL_SUFFIX;
             ready = new State(
                     Status.READY, operationId, "", false, true, prepared.length);
             state = ready;
