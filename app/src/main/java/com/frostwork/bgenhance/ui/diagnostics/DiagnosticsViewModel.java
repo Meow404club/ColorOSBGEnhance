@@ -1,6 +1,7 @@
 package com.frostwork.bgenhance.ui.diagnostics;
 
 import android.content.Context;
+import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
 import com.frostwork.bgenhance.diagnostics.RecentBehaviorStats;
 import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
@@ -124,7 +125,7 @@ public final class DiagnosticsViewModel implements AutoCloseable {
         Objects.requireNonNull(callbackExecutor, "callbackExecutor");
         return new DiagnosticsViewModel(
                 DiagnosticsDataSource.fromBackend(context, backend),
-                new DiagnosticsUiMapper(),
+                new DiagnosticsUiMapper(() -> ModuleSettings.getConfigRevision(context)),
                 callbackExecutor,
                 DEFAULT_UI_PAGE_SIZE,
                 DEFAULT_QUERY_PAGE_SIZE);

@@ -234,6 +234,41 @@ public final class DiagnosticsUiMapperTest {
     }
 
     @Test
+    public void configStatusRequiresTheCurrentLocalRevisionAndErrorsTakePriority() {
+        DiagnosticsUiMapper revisionEightMapper = new DiagnosticsUiMapper(() -> 8);
+        List<DiagnosticsHookState> states = Arrays.asList(
+                configState(DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                        "CONFIG_READY", 7),
+                configState(DiagnosticsHookCatalog.PROCESS_ATHENA,
+                        "CONFIG_READY", 8));
+
+        List<DiagnosticsUiMapper.HookTargetRow> rows = revisionEightMapper.mapHookTargets(
+                DiagnosticsDataSource.HookStatePage.success(states), "current_boot");
+
+        assertEquals(DiagnosticsUiMapper.HookStatus.PENDING,
+                findHook(rows, DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                        DiagnosticsTargetIds.RUNTIME_CONFIG).status);
+        assertEquals(DiagnosticsUiMapper.HookStatus.READY,
+                findHook(rows, DiagnosticsHookCatalog.PROCESS_ATHENA,
+                        DiagnosticsTargetIds.RUNTIME_CONFIG).status);
+
+        rows = revisionEightMapper.mapHookTargets(
+                DiagnosticsDataSource.HookStatePage.success(Arrays.asList(
+                        configState(DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                                "CONFIG_READY", 9),
+                        configState(DiagnosticsHookCatalog.PROCESS_ATHENA,
+                                "CONFIG_ERROR", 9))),
+                "current_boot");
+
+        assertEquals(DiagnosticsUiMapper.HookStatus.READY,
+                findHook(rows, DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                        DiagnosticsTargetIds.RUNTIME_CONFIG).status);
+        assertEquals(DiagnosticsUiMapper.HookStatus.FAILED,
+                findHook(rows, DiagnosticsHookCatalog.PROCESS_ATHENA,
+                        DiagnosticsTargetIds.RUNTIME_CONFIG).status);
+    }
+
+    @Test
     public void processEntryBeforeFeatureInstallationRemainsPending() {
         DiagnosticsHookState entry = hookState(
                 DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
@@ -311,6 +346,17 @@ public final class DiagnosticsUiMapperTest {
                 .parsedCount(count)
                 .identityResolvedCount(count)
                 .updatedAt(count)
+                .build();
+    }
+
+    private static DiagnosticsHookState configState(
+            String processId, String status, int revision) {
+        return DiagnosticsHookState.builder()
+                .processId(processId)
+                .hookTargetId(DiagnosticsTargetIds.RUNTIME_CONFIG)
+                .installStatus(status)
+                .configRevision(revision)
+                .bootId("current_boot")
                 .build();
     }
 

@@ -17,9 +17,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeSet;
+import java.util.function.IntSupplier;
 
 /** Converts storage DTOs into immutable, deterministic rows for UI adapters. */
 public final class DiagnosticsUiMapper {
+    private final IntSupplier localConfigRevisionSupplier;
+
+    public DiagnosticsUiMapper() {
+        this(() -> -1);
+    }
+
+    DiagnosticsUiMapper(IntSupplier localConfigRevisionSupplier) {
+        this.localConfigRevisionSupplier = Objects.requireNonNull(
+                localConfigRevisionSupplier, "localConfigRevisionSupplier");
+    }
+
     public interface UiRow {
         String stableId();
     }
@@ -198,7 +210,8 @@ public final class DiagnosticsUiMapper {
 
         private HookTargetRow(
                 DiagnosticsHookCatalog.Entry entry,
-                DiagnosticsHookState state) {
+                DiagnosticsHookState state,
+                int localConfigRevision) {
             stableId = entry.stableId();
             hookTargetId = entry.hookTargetId;
             expectedProcessId = entry.expectedProcessId;
@@ -206,7 +219,9 @@ public final class DiagnosticsUiMapper {
             fallbackTitle = entry.fallbackTitle;
             kind = entry.kind;
             reported = state != null;
-            status = state == null ? HookStatus.MISSING : hookStatus(state.installStatus);
+            status = state == null
+                    ? HookStatus.MISSING
+                    : hookStatus(state, localConfigRevision);
             installStatus = state == null ? "" : state.installStatus;
             featureId = state == null ? "" : state.featureId;
             bootId = state == null ? "" : state.bootId;
@@ -424,9 +439,11 @@ public final class DiagnosticsUiMapper {
         }
 
         ArrayList<HookTargetRow> result = new ArrayList<>();
+        int localConfigRevision = localConfigRevisionSupplier.getAsInt();
         for (DiagnosticsHookCatalog.Entry entry : DiagnosticsHookCatalog.all()) {
             result.add(new HookTargetRow(entry,
-                    byIdentity.get(identity(entry.expectedProcessId, entry.hookTargetId))));
+                    byIdentity.get(identity(entry.expectedProcessId, entry.hookTargetId)),
+                    localConfigRevision));
         }
         return immutable(result);
     }
@@ -447,16 +464,22 @@ public final class DiagnosticsUiMapper {
         return left.installStatus.compareTo(right.installStatus);
     }
 
-    private static HookStatus hookStatus(String installStatus) {
-        String value = installStatus == null ? "" : installStatus;
-        if (ModuleRuntimeStatus.isCurrentVersion(value, BuildConfig.VERSION_CODE)
-                || value.startsWith("CONFIG_READY")) return HookStatus.READY;
+    private static HookStatus hookStatus(
+            DiagnosticsHookState state, int localConfigRevision) {
+        String value = state.installStatus == null ? "" : state.installStatus;
+        if (value.startsWith("CONFIG_ERROR")) return HookStatus.FAILED;
+        if (value.startsWith("CONFIG_READY")) {
+            return state.configRevision >= localConfigRevision
+                    ? HookStatus.READY : HookStatus.PENDING;
+        }
+        if (ModuleRuntimeStatus.isCurrentVersion(value, BuildConfig.VERSION_CODE)) {
+            return HookStatus.READY;
+        }
         if (value.startsWith("FEATURES_INSTALLED")) return HookStatus.PENDING;
         if (value.startsWith("ENTRY_LOADED")) return HookStatus.PENDING;
         if (value.startsWith("INSTALLED")) return HookStatus.INSTALLED;
         if (value.startsWith("FAILED")
-                || value.startsWith("BOOTSTRAP_FAILED")
-                || value.startsWith("CONFIG_ERROR")) return HookStatus.FAILED;
+                || value.startsWith("BOOTSTRAP_FAILED")) return HookStatus.FAILED;
         if (value.startsWith("UNSUPPORTED")) return HookStatus.UNSUPPORTED;
         if (value.startsWith("SKIPPED")) return HookStatus.SKIPPED;
         if (value.startsWith("PENDING")) return HookStatus.PENDING;
