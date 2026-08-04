@@ -128,6 +128,8 @@
     <string name="residency_apply_sync_unavailable">设置会保存在本机；暂时无法提供给系统，请稍候或重启后再检查</string>
     <string name="residency_apply_sync_pending">设置会保存；系统正在读取最新设置，请稍候</string>
     <string name="residency_apply_config_error">设置会保存；模块未能读取当前设置，请在运行诊断中查看详情</string>
+    <string name="residency_apply_identity_error">设置会保存；模块暂时无法识别驻留应用，相关操作已自动放行，请在运行诊断中查看详情</string>
+    <string name="residency_apply_identity_pending">设置会保存；模块正在更新驻留应用的识别信息，请稍候</string>
     <string name="residency_apply_partial">设置会保存；部分驻留功能当前不可用，可在运行诊断中查看</string>
     <string name="residency_save">保存</string>
     <string name="residency_delete">删除规则</string>

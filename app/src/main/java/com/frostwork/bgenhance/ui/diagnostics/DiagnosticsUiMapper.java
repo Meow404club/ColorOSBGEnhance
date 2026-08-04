@@ -18,18 +18,28 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.TreeSet;
 import java.util.function.IntSupplier;
+import java.util.function.LongSupplier;
 
 /** Converts storage DTOs into immutable, deterministic rows for UI adapters. */
 public final class DiagnosticsUiMapper {
     private final IntSupplier localConfigRevisionSupplier;
+    private final LongSupplier localPolicyRevisionSupplier;
 
     public DiagnosticsUiMapper() {
-        this(() -> -1);
+        this(() -> -1, () -> -1L);
     }
 
     DiagnosticsUiMapper(IntSupplier localConfigRevisionSupplier) {
+        this(localConfigRevisionSupplier, () -> -1L);
+    }
+
+    DiagnosticsUiMapper(
+            IntSupplier localConfigRevisionSupplier,
+            LongSupplier localPolicyRevisionSupplier) {
         this.localConfigRevisionSupplier = Objects.requireNonNull(
                 localConfigRevisionSupplier, "localConfigRevisionSupplier");
+        this.localPolicyRevisionSupplier = Objects.requireNonNull(
+                localPolicyRevisionSupplier, "localPolicyRevisionSupplier");
     }
 
     public interface UiRow {
@@ -211,7 +221,8 @@ public final class DiagnosticsUiMapper {
         private HookTargetRow(
                 DiagnosticsHookCatalog.Entry entry,
                 DiagnosticsHookState state,
-                int localConfigRevision) {
+                int localConfigRevision,
+                long localPolicyRevision) {
             stableId = entry.stableId();
             hookTargetId = entry.hookTargetId;
             expectedProcessId = entry.expectedProcessId;
@@ -221,7 +232,7 @@ public final class DiagnosticsUiMapper {
             reported = state != null;
             status = state == null
                     ? HookStatus.MISSING
-                    : hookStatus(state, localConfigRevision);
+                    : hookStatus(state, localConfigRevision, localPolicyRevision);
             installStatus = state == null ? "" : state.installStatus;
             featureId = state == null ? "" : state.featureId;
             bootId = state == null ? "" : state.bootId;
@@ -440,10 +451,12 @@ public final class DiagnosticsUiMapper {
 
         ArrayList<HookTargetRow> result = new ArrayList<>();
         int localConfigRevision = localConfigRevisionSupplier.getAsInt();
+        long localPolicyRevision = localPolicyRevisionSupplier.getAsLong();
         for (DiagnosticsHookCatalog.Entry entry : DiagnosticsHookCatalog.all()) {
             result.add(new HookTargetRow(entry,
                     byIdentity.get(identity(entry.expectedProcessId, entry.hookTargetId)),
-                    localConfigRevision));
+                    localConfigRevision,
+                    localPolicyRevision));
         }
         return immutable(result);
     }
@@ -465,10 +478,16 @@ public final class DiagnosticsUiMapper {
     }
 
     private static HookStatus hookStatus(
-            DiagnosticsHookState state, int localConfigRevision) {
+            DiagnosticsHookState state,
+            int localConfigRevision,
+            long localPolicyRevision) {
         String value = state.installStatus == null ? "" : state.installStatus;
         if (value.startsWith("CONFIG_ERROR")) return HookStatus.FAILED;
-        if (value.startsWith("IDENTITY_READY")) return HookStatus.READY;
+        if (value.startsWith("IDENTITY_READY")) {
+            return state.configRevision >= localConfigRevision
+                    && revisionAtLeast(state.policyRevision, localPolicyRevision)
+                    ? HookStatus.READY : HookStatus.PENDING;
+        }
         if (value.startsWith("PENDING_IDENTITY")) return HookStatus.PENDING;
         if (value.startsWith("CONFIG_READY")) {
             return state.configRevision >= localConfigRevision
@@ -486,6 +505,10 @@ public final class DiagnosticsUiMapper {
         if (value.startsWith("SKIPPED")) return HookStatus.SKIPPED;
         if (value.startsWith("PENDING")) return HookStatus.PENDING;
         return HookStatus.UNKNOWN;
+    }
+
+    private static boolean revisionAtLeast(int reported, long local) {
+        return local < 0L || reported >= Math.min(local, Integer.MAX_VALUE);
     }
 
     public static Metrics emptyMetrics() {

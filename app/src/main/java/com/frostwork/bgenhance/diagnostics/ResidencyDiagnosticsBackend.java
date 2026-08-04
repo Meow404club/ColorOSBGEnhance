@@ -1010,6 +1010,8 @@ public final class ResidencyDiagnosticsBackend implements AutoCloseable {
                     processId, DiagnosticsTargetIds.RUNTIME_PROCESS));
             identities.add(hookStateIdentity(
                     processId, DiagnosticsTargetIds.RUNTIME_CONFIG));
+            identities.add(hookStateIdentity(
+                    processId, DiagnosticsTargetIds.RUNTIME_IDENTITY));
         }
         return Collections.unmodifiableSet(identities);
     }

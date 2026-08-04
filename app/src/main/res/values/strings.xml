@@ -261,6 +261,8 @@
     <string name="effect_config_pending">模块功能已加载，但尚未读取最新设置；请稍候或进入运行诊断重新检测</string>
     <string name="effect_runtime_unavailable">暂时无法确认功能加载状态；保护开关和设置仍可正常保存</string>
     <string name="effect_config_error">模块未能读取当前设置；请在运行诊断中查看详情，重新加载或重启后再检查</string>
+    <string name="effect_identity_error">模块暂时无法识别受保护应用，相关操作已自动放行；请在运行诊断中查看详情</string>
+    <string name="effect_identity_pending">模块正在更新应用识别信息；完成前相关操作会自动放行</string>
     <string name="effect_primary_hook_unavailable">部分基础保护功能当前不可用；可关闭现有设置，但无法再次开启对应开关</string>
 
     <string name="risk_dialog_title">开启“%1$s”？</string>

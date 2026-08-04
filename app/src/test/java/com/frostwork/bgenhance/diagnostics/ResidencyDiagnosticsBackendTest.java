@@ -1028,6 +1028,26 @@ public final class ResidencyDiagnosticsBackendTest {
     }
 
     @Test
+    public void missingIdentityRuntimePreventsCompleteCurrentBootCoverage()
+            throws Exception {
+        FakeStorage storage = new FakeStorage();
+        addExpectedCurrentBootRows(storage);
+        assertTrue(storage.hookStates.removeIf(state ->
+                BridgeContract.PROCESS_ATHENA.equals(state.processId)
+                        && DiagnosticsTargetIds.RUNTIME_IDENTITY.equals(
+                        state.hookTargetId)));
+        ResidencyDiagnosticsBackend backend = backend(storage, policy(8, 2, 60_000L));
+
+        DiagnosticsQuery.ExportSnapshot snapshot = backend.exportAsync(
+                DiagnosticsQuery.ExportOptions.fullReport(),
+                FeatureIds.all()).get(5, TimeUnit.SECONDS);
+
+        assertEquals(expectedCurrentBootRowCount() - 1,
+                snapshot.exportStatus.currentBoot.currentBootHookStateCount);
+        assertFalse(snapshot.exportStatus.currentBoot.hookStateCoverageComplete);
+    }
+
+    @Test
     public void duplicateIdentityCannotReplaceMissingExpectedCurrentBootTarget()
             throws Exception {
         FakeStorage storage = new FakeStorage();
@@ -1156,11 +1176,18 @@ public final class ResidencyDiagnosticsBackendTest {
                     .bootId("boot")
                     .updatedAt(3L)
                     .build());
+            storage.hookStates.add(DiagnosticsHookState.builder()
+                    .processId(processId)
+                    .hookTargetId(DiagnosticsTargetIds.RUNTIME_IDENTITY)
+                    .installStatus("IDENTITY_READY")
+                    .bootId("boot")
+                    .updatedAt(4L)
+                    .build());
         }
     }
 
     private static int expectedCurrentBootRowCount() {
-        return HookTargetIds.all().size() + 4;
+        return HookTargetIds.all().size() + 6;
     }
 
     private static void removeExpectedTarget(FakeStorage storage, String target) {

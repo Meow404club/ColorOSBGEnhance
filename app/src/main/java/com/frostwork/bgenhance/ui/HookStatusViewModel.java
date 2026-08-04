@@ -23,6 +23,8 @@ public final class HookStatusViewModel implements AutoCloseable {
 
     public enum Installation { INSTALLED, FAILED, UNSUPPORTED, UNKNOWN }
 
+    public enum Identity { READY, PENDING, FAILED, MISSING }
+
     public interface Source {
         String currentBootId();
         CompletableFuture<DiagnosticsQuery.HookStatePage> queryHookStatesAsync(int limit);
@@ -136,6 +138,32 @@ public final class HookStatusViewModel implements AutoCloseable {
                 }
             }
             return false;
+        }
+
+        public Identity identity(
+                String processId, int localConfigRevision, long localPolicyRevision) {
+            if (status != Status.READY) return Identity.MISSING;
+            DiagnosticsHookState selected = null;
+            for (DiagnosticsHookState row : rows) {
+                if (!same(processId, row.processId)
+                        || !DiagnosticsTargetIds.RUNTIME_IDENTITY.equals(row.hookTargetId)) {
+                    continue;
+                }
+                if (selected == null || row.updatedAt >= selected.updatedAt) selected = row;
+            }
+            if (selected == null) return Identity.MISSING;
+            String value = safe(selected.installStatus);
+            if (value.startsWith("FAILED")) return Identity.FAILED;
+            if (value.startsWith("IDENTITY_READY")
+                    && selected.configRevision >= localConfigRevision
+                    && revisionAtLeast(selected.policyRevision, localPolicyRevision)) {
+                return Identity.READY;
+            }
+            return Identity.PENDING;
+        }
+
+        private static boolean revisionAtLeast(int reported, long local) {
+            return local < 0L || reported >= Math.min(local, Integer.MAX_VALUE);
         }
 
         public Installation installation(String hookTargetId) {

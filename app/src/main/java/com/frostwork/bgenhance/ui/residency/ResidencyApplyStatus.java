@@ -41,6 +41,18 @@ final class ResidencyApplyStatus {
             int localConfigRevision,
             boolean masterEnabled,
             boolean residencyEnabled) {
+        return message(state, serviceConnected, localConfigError, localConfigRevision,
+                -1L, masterEnabled, residencyEnabled);
+    }
+
+    static int message(
+            HookStatusViewModel.State state,
+            boolean serviceConnected,
+            boolean localConfigError,
+            int localConfigRevision,
+            long localPolicyRevision,
+            boolean masterEnabled,
+            boolean residencyEnabled) {
         if (state == null
                 || state.status() == HookStatusViewModel.Status.IDLE
                 || state.status() == HookStatusViewModel.Status.LOADING) {
@@ -68,6 +80,18 @@ final class ResidencyApplyStatus {
         if (!systemReported || !athenaReported) {
             return R.string.residency_apply_after_restart;
         }
+        HookStatusViewModel.Identity systemIdentity = state.identity(
+                BridgeContract.PROCESS_SYSTEM_SERVER,
+                localConfigRevision,
+                localPolicyRevision);
+        HookStatusViewModel.Identity athenaIdentity = state.identity(
+                BridgeContract.PROCESS_ATHENA,
+                localConfigRevision,
+                localPolicyRevision);
+        if (systemIdentity == HookStatusViewModel.Identity.FAILED
+                || athenaIdentity == HookStatusViewModel.Identity.FAILED) {
+            return R.string.residency_apply_identity_error;
+        }
         if (!serviceConnected) {
             return R.string.residency_apply_sync_unavailable;
         }
@@ -80,6 +104,10 @@ final class ResidencyApplyStatus {
                 || state.configRevision(BridgeContract.PROCESS_ATHENA) < localConfigRevision) {
             return R.string.residency_apply_sync_pending;
         }
+        if (systemIdentity != HookStatusViewModel.Identity.READY
+                || athenaIdentity != HookStatusViewModel.Identity.READY) {
+            return R.string.residency_apply_identity_pending;
+        }
         if (!masterEnabled) return R.string.residency_apply_master_disabled;
         if (!residencyEnabled) return R.string.residency_apply_disabled;
         return R.string.residency_apply_without_restart;
@@ -88,6 +116,7 @@ final class ResidencyApplyStatus {
     static Tone tone(int messageRes) {
         if (messageRes == R.string.residency_apply_without_restart) return Tone.SUCCESS;
         if (messageRes == R.string.residency_apply_config_error
+                || messageRes == R.string.residency_apply_identity_error
                 || messageRes == R.string.effect_runtime_unavailable) {
             return Tone.ERROR;
         }

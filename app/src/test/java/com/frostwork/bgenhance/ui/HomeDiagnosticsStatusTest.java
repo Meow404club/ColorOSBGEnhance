@@ -43,6 +43,8 @@ public final class HomeDiagnosticsStatusTest {
                                 currentStage(), CURRENT_BOOT),
                         config(BridgeContract.PROCESS_SYSTEM_SERVER, 8),
                         config(BridgeContract.PROCESS_ATHENA, 8),
+                        identity(BridgeContract.PROCESS_SYSTEM_SERVER, 8, 2),
+                        identity(BridgeContract.PROCESS_ATHENA, 8, 2),
                         hook(HookTargetIds.OGUARD_KILL, "INSTALLED:1"),
                         hook(HookTargetIds.OGUARD_FORCE_STOP, "INSTALLED:1"),
                         hook(HookTargetIds.ATHENA_PERIODIC, "INSTALLED:1"),
@@ -115,6 +117,46 @@ public final class HomeDiagnosticsStatusTest {
     }
 
     @Test
+    public void identityFailureOrStaleRevisionPreventsHealthyStatus() {
+        HomeDiagnosticsStatus failed = HomeDiagnosticsStatus.evaluate(
+                Arrays.asList(
+                        process(BridgeContract.PROCESS_SYSTEM_SERVER,
+                                currentStage(), CURRENT_BOOT),
+                        process(BridgeContract.PROCESS_ATHENA,
+                                currentStage(), CURRENT_BOOT),
+                        identity(BridgeContract.PROCESS_SYSTEM_SERVER,
+                                8, 3, "FAILED_FAIL_OPEN_IDENTITY_REBUILD"),
+                        identity(BridgeContract.PROCESS_ATHENA, 8, 3)),
+                CURRENT_BOOT,
+                8,
+                3L,
+                BuildConfig.VERSION_CODE);
+
+        assertEquals(HomeDiagnosticsStatus.Activation.PARTIAL, failed.activation);
+        assertTrue(failed.hasIdentityError());
+        assertEquals(R.string.effect_identity_error,
+                failed.effectNotice(true, true, false));
+
+        HomeDiagnosticsStatus stale = HomeDiagnosticsStatus.evaluate(
+                Arrays.asList(
+                        process(BridgeContract.PROCESS_SYSTEM_SERVER,
+                                currentStage(), CURRENT_BOOT),
+                        process(BridgeContract.PROCESS_ATHENA,
+                                currentStage(), CURRENT_BOOT),
+                        identity(BridgeContract.PROCESS_SYSTEM_SERVER, 7, 2),
+                        identity(BridgeContract.PROCESS_ATHENA, 8, 2)),
+                CURRENT_BOOT,
+                8,
+                3L,
+                BuildConfig.VERSION_CODE);
+
+        assertEquals(HomeDiagnosticsStatus.Activation.PARTIAL, stale.activation);
+        assertFalse(stale.hasIdentityError());
+        assertEquals(R.string.effect_identity_pending,
+                stale.effectNotice(true, true, false));
+    }
+
+    @Test
     public void explicitlyUnavailablePrimaryHookDisablesOnlyItsOwnControl() {
         HomeDiagnosticsStatus status = HomeDiagnosticsStatus.evaluate(
                 Arrays.asList(
@@ -124,6 +166,8 @@ public final class HomeDiagnosticsStatusTest {
                                 currentStage(), CURRENT_BOOT),
                         config(BridgeContract.PROCESS_SYSTEM_SERVER, 7),
                         config(BridgeContract.PROCESS_ATHENA, 7),
+                        identity(BridgeContract.PROCESS_SYSTEM_SERVER, 7, 1),
+                        identity(BridgeContract.PROCESS_ATHENA, 7, 1),
                         hook(HookTargetIds.ATHENA_PERIODIC, "FAILED_FAIL_OPEN"),
                         hook(HookTargetIds.OGUARD_KILL, "UNSUPPORTED"),
                         hook(HookTargetIds.OGUARD_FORCE_STOP, "INSTALLED")),
@@ -155,6 +199,8 @@ public final class HomeDiagnosticsStatusTest {
                                 currentStage(), CURRENT_BOOT),
                         config(BridgeContract.PROCESS_SYSTEM_SERVER, 7),
                         config(BridgeContract.PROCESS_ATHENA, 7),
+                        identity(BridgeContract.PROCESS_SYSTEM_SERVER, 7, 1),
+                        identity(BridgeContract.PROCESS_ATHENA, 7, 1),
                         hook(HookTargetIds.ATHENA_PERIODIC, "INSTALLED"),
                         hook(HookTargetIds.OGUARD_KILL, "INSTALLED"),
                         hook(HookTargetIds.OGUARD_FORCE_STOP, "INSTALLED")),
@@ -225,6 +271,26 @@ public final class HomeDiagnosticsStatusTest {
                 .processId(HookTargetIds.expectedProcessId(targetId))
                 .hookTargetId(targetId)
                 .installStatus(installStatus)
+                .bootId(CURRENT_BOOT)
+                .build();
+    }
+
+    private static DiagnosticsHookState identity(
+            String processId, int configRevision, int policyRevision) {
+        return identity(processId, configRevision, policyRevision, "IDENTITY_READY");
+    }
+
+    private static DiagnosticsHookState identity(
+            String processId,
+            int configRevision,
+            int policyRevision,
+            String installStatus) {
+        return DiagnosticsHookState.builder()
+                .processId(processId)
+                .hookTargetId(DiagnosticsTargetIds.RUNTIME_IDENTITY)
+                .installStatus(installStatus)
+                .configRevision(configRevision)
+                .policyRevision(policyRevision)
                 .bootId(CURRENT_BOOT)
                 .build();
     }

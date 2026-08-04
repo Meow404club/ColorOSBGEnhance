@@ -261,6 +261,45 @@ public final class DiagnosticsUiMapperTest {
     }
 
     @Test
+    public void identityReadyRequiresCurrentConfigAndPolicyRevisions() {
+        DiagnosticsUiMapper currentMapper = new DiagnosticsUiMapper(() -> 8, () -> 4L);
+        DiagnosticsHookState stale = DiagnosticsHookState.builder()
+                .processId(DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER)
+                .hookTargetId(DiagnosticsTargetIds.RUNTIME_IDENTITY)
+                .installStatus("IDENTITY_READY")
+                .configRevision(8)
+                .policyRevision(3)
+                .bootId("current_boot")
+                .build();
+
+        DiagnosticsUiMapper.HookTargetRow row = findHook(
+                currentMapper.mapHookTargets(
+                        DiagnosticsDataSource.HookStatePage.success(
+                                Collections.singletonList(stale)),
+                        "current_boot"),
+                DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                DiagnosticsTargetIds.RUNTIME_IDENTITY);
+        assertEquals(DiagnosticsUiMapper.HookStatus.PENDING, row.status);
+
+        DiagnosticsHookState current = DiagnosticsHookState.builder()
+                .processId(DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER)
+                .hookTargetId(DiagnosticsTargetIds.RUNTIME_IDENTITY)
+                .installStatus("IDENTITY_READY")
+                .configRevision(8)
+                .policyRevision(4)
+                .bootId("current_boot")
+                .build();
+        row = findHook(
+                currentMapper.mapHookTargets(
+                        DiagnosticsDataSource.HookStatePage.success(
+                                Collections.singletonList(current)),
+                        "current_boot"),
+                DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                DiagnosticsTargetIds.RUNTIME_IDENTITY);
+        assertEquals(DiagnosticsUiMapper.HookStatus.READY, row.status);
+    }
+
+    @Test
     public void configStatusRequiresTheCurrentLocalRevisionAndErrorsTakePriority() {
         DiagnosticsUiMapper revisionEightMapper = new DiagnosticsUiMapper(() -> 8);
         List<DiagnosticsHookState> states = Arrays.asList(

@@ -118,6 +118,23 @@ public final class ResidencyApplyStatusTest {
     }
 
     @Test
+    public void identityFailureAndStaleIdentityNeverPromiseImmediateApplication() {
+        List<DiagnosticsHookState> rows = completeRows(7);
+        replaceIdentity(rows, BridgeContract.PROCESS_ATHENA,
+                "FAILED_FAIL_OPEN_IDENTITY_REBUILD", 7, 4);
+        assertEquals(R.string.residency_apply_identity_error,
+                ResidencyApplyStatus.message(
+                        ready(rows), true, false, 7, 4L, true, true));
+
+        rows = completeRows(7);
+        replaceIdentity(rows, BridgeContract.PROCESS_SYSTEM_SERVER,
+                "IDENTITY_READY", 7, 3);
+        assertEquals(R.string.residency_apply_identity_pending,
+                ResidencyApplyStatus.message(
+                        ready(rows), true, false, 7, 4L, true, true));
+    }
+
+    @Test
     public void localConfigurationFailureIsNotReportedAsPendingSynchronization() {
         HookStatusViewModel.State state = ready(completeRows(7));
 
@@ -146,6 +163,8 @@ public final class ResidencyApplyStatusTest {
                 ResidencyApplyStatus.tone(R.string.residency_apply_without_restart));
         assertEquals(ResidencyApplyStatus.Tone.ERROR,
                 ResidencyApplyStatus.tone(R.string.residency_apply_config_error));
+        assertEquals(ResidencyApplyStatus.Tone.ERROR,
+                ResidencyApplyStatus.tone(R.string.residency_apply_identity_error));
         assertEquals(ResidencyApplyStatus.Tone.WARNING,
                 ResidencyApplyStatus.tone(R.string.residency_apply_after_restart));
         assertEquals(ResidencyApplyStatus.Tone.INFO,
@@ -158,6 +177,8 @@ public final class ResidencyApplyStatusTest {
         rows.add(process(BridgeContract.PROCESS_ATHENA));
         rows.add(config(BridgeContract.PROCESS_SYSTEM_SERVER, revision));
         rows.add(config(BridgeContract.PROCESS_ATHENA, revision));
+        rows.add(identity(BridgeContract.PROCESS_SYSTEM_SERVER, revision, 4));
+        rows.add(identity(BridgeContract.PROCESS_ATHENA, revision, 4));
         for (String hookTargetId : ResidencyApplyStatus.REQUIRED_HOOKS) {
             rows.add(DiagnosticsHookState.builder()
                     .processId(HookTargetIds.expectedProcessId(hookTargetId))
@@ -205,6 +226,37 @@ public final class ResidencyApplyStatusTest {
                 .processId(processId)
                 .hookTargetId(DiagnosticsTargetIds.RUNTIME_CONFIG)
                 .installStatus("CONFIG_ERROR")
+                .bootId(CURRENT_BOOT)
+                .build();
+    }
+
+    private static void replaceIdentity(
+            List<DiagnosticsHookState> rows,
+            String processId,
+            String status,
+            int configRevision,
+            int policyRevision) {
+        rows.removeIf(row -> processId.equals(row.processId)
+                && DiagnosticsTargetIds.RUNTIME_IDENTITY.equals(row.hookTargetId));
+        rows.add(identity(processId, configRevision, policyRevision, status));
+    }
+
+    private static DiagnosticsHookState identity(
+            String processId, int configRevision, int policyRevision) {
+        return identity(processId, configRevision, policyRevision, "IDENTITY_READY");
+    }
+
+    private static DiagnosticsHookState identity(
+            String processId,
+            int configRevision,
+            int policyRevision,
+            String status) {
+        return DiagnosticsHookState.builder()
+                .processId(processId)
+                .hookTargetId(DiagnosticsTargetIds.RUNTIME_IDENTITY)
+                .installStatus(status)
+                .configRevision(configRevision)
+                .policyRevision(policyRevision)
                 .bootId(CURRENT_BOOT)
                 .build();
     }

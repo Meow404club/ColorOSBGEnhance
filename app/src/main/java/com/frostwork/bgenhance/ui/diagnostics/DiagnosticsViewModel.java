@@ -125,7 +125,9 @@ public final class DiagnosticsViewModel implements AutoCloseable {
         Objects.requireNonNull(callbackExecutor, "callbackExecutor");
         return new DiagnosticsViewModel(
                 DiagnosticsDataSource.fromBackend(context, backend),
-                new DiagnosticsUiMapper(() -> ModuleSettings.getConfigRevision(context)),
+                new DiagnosticsUiMapper(
+                        () -> ModuleSettings.getConfigRevision(context),
+                        () -> ModuleSettings.getResidencyPolicy(context).policyRevision()),
                 callbackExecutor,
                 DEFAULT_UI_PAGE_SIZE,
                 DEFAULT_QUERY_PAGE_SIZE);

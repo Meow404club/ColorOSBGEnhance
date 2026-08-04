@@ -15,6 +15,8 @@ import java.util.Set;
 final class HomeDiagnosticsStatus {
     enum Activation { ACTIVE, PARTIAL, INACTIVE }
 
+    private enum IdentityStatus { READY, PENDING, FAILED, MISSING }
+
     private static final Set<String> PRIMARY_HOOKS = Set.of(
             HookTargetIds.ATHENA_PERIODIC,
             HookTargetIds.OGUARD_KILL,
@@ -28,6 +30,10 @@ final class HomeDiagnosticsStatus {
     final boolean athenaConfigSynced;
     final boolean systemConfigError;
     final boolean athenaConfigError;
+    final boolean systemIdentityReady;
+    final boolean athenaIdentityReady;
+    final boolean systemIdentityError;
+    final boolean athenaIdentityError;
     private final Set<String> unavailablePrimaryHooks;
 
     private HomeDiagnosticsStatus(
@@ -39,6 +45,10 @@ final class HomeDiagnosticsStatus {
             boolean athenaConfigSynced,
             boolean systemConfigError,
             boolean athenaConfigError,
+            boolean systemIdentityReady,
+            boolean athenaIdentityReady,
+            boolean systemIdentityError,
+            boolean athenaIdentityError,
             Set<String> unavailablePrimaryHooks) {
         this.activation = activation;
         this.installedPrimaryHooks = installedPrimaryHooks;
@@ -48,6 +58,10 @@ final class HomeDiagnosticsStatus {
         this.athenaConfigSynced = athenaConfigSynced;
         this.systemConfigError = systemConfigError;
         this.athenaConfigError = athenaConfigError;
+        this.systemIdentityReady = systemIdentityReady;
+        this.athenaIdentityReady = athenaIdentityReady;
+        this.systemIdentityError = systemIdentityError;
+        this.athenaIdentityError = athenaIdentityError;
         this.unavailablePrimaryHooks = Collections.unmodifiableSet(
                 new HashSet<>(unavailablePrimaryHooks));
     }
@@ -57,6 +71,16 @@ final class HomeDiagnosticsStatus {
             String currentBootId,
             int localConfigRevision,
             int localModuleVersionCode) {
+        return evaluate(rows, currentBootId, localConfigRevision, -1L,
+                localModuleVersionCode);
+    }
+
+    static HomeDiagnosticsStatus evaluate(
+            List<DiagnosticsHookState> rows,
+            String currentBootId,
+            int localConfigRevision,
+            long localPolicyRevision,
+            int localModuleVersionCode) {
         boolean hasCurrentRows = false;
         boolean systemReady = false;
         boolean athenaReady = false;
@@ -64,6 +88,8 @@ final class HomeDiagnosticsStatus {
         boolean athenaSynced = false;
         boolean systemConfigError = false;
         boolean athenaConfigError = false;
+        IdentityStatus systemIdentity = IdentityStatus.MISSING;
+        IdentityStatus athenaIdentity = IdentityStatus.MISSING;
         Set<String> installedHooks = new HashSet<>();
         Set<String> unavailableHooks = new HashSet<>();
 
@@ -91,6 +117,14 @@ final class HomeDiagnosticsStatus {
                         athenaSynced |= synced;
                         athenaConfigError |= failed;
                     }
+                } else if (DiagnosticsTargetIds.RUNTIME_IDENTITY.equals(row.hookTargetId)) {
+                    IdentityStatus identity = identityStatus(
+                            row, localConfigRevision, localPolicyRevision);
+                    if (BridgeContract.PROCESS_SYSTEM_SERVER.equals(row.processId)) {
+                        systemIdentity = identity;
+                    } else if (BridgeContract.PROCESS_ATHENA.equals(row.processId)) {
+                        athenaIdentity = identity;
+                    }
                 } else if (PRIMARY_HOOKS.contains(row.hookTargetId)) {
                     String expectedProcessId = HookTargetIds.expectedProcessId(row.hookTargetId);
                     if (!expectedProcessId.isEmpty()
@@ -110,7 +144,10 @@ final class HomeDiagnosticsStatus {
         unavailableHooks.removeAll(installedHooks);
 
         Activation activation;
-        if (systemReady && athenaReady && installedHooks.containsAll(PRIMARY_HOOKS)) {
+        if (systemReady && athenaReady
+                && systemIdentity == IdentityStatus.READY
+                && athenaIdentity == IdentityStatus.READY
+                && installedHooks.containsAll(PRIMARY_HOOKS)) {
             activation = Activation.ACTIVE;
         } else if (hasCurrentRows) {
             activation = Activation.PARTIAL;
@@ -126,11 +163,19 @@ final class HomeDiagnosticsStatus {
                 athenaSynced,
                 systemConfigError,
                 athenaConfigError,
+                systemIdentity == IdentityStatus.READY,
+                athenaIdentity == IdentityStatus.READY,
+                systemIdentity == IdentityStatus.FAILED,
+                athenaIdentity == IdentityStatus.FAILED,
                 unavailableHooks);
     }
 
     boolean hasConfigError() {
         return systemConfigError || athenaConfigError;
+    }
+
+    boolean hasIdentityError() {
+        return systemIdentityError || athenaIdentityError;
     }
 
     boolean isPrimaryHookExplicitlyUnavailable(String hookTargetId) {
@@ -147,11 +192,15 @@ final class HomeDiagnosticsStatus {
             boolean localConfigError) {
         if (hasConfigError()) return R.string.effect_config_error;
         if (localConfigError) return R.string.effect_config_error;
+        if (hasIdentityError()) return R.string.effect_identity_error;
         if (hasExplicitlyUnavailablePrimaryHook()) {
             return R.string.effect_primary_hook_unavailable;
         }
         if (!systemProcessReady || !athenaProcessReady) {
             return R.string.effect_restart_required;
+        }
+        if (!systemIdentityReady || !athenaIdentityReady) {
+            return R.string.effect_identity_pending;
         }
         if (activation != Activation.ACTIVE) {
             return R.string.effect_primary_hook_unavailable;
@@ -165,5 +214,23 @@ final class HomeDiagnosticsStatus {
 
     private static String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private static IdentityStatus identityStatus(
+            DiagnosticsHookState row,
+            int localConfigRevision,
+            long localPolicyRevision) {
+        String value = safe(row.installStatus);
+        if (value.startsWith("FAILED")) return IdentityStatus.FAILED;
+        if (value.startsWith("IDENTITY_READY")
+                && row.configRevision >= localConfigRevision
+                && revisionAtLeast(row.policyRevision, localPolicyRevision)) {
+            return IdentityStatus.READY;
+        }
+        return IdentityStatus.PENDING;
+    }
+
+    private static boolean revisionAtLeast(int reported, long local) {
+        return local < 0L || reported >= Math.min(local, Integer.MAX_VALUE);
     }
 }

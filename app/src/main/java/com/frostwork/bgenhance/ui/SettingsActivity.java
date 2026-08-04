@@ -313,6 +313,7 @@ public final class SettingsActivity extends AppCompatActivity {
                 state.hookStates.items,
                 ModuleApplication.diagnosticsBootId(),
                 localRevision,
+                ModuleSettings.getResidencyPolicy(this).policyRevision(),
                 BuildConfig.VERSION_CODE);
         applyHomeDiagnosticsStatus(status);
         renderActivation(status.activation);

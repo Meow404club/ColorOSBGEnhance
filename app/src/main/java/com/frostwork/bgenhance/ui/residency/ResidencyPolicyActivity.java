@@ -522,6 +522,7 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
                 ModuleApplication.isServiceConnected(),
                 ModuleApplication.hasConfigSyncError(),
                 ModuleSettings.getConfigRevision(this),
+                ModuleSettings.getResidencyPolicy(this).policyRevision(),
                 ModuleSettings.getLocalBoolean(this, ModuleSettings.KEY_MASTER_ENABLE),
                 ModuleSettings.getResidencyPolicy(this).enabled());
         applyNotice.setText(message);
