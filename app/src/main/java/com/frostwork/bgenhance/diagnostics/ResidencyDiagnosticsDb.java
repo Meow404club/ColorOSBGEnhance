@@ -1023,7 +1023,7 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         selected.add("SUM(raw_hit_count) AS raw_hit_count");
         selected.add("SUM(event_count) AS event_count");
         selected.add("SUM(blocked_count) AS blocked_count");
-        selected.add("SUM(fail_open_count) AS fail_open_count");
+        selected.add(anomalousFailOpenCountSql());
         selected.add("SUM(identity_resolved_count) AS identity_resolved_count");
         selected.add("SUM(latency_micros_total) AS latency_micros_total");
         selected.add("MAX(latency_micros_max) AS latency_micros_max");
@@ -1051,6 +1051,14 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         where.argument(limit + 1);
         where.argument(offset);
         return new AggregateSql(sql.toString(), where.arguments());
+    }
+
+    private static String anomalousFailOpenCountSql() {
+        return "SUM(CASE WHEN result IN ('config_unavailable','runtime_fail_open')"
+                + " OR (result='fail_open' AND (decision IS NULL OR decision NOT IN ("
+                + "'MASTER_DISABLED','RESIDENCY_DISABLED','IDENTITY_UNKNOWN',"
+                + "'IDENTITY_UID_MISMATCH','SHARED_UID_CONFLICT','SYSTEM_UID')))"
+                + " THEN event_count ELSE 0 END) AS fail_open_count";
     }
 
     private static void selectDimension(

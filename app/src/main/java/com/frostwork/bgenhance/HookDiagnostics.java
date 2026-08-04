@@ -286,6 +286,8 @@ public final class HookDiagnostics {
             boolean resolved = safeIdentityResolved(trace, event);
             String failOpen = DiagnosticsResult.countsAsFailOpen(stableResult)
                     ? safeFailOpenReason(stableResult, trace) : "";
+            String rawError = DiagnosticsResult.countsAsAnomalousFailOpen(
+                    stableResult, failOpen) ? failOpen : "";
             RawHookHit rawHit = RawHookHit.builder()
                     .timestampMillis(timestamp)
                     .bootId(BOOT_ID)
@@ -296,7 +298,7 @@ public final class HookDiagnostics {
                     .policyRevision(revisions.policyRevision)
                     .parsed(true)
                     .identityResolved(resolved)
-                    .errorCode(failOpen)
+                    .errorCode(rawError)
                     .build();
             OutboxState outbox = OUTBOX.get();
             OfferResult rawOffered = outbox.offerRawHit(

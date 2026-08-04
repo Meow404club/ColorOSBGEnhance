@@ -13,6 +13,7 @@ import android.database.Cursor;
 import android.database.DatabaseUtils;
 import android.database.sqlite.SQLiteDatabase;
 import android.os.SystemClock;
+import com.frostwork.bgenhance.DiagnosticsResult;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -198,6 +199,48 @@ public final class ResidencyDiagnosticsDbTest {
         assertEquals(2L, database.queryRawHooks(0L, Long.MAX_VALUE, 10).get(0).hitCount);
         assertEquals(1L, database.queryHomeStats(
                 Collections.singletonList("freeze")).observed);
+    }
+
+    @Test
+    public void aggregateQueriesSeparateAnomalousAndProtectiveFailOpenEvents() {
+        database = open(policy(30, 30, 30, 60_000L));
+        long now = System.currentTimeMillis();
+        DiagnosticsWriteBatch.Builder batch = DiagnosticsWriteBatch.builder();
+        batch.addEvent(event(now, "stale", "com.example.target", 10123,
+                "WAKE", "fail_open", "STALE_IDENTITY_INDEX"));
+        batch.addEvent(event(now + 1L, "unknown", "", 10124,
+                "WAKE", "fail_open", "IDENTITY_UNKNOWN"));
+        batch.addEvent(event(now + 2L, "system", "android", 1000,
+                "WAKE", "fail_open", "SYSTEM_UID"));
+        batch.addEvent(event(now + 3L, "shared", "com.example.shared", 10125,
+                "WAKE", "fail_open", "SHARED_UID_CONFLICT"));
+        batch.addEvent(event(now + 4L, "generic", "com.example.target", 10123,
+                "WAKE", "fail_open", "FAIL_OPEN"));
+        batch.addEvent(event(now + 5L, "runtime", "com.example.target", 10123,
+                "WAKE", "runtime_fail_open", "SYSTEM_UID"));
+        batch.addEvent(event(now + 6L, "config", "com.example.target", 10123,
+                "WAKE", "config_unavailable", "CONFIG_UNAVAILABLE"));
+        database.writeBatch(batch.build());
+
+        DiagnosticsQuery.AggregatePage page = database.queryAggregates(
+                DiagnosticsQuery.AggregateQuery.builder()
+                        .dimension(DiagnosticsQuery.AggregateDimension.DECISION)
+                        .dimension(DiagnosticsQuery.AggregateDimension.RESULT)
+                        .limit(30)
+                        .build());
+
+        long observed = 0L;
+        long anomalous = 0L;
+        for (DiagnosticsQuery.AggregateRow row : page.items) {
+            observed += row.eventCount;
+            anomalous += row.failOpenCount;
+            if (DiagnosticsResult.isProtectiveFailOpenDecision(row.decision)
+                    && "fail_open".equals(row.result)) {
+                assertEquals(0L, row.failOpenCount);
+            }
+        }
+        assertEquals(7L, observed);
+        assertEquals(4L, anomalous);
     }
 
     @Test
@@ -1096,6 +1139,14 @@ public final class ResidencyDiagnosticsDbTest {
     private static NormalizedDiagnosticsEvent event(
             long at, String token, String packageName, int uid,
             String behavior, String result) {
+        return event(
+                at, token, packageName, uid, behavior, result,
+                "blocked".equals(result) ? "BLOCK_FREEZE" : "ALLOW_SYSTEM");
+    }
+
+    private static NormalizedDiagnosticsEvent event(
+            long at, String token, String packageName, int uid,
+            String behavior, String result, String decision) {
         return NormalizedDiagnosticsEvent.builder()
                 .timestampMillis(at)
                 .bootId("42")
@@ -1109,7 +1160,7 @@ public final class ResidencyDiagnosticsDbTest {
                 .configRevision(7)
                 .policyRevision(9)
                 .mode("CUSTOM")
-                .decision("blocked".equals(result) ? "BLOCK_FREEZE" : "ALLOW_SYSTEM")
+                .decision(decision)
                 .result(result)
                 .failOpenReason("runtime_fail_open".equals(result) ? "runtime_error" : "")
                 .latencyMicros(25L)

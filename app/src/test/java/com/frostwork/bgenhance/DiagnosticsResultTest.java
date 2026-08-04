@@ -33,6 +33,28 @@ public final class DiagnosticsResultTest {
     }
 
     @Test
+    public void anomalousFailOpenCountersExcludeProtectiveCompatibilityOutcomes() {
+        assertTrue(DiagnosticsResult.countsAsAnomalousFailOpen(
+                DiagnosticsResult.FAIL_OPEN, "STALE_IDENTITY_INDEX"));
+        assertTrue(DiagnosticsResult.countsAsAnomalousFailOpen(
+                DiagnosticsResult.FAIL_OPEN, "FAIL_OPEN"));
+        assertTrue(DiagnosticsResult.countsAsAnomalousFailOpen(
+                DiagnosticsResult.RUNTIME_FAIL_OPEN, "SYSTEM_UID"));
+        assertTrue(DiagnosticsResult.countsAsAnomalousFailOpen(
+                DiagnosticsResult.CONFIG_UNAVAILABLE, "CONFIG_UNAVAILABLE"));
+        assertFalse(DiagnosticsResult.countsAsAnomalousFailOpen(
+                DiagnosticsResult.FAIL_OPEN, "IDENTITY_UNKNOWN"));
+        assertFalse(DiagnosticsResult.countsAsAnomalousFailOpen(
+                DiagnosticsResult.FAIL_OPEN, "IDENTITY_UID_MISMATCH"));
+        assertFalse(DiagnosticsResult.countsAsAnomalousFailOpen(
+                DiagnosticsResult.FAIL_OPEN, "SHARED_UID_CONFLICT"));
+        assertFalse(DiagnosticsResult.countsAsAnomalousFailOpen(
+                DiagnosticsResult.FAIL_OPEN, "SYSTEM_UID"));
+        assertFalse(DiagnosticsResult.countsAsAnomalousFailOpen(
+                DiagnosticsResult.FAIL_OPEN, "MASTER_DISABLED"));
+    }
+
+    @Test
     public void appliedIsAStableKnownResult() {
         assertTrue(DiagnosticsResult.isKnown(DiagnosticsResult.APPLIED));
     }

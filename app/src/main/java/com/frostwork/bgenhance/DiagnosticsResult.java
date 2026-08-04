@@ -30,6 +30,24 @@ public final class DiagnosticsResult {
                 || RUNTIME_FAIL_OPEN.equals(result);
     }
 
+    /** Counts only fail-open outcomes that indicate an internal or configuration fault. */
+    public static boolean countsAsAnomalousFailOpen(String result, String decision) {
+        if (CONFIG_UNAVAILABLE.equals(result) || RUNTIME_FAIL_OPEN.equals(result)) {
+            return true;
+        }
+        if (!FAIL_OPEN.equals(result)) return false;
+        return !isProtectiveFailOpenDecision(decision);
+    }
+
+    public static boolean isProtectiveFailOpenDecision(String decision) {
+        return "MASTER_DISABLED".equals(decision)
+                || "RESIDENCY_DISABLED".equals(decision)
+                || "IDENTITY_UNKNOWN".equals(decision)
+                || "IDENTITY_UID_MISMATCH".equals(decision)
+                || "SHARED_UID_CONFLICT".equals(decision)
+                || "SYSTEM_UID".equals(decision);
+    }
+
     public static boolean isKnown(String result) {
         return PASSED.equals(result)
                 || BLOCKED.equals(result)
