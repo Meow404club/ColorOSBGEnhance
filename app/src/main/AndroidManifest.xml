@@ -13,6 +13,8 @@
     <application
         android:name=".ModuleApplication"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
         android:hasCode="true"
         android:description="@string/xposed_description"
         android:icon="@drawable/ic_shield"
