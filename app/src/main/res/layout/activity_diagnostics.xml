@@ -124,11 +124,15 @@
         <LinearLayout
             android:id="@+id/diagnostics_loading_state"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
             android:accessibilityLiveRegion="polite"
-            android:gravity="center"
+            android:gravity="center_horizontal"
             android:orientation="vertical"
-            android:padding="24dp">
+            android:paddingStart="24dp"
+            android:paddingTop="@dimen/diagnostics_state_top_padding"
+            android:paddingEnd="24dp"
+            android:paddingBottom="24dp">
 
             <com.google.android.material.progressindicator.CircularProgressIndicator
                 android:layout_width="40dp"
@@ -146,11 +150,15 @@
         <LinearLayout
             android:id="@+id/diagnostics_empty_state"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
             android:accessibilityLiveRegion="polite"
-            android:gravity="center"
+            android:gravity="center_horizontal"
             android:orientation="vertical"
-            android:padding="24dp"
+            android:paddingStart="24dp"
+            android:paddingTop="@dimen/diagnostics_state_top_padding"
+            android:paddingEnd="24dp"
+            android:paddingBottom="24dp"
             android:visibility="gone">
 
             <TextView
@@ -174,11 +182,15 @@
         <LinearLayout
             android:id="@+id/diagnostics_error_state"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
             android:accessibilityLiveRegion="polite"
-            android:gravity="center"
+            android:gravity="center_horizontal"
             android:orientation="vertical"
-            android:padding="24dp"
+            android:paddingStart="24dp"
+            android:paddingTop="@dimen/diagnostics_state_top_padding"
+            android:paddingEnd="24dp"
+            android:paddingBottom="24dp"
             android:visibility="gone">
 
             <TextView

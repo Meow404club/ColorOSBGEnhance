@@ -16,9 +16,11 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.view.ContextThemeWrapper;
+import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import androidx.appcompat.app.AlertDialog;
@@ -109,9 +111,24 @@ public final class DiagnosticsActivityLayoutTest {
         assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE,
                 activity.findViewById(R.id.diagnostics_error_state)
                         .getAccessibilityLiveRegion());
+        assertTopAnchoredStatePanel(activity, R.id.diagnostics_loading_state);
+        assertTopAnchoredStatePanel(activity, R.id.diagnostics_empty_state);
+        assertTopAnchoredStatePanel(activity, R.id.diagnostics_error_state);
         assertHistoryNoticeLayout(activity);
         assertNull(activity.findViewById(R.id.home_stats_overview));
         activity.finish();
+    }
+
+    private static void assertTopAnchoredStatePanel(Activity activity, int viewId) {
+        LinearLayout panel = activity.findViewById(viewId);
+        assertEquals(ViewGroup.LayoutParams.WRAP_CONTENT, panel.getLayoutParams().height);
+        assertEquals(Gravity.CENTER_HORIZONTAL,
+                panel.getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK);
+        assertEquals(Gravity.TOP,
+                ((FrameLayout.LayoutParams) panel.getLayoutParams()).gravity);
+        assertEquals(activity.getResources().getDimensionPixelSize(
+                        R.dimen.diagnostics_state_top_padding),
+                panel.getPaddingTop());
     }
 
     @Test
