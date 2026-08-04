@@ -17,7 +17,7 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
     private static final long MAX_WAL_BYTES = 2L * 1_024L * 1_024L;
 
     public static final String DATABASE_NAME = "residency_diagnostics.db";
-    public static final int SCHEMA_VERSION = 7;
+    public static final int SCHEMA_VERSION = 8;
 
     static final String TABLE_EVENTS = "normalized_events";
     static final String TABLE_AGGREGATES = "event_aggregates";
@@ -109,6 +109,10 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         if (current == 6 && newVersion >= 7) {
             migrateVersionSixToSeven(db);
             current = 7;
+        }
+        if (current == 7 && newVersion >= 8) {
+            migrateVersionSevenToEight(db);
+            current = 8;
         }
         if (current != newVersion) {
             throw new IllegalStateException(
@@ -299,14 +303,21 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         long toBucket = to == Long.MAX_VALUE
                 ? Long.MAX_VALUE : DiagnosticsValues.dayBucket(to - 1L) + DiagnosticsValues.DAY_MILLIS;
         ArrayList<DiagnosticsQuery.RawHookSummary> rows = new ArrayList<>();
-        String sql = "SELECT process_id,feature_id,hook_target_id,"
-                + "SUM(hit_count) AS hit_count,SUM(parsed_count) AS parsed_count,"
-                + "SUM(identity_resolved_count) AS identity_resolved_count,"
-                + "MAX(last_hit_at) AS last_hit_at,MAX(last_error) AS last_error "
-                + "FROM " + TABLE_RAW + " WHERE bucket_start>=? AND bucket_start<? "
-                + "GROUP BY process_id,feature_id,hook_target_id "
+        String sql = "SELECT r.process_id,r.feature_id,r.hook_target_id,"
+                + "SUM(r.hit_count) AS hit_count,SUM(r.parsed_count) AS parsed_count,"
+                + "SUM(r.identity_resolved_count) AS identity_resolved_count,"
+                + "MAX(r.last_hit_at) AS last_hit_at,COALESCE((SELECT latest.last_error FROM "
+                + TABLE_RAW + " latest WHERE latest.bucket_start>=? "
+                + "AND latest.bucket_start<? AND latest.process_id=r.process_id "
+                + "AND latest.feature_id=r.feature_id "
+                + "AND latest.hook_target_id=r.hook_target_id "
+                + "ORDER BY latest.last_hit_at DESC,latest.bucket_start DESC LIMIT 1),'') "
+                + "AS last_error FROM " + TABLE_RAW + " r "
+                + "WHERE r.bucket_start>=? AND r.bucket_start<? "
+                + "GROUP BY r.process_id,r.feature_id,r.hook_target_id "
                 + "ORDER BY hit_count DESC,last_hit_at DESC LIMIT ?";
         try (Cursor cursor = getReadableDatabase().rawQuery(sql, new String[] {
+                String.valueOf(fromBucket), String.valueOf(toBucket),
                 String.valueOf(fromBucket), String.valueOf(toBucket), String.valueOf(limit)
         })) {
             while (cursor.moveToNext()) {
@@ -412,6 +423,7 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         values.put("raw_hit_count", 0L);
         values.put("parsed_count", 0L);
         values.put("identity_resolved_count", 0L);
+        values.put("runtime_error", "");
         db.update(TABLE_HOOK_STATES, values, null, null);
     }
 
@@ -648,7 +660,8 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         values.put("identity_resolved_count", state.identityResolvedCount);
         values.put("config_revision", state.configRevision);
         values.put("policy_revision", state.policyRevision);
-        values.put("last_error", state.lastError);
+        values.put("install_error", authoritative ? state.lastError : "");
+        values.put("runtime_error", authoritative ? "" : state.lastError);
         values.put("updated_at", state.updatedAt);
         long inserted = db.insertWithOnConflict(
                 TABLE_HOOK_STATES, null, values, SQLiteDatabase.CONFLICT_IGNORE);
@@ -675,7 +688,9 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                         + "identity_resolved_count=identity_resolved_count+?,"
                         + "config_revision=CASE WHEN ?>=0 THEN ? ELSE config_revision END,"
                         + "policy_revision=CASE WHEN ?>=0 THEN ? ELSE policy_revision END,"
-                        + "last_error=CASE WHEN ?=1 OR ?<>'' THEN ? ELSE last_error END,"
+                        + "install_error=CASE WHEN ?=1 THEN ? ELSE install_error END,"
+                        + "runtime_error=CASE WHEN ?=0 AND ?>=last_hook_at "
+                        + "THEN ? ELSE runtime_error END,"
                         + "updated_at=MAX(updated_at,?) WHERE process_id=? AND hook_target_id=? "
                         + "AND (boot_id=? OR boot_id='' OR ?='')",
                 new Object[] {
@@ -689,7 +704,8 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                         state.identityResolvedCount,
                         state.configRevision, state.configRevision,
                         state.policyRevision, state.policyRevision,
-                        authoritative ? 1 : 0, state.lastError, state.lastError,
+                        authoritative ? 1 : 0, state.lastError,
+                        authoritative ? 1 : 0, state.lastHookAt, state.lastError,
                         state.updatedAt,
                         state.processId,
                         state.hookTargetId,
@@ -1139,7 +1155,7 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         createAggregateTableLatest(db);
         createRawTable(db);
         createFeatureTotalsTable(db);
-        createHookStateTable(db);
+        createHookStateTableVersionSeven(db);
         createMetadataTable(db);
         db.execSQL("CREATE TABLE " + TABLE_BATCH_CURSORS + " ("
                 + "wire_version INTEGER NOT NULL,boot_id TEXT NOT NULL,"
@@ -1195,7 +1211,7 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                 + "'runtime_fail_open') THEN event_count ELSE 0 END");
         createRawTable(db);
         createFeatureTotalsTable(db);
-        createHookStateTable(db);
+        createHookStateTableVersionSeven(db);
         db.execSQL("INSERT OR IGNORE INTO " + TABLE_FEATURE_TOTALS
                 + "(feature_id,observed,blocked,fail_open,last_at) "
                 + "SELECT feature_id,SUM(event_count),SUM(blocked_count),"
@@ -1250,6 +1266,15 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                 + " SET blocked_count=event_count WHERE result='candidate_filtered'");
     }
 
+    private static void migrateVersionSevenToEight(SQLiteDatabase db) {
+        db.execSQL("ALTER TABLE " + TABLE_HOOK_STATES
+                + " ADD COLUMN install_error TEXT NOT NULL DEFAULT ''");
+        db.execSQL("ALTER TABLE " + TABLE_HOOK_STATES
+                + " ADD COLUMN runtime_error TEXT NOT NULL DEFAULT ''");
+        db.execSQL("UPDATE " + TABLE_HOOK_STATES
+                + " SET install_error=last_error");
+    }
+
     private static void normalizeLegacySharedUidPackages(SQLiteDatabase db) {
         db.execSQL("UPDATE " + TABLE_EVENTS
                 + " SET package_name='' WHERE instr(package_name, ',')>0");
@@ -1282,7 +1307,22 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
     }
 
     static void createVersionSixForTest(SQLiteDatabase db) {
-        createLatestSchema(db);
+        createVersionSevenSchemaForTest(db);
+    }
+
+    static void createVersionSevenForTest(SQLiteDatabase db) {
+        createVersionSevenSchemaForTest(db);
+    }
+
+    private static void createVersionSevenSchemaForTest(SQLiteDatabase db) {
+        createEventTableLatest(db);
+        createAggregateTableLatest(db);
+        createRawTable(db);
+        createFeatureTotalsTable(db);
+        createHookStateTableVersionSeven(db);
+        createBatchCursorTable(db);
+        createMetadataTable(db);
+        createIndexes(db);
     }
 
     private static void createEventTableLatest(SQLiteDatabase db) {
@@ -1344,6 +1384,23 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
     }
 
     private static void createHookStateTable(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS " + TABLE_HOOK_STATES + " ("
+                + "process_id TEXT NOT NULL,hook_target_id TEXT NOT NULL,"
+                + "feature_id TEXT NOT NULL DEFAULT '',"
+                + "install_status TEXT NOT NULL DEFAULT 'UNKNOWN',"
+                + "boot_id TEXT NOT NULL DEFAULT '',last_hook_at INTEGER NOT NULL DEFAULT 0,"
+                + "last_event_at INTEGER NOT NULL DEFAULT 0,"
+                + "raw_hit_count INTEGER NOT NULL DEFAULT 0,"
+                + "parsed_count INTEGER NOT NULL DEFAULT 0,"
+                + "identity_resolved_count INTEGER NOT NULL DEFAULT 0,"
+                + "config_revision INTEGER NOT NULL DEFAULT -1,"
+                + "policy_revision INTEGER NOT NULL DEFAULT -1,"
+                + "install_error TEXT NOT NULL DEFAULT '',"
+                + "runtime_error TEXT NOT NULL DEFAULT '',updated_at INTEGER NOT NULL,"
+                + "PRIMARY KEY(process_id,hook_target_id))");
+    }
+
+    private static void createHookStateTableVersionSeven(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE IF NOT EXISTS " + TABLE_HOOK_STATES + " ("
                 + "process_id TEXT NOT NULL,hook_target_id TEXT NOT NULL,"
                 + "feature_id TEXT NOT NULL DEFAULT '',"
@@ -1501,7 +1558,8 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
     private static final String[] HOOK_STATE_PROJECTION = {
             "process_id", "hook_target_id", "feature_id", "install_status", "boot_id",
             "last_hook_at", "last_event_at", "raw_hit_count", "parsed_count",
-            "identity_resolved_count", "config_revision", "policy_revision", "last_error",
+            "identity_resolved_count", "config_revision", "policy_revision",
+            "CASE WHEN install_error<>'' THEN install_error ELSE runtime_error END AS last_error",
             "updated_at"
     };
 

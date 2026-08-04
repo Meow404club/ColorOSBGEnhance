@@ -76,6 +76,75 @@ public final class ResidencyDiagnosticsDbTest {
     }
 
     @Test
+    public void runtimeErrorSurvivesStickyStateAndClearsOnLaterSuccessfulHit() {
+        database = open(policy(20, 20, 20, 60_000L));
+        long now = System.currentTimeMillis();
+        database.writeBatch(DiagnosticsWriteBatch.builder()
+                .addRawHit(raw(now, false, false, "runtime_decode_error"))
+                .addHookState(state(now, "INSTALLED"))
+                .build());
+
+        assertEquals("runtime_decode_error",
+                database.queryHookStates(10).get(0).lastError);
+
+        database.writeBatch(DiagnosticsWriteBatch.builder()
+                .addHookState(state(now + 1L, "INSTALLED"))
+                .build());
+        assertEquals("runtime_decode_error",
+                database.queryHookStates(10).get(0).lastError);
+
+        database.writeBatch(DiagnosticsWriteBatch.builder()
+                .addRawHit(raw(now + 2L, true, true, ""))
+                .build());
+        assertEquals("", database.queryHookStates(10).get(0).lastError);
+    }
+
+    @Test
+    public void rawSummaryErrorComesFromLatestHitAndSuccessClearsIt() {
+        database = open(policy(20, 20, 20, 60_000L));
+        long firstDay = DiagnosticsValues.dayBucket(System.currentTimeMillis())
+                - (2L * DiagnosticsValues.DAY_MILLIS);
+        long oldHit = firstDay + 1_000L;
+        long newHit = firstDay + DiagnosticsValues.DAY_MILLIS + 1_000L;
+        database.writeBatch(DiagnosticsWriteBatch.builder()
+                .addRawHit(raw(oldHit, false, false, "zzz_old_error"))
+                .addRawHit(raw(newHit, false, false, "aaa_new_error"))
+                .build());
+
+        assertEquals("aaa_new_error",
+                database.queryRawHooks(0L, Long.MAX_VALUE, 10).get(0).lastError);
+
+        database.writeBatch(DiagnosticsWriteBatch.builder()
+                .addRawHit(raw(newHit + 1L, true, true, ""))
+                .build());
+
+        assertEquals("",
+                database.queryRawHooks(0L, Long.MAX_VALUE, 10).get(0).lastError);
+    }
+
+    @Test
+    public void statisticsClearRemovesRuntimeErrorButPreservesInstallError() {
+        database = open(policy(20, 20, 20, 60_000L));
+        long now = System.currentTimeMillis();
+        database.writeBatch(DiagnosticsWriteBatch.builder()
+                .addRawHit(raw(now, false, false, "runtime_decode_error"))
+                .addHookState(state(now, "INSTALLED"))
+                .build());
+
+        database.clear(DiagnosticsQuery.ClearScope.STATISTICS);
+
+        assertEquals("", database.queryHookStates(10).get(0).lastError);
+
+        database.writeBatch(DiagnosticsWriteBatch.builder()
+                .addHookState(state(now + 1L, "CONFIG_ERROR", "config_unavailable"))
+                .build());
+        database.clear(DiagnosticsQuery.ClearScope.STATISTICS);
+
+        assertEquals("config_unavailable",
+                database.queryHookStates(10).get(0).lastError);
+    }
+
+    @Test
     public void legacyMigrationDataAndMarkerCommitExactlyOnce() {
         database = open(policy(20, 20, 20, 60_000L));
         DiagnosticsWriteBatch first = DiagnosticsWriteBatch.builder()
@@ -914,6 +983,43 @@ public final class ResidencyDiagnosticsDbTest {
                 null));
     }
 
+    @Test
+    public void migrationFromVersionSevenPreservesExistingHookError() {
+        SQLiteDatabase legacy = context.openOrCreateDatabase(
+                databaseName, Context.MODE_PRIVATE, null);
+        ResidencyDiagnosticsDb.createVersionSevenForTest(legacy);
+        ContentValues state = new ContentValues();
+        state.put("process_id", "system_server");
+        state.put("hook_target_id", "freeze_target");
+        state.put("feature_id", "freeze");
+        state.put("install_status", "CONFIG_ERROR");
+        state.put("boot_id", "42");
+        state.put("last_error", "legacy_config_error");
+        state.put("updated_at", System.currentTimeMillis());
+        legacy.insertOrThrow(ResidencyDiagnosticsDb.TABLE_HOOK_STATES, null, state);
+        legacy.setVersion(7);
+        legacy.close();
+
+        database = open(policy(20, 20, 20, 60_000L));
+        SQLiteDatabase upgraded = database.getWritableDatabase();
+
+        assertEquals(ResidencyDiagnosticsDb.SCHEMA_VERSION, upgraded.getVersion());
+        assertEquals("legacy_config_error",
+                database.queryHookStates(10).get(0).lastError);
+        try (Cursor columns = upgraded.rawQuery(
+                "PRAGMA table_info(" + ResidencyDiagnosticsDb.TABLE_HOOK_STATES + ")",
+                null)) {
+            boolean installErrorFound = false;
+            boolean runtimeErrorFound = false;
+            while (columns.moveToNext()) {
+                if ("install_error".equals(columns.getString(1))) installErrorFound = true;
+                if ("runtime_error".equals(columns.getString(1))) runtimeErrorFound = true;
+            }
+            assertTrue(installErrorFound);
+            assertTrue(runtimeErrorFound);
+        }
+    }
+
     private ResidencyDiagnosticsDb open(DiagnosticsRetentionPolicy policy) {
         return open(policy, "42");
     }
@@ -945,6 +1051,11 @@ public final class ResidencyDiagnosticsDbTest {
     }
 
     private static RawHookHit raw(long at, boolean parsed, boolean identity) {
+        return raw(at, parsed, identity, "");
+    }
+
+    private static RawHookHit raw(
+            long at, boolean parsed, boolean identity, String errorCode) {
         return RawHookHit.builder()
                 .timestampMillis(at)
                 .bootId("42")
@@ -955,6 +1066,7 @@ public final class ResidencyDiagnosticsDbTest {
                 .policyRevision(9)
                 .parsed(parsed)
                 .identityResolved(identity)
+                .errorCode(errorCode)
                 .build();
     }
 
@@ -985,6 +1097,21 @@ public final class ResidencyDiagnosticsDbTest {
 
     private static DiagnosticsHookState state(long now, String status) {
         return state(now, "42", status, 0L);
+    }
+
+    private static DiagnosticsHookState state(
+            long now, String status, String lastError) {
+        return DiagnosticsHookState.builder()
+                .processId("system_server")
+                .featureId("freeze")
+                .hookTargetId("freeze_target")
+                .installStatus(status)
+                .bootId("42")
+                .configRevision(7)
+                .policyRevision(9)
+                .lastError(lastError)
+                .updatedAt(now)
+                .build();
     }
 
     private static DiagnosticsHookState state(
