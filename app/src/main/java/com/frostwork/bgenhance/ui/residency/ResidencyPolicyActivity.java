@@ -436,6 +436,33 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
         String label = presetLabels(section)[currentPresetIndex(section)];
         ((TextView) findViewById(viewId)).setText(
                 getString(R.string.residency_section_preset_value, label));
+        findViewById(sectionRowId(section)).setContentDescription(getString(
+                R.string.residency_section_row_accessibility,
+                getString(sectionTitle(section)),
+                getString(sectionSummary(section)),
+                label));
+    }
+
+    private static int sectionRowId(ResidencyPolicyEditorContract.Section section) {
+        switch (section) {
+            case KILL: return R.id.residency_kill_section_row;
+            case FREEZE: return R.id.residency_freeze_section_row;
+            case WAKE: return R.id.residency_wake_section_row;
+            case RESOURCE: return R.id.residency_resource_section_row;
+            case REFREEZE: return R.id.residency_refreeze_section_row;
+            default: throw new AssertionError(section);
+        }
+    }
+
+    private static int sectionSummary(ResidencyPolicyEditorContract.Section section) {
+        switch (section) {
+            case KILL: return R.string.residency_kill_summary;
+            case FREEZE: return R.string.residency_freeze_summary;
+            case WAKE: return R.string.residency_wake_summary;
+            case RESOURCE: return R.string.residency_resource_summary;
+            case REFREEZE: return R.string.residency_refreeze_summary;
+            default: throw new AssertionError(section);
+        }
     }
 
     private int currentPresetIndex(ResidencyPolicyEditorContract.Section section) {

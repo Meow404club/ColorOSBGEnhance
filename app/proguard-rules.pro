@@ -15,6 +15,14 @@
 -keep class com.frostwork.bgenhance.ui.FeatureSettingsActivity { *; }
 -keep class com.frostwork.bgenhance.ui.DiagnosticsActivity { *; }
 
+# Keep the Material exposed-menu fields used by the themed accessibility popup.
+-keepclassmembers class com.google.android.material.textfield.MaterialAutoCompleteTextView {
+    androidx.appcompat.widget.ListPopupWindow modalListPopup;
+}
+-keepclassmembers class androidx.appcompat.widget.ListPopupWindow {
+    android.widget.PopupWindow mPopup;
+}
+
 -keepclassmembers class * implements android.os.Parcelable {
     public static final ** CREATOR;
 }

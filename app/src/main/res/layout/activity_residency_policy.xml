@@ -236,6 +236,7 @@
                             android:layout_height="wrap_content"
                             android:clickable="true"
                             android:focusable="true"
+                            android:screenReaderFocusable="true"
                             android:foreground="?attr/selectableItemBackground"
                             android:gravity="center_vertical"
                             android:minHeight="112dp"
@@ -246,6 +247,7 @@
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
+                                android:importantForAccessibility="noHideDescendants"
                                 android:orientation="vertical"
                                 android:paddingEnd="12dp">
 
@@ -274,6 +276,7 @@
                             <ImageView
                                 android:layout_width="24dp"
                                 android:layout_height="24dp"
+                                android:importantForAccessibility="no"
                                 android:contentDescription="@null"
                                 android:src="@drawable/ic_chevron_right" />
                         </LinearLayout>
@@ -290,6 +293,7 @@
                             android:layout_height="wrap_content"
                             android:clickable="true"
                             android:focusable="true"
+                            android:screenReaderFocusable="true"
                             android:foreground="?attr/selectableItemBackground"
                             android:gravity="center_vertical"
                             android:minHeight="112dp"
@@ -300,6 +304,7 @@
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
+                                android:importantForAccessibility="noHideDescendants"
                                 android:orientation="vertical"
                                 android:paddingEnd="12dp">
 
@@ -328,6 +333,7 @@
                             <ImageView
                                 android:layout_width="24dp"
                                 android:layout_height="24dp"
+                                android:importantForAccessibility="no"
                                 android:contentDescription="@null"
                                 android:src="@drawable/ic_chevron_right" />
                         </LinearLayout>
@@ -344,6 +350,7 @@
                             android:layout_height="wrap_content"
                             android:clickable="true"
                             android:focusable="true"
+                            android:screenReaderFocusable="true"
                             android:foreground="?attr/selectableItemBackground"
                             android:gravity="center_vertical"
                             android:minHeight="112dp"
@@ -354,6 +361,7 @@
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
+                                android:importantForAccessibility="noHideDescendants"
                                 android:orientation="vertical"
                                 android:paddingEnd="12dp">
 
@@ -382,6 +390,7 @@
                             <ImageView
                                 android:layout_width="24dp"
                                 android:layout_height="24dp"
+                                android:importantForAccessibility="no"
                                 android:contentDescription="@null"
                                 android:src="@drawable/ic_chevron_right" />
                         </LinearLayout>
@@ -398,6 +407,7 @@
                             android:layout_height="wrap_content"
                             android:clickable="true"
                             android:focusable="true"
+                            android:screenReaderFocusable="true"
                             android:foreground="?attr/selectableItemBackground"
                             android:gravity="center_vertical"
                             android:minHeight="112dp"
@@ -408,6 +418,7 @@
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
+                                android:importantForAccessibility="noHideDescendants"
                                 android:orientation="vertical"
                                 android:paddingEnd="12dp">
 
@@ -436,6 +447,7 @@
                             <ImageView
                                 android:layout_width="24dp"
                                 android:layout_height="24dp"
+                                android:importantForAccessibility="no"
                                 android:contentDescription="@null"
                                 android:src="@drawable/ic_chevron_right" />
                         </LinearLayout>
@@ -452,6 +464,7 @@
                             android:layout_height="wrap_content"
                             android:clickable="true"
                             android:focusable="true"
+                            android:screenReaderFocusable="true"
                             android:foreground="?attr/selectableItemBackground"
                             android:gravity="center_vertical"
                             android:minHeight="112dp"
@@ -462,6 +475,7 @@
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
+                                android:importantForAccessibility="noHideDescendants"
                                 android:orientation="vertical"
                                 android:paddingEnd="12dp">
 
@@ -490,6 +504,7 @@
                             <ImageView
                                 android:layout_width="24dp"
                                 android:layout_height="24dp"
+                                android:importantForAccessibility="no"
                                 android:contentDescription="@null"
                                 android:src="@drawable/ic_chevron_right" />
                         </LinearLayout>

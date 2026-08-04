@@ -426,15 +426,25 @@ public final class ResidencyUiLayoutTest {
         View policy = inflate(R.layout.activity_residency_policy);
         View custom = policy.findViewById(R.id.residency_custom_section);
 
-        assertTrue(custom.findViewById(R.id.residency_kill_section_row).isClickable());
-        assertTrue(custom.findViewById(R.id.residency_freeze_section_row).isClickable());
-        assertTrue(custom.findViewById(R.id.residency_wake_section_row).isClickable());
-        assertTrue(custom.findViewById(R.id.residency_resource_section_row).isClickable());
-        assertTrue(custom.findViewById(R.id.residency_refreeze_section_row).isClickable());
+        assertPresetRowAccessibility(custom, R.id.residency_kill_section_row);
+        assertPresetRowAccessibility(custom, R.id.residency_freeze_section_row);
+        assertPresetRowAccessibility(custom, R.id.residency_wake_section_row);
+        assertPresetRowAccessibility(custom, R.id.residency_resource_section_row);
+        assertPresetRowAccessibility(custom, R.id.residency_refreeze_section_row);
         assertEquals(0, countViewsOfType(
                 custom, com.google.android.material.materialswitch.MaterialSwitch.class));
         assertEquals(0, countViewsOfType(
                 custom, com.google.android.material.textfield.TextInputEditText.class));
+    }
+
+    private static void assertPresetRowAccessibility(View root, int rowId) {
+        ViewGroup row = (ViewGroup) root.findViewById(rowId);
+        assertTrue(row.isClickable());
+        assertTrue(row.isScreenReaderFocusable());
+        assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS,
+                row.getChildAt(0).getImportantForAccessibility());
+        assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO,
+                row.getChildAt(1).getImportantForAccessibility());
     }
 
     @Test

@@ -101,6 +101,7 @@
     <string name="residency_custom_title">自定义策略</string>
     <string name="residency_custom_summary">以下设置只在选择“自定义”时使用</string>
     <string name="residency_section_preset_value">预置：%1$s</string>
+    <string name="residency_section_row_accessibility">%1$s。%2$s。当前预置：%3$s。点击编辑。</string>
     <string name="residency_detail_done">完成</string>
     <string name="residency_section_partial_support">部分设置在当前系统上不可用，已暂时禁用。可在“运行诊断”的“功能状态”中查看详情。</string>
     <string name="residency_preset_follow_system">跟随系统</string>
