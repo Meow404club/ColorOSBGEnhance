@@ -779,6 +779,7 @@ public final class HookDiagnostics {
         if (HookTargetIds.OGUARD_KILL.equals(target)) return FeatureIds.OGUARD_KILL;
         if (HookTargetIds.OGUARD_FORCE_STOP.equals(target)) return FeatureIds.OGUARD_FORCE_STOP;
         if (HookTargetIds.TOURNAMENT.equals(target)) return FeatureIds.TOURNAMENT;
+        if (HookTargetIds.OSENSE_GROUP_CLEAN.equals(target)) return FeatureIds.NIRVANA;
         if (HookTargetIds.OSENSE_PROCESS_KILL.equals(target)) return FeatureIds.OSENSE_PER_PROCESS;
         if (HookTargetIds.HANS_FREEZE_DISPATCH.equals(target)
                 || HookTargetIds.HANS_FAST_FREEZE_DISPATCH.equals(target)) return FeatureIds.HANS;

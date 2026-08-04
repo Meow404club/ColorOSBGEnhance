@@ -3,6 +3,7 @@ package com.frostwork.bgenhance.hooks;
 import android.os.Bundle;
 import com.frostwork.bgenhance.FeatureHook;
 import com.frostwork.bgenhance.FeatureIds;
+import com.frostwork.bgenhance.HookDiagnostics;
 import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.HookUtils;
 import com.frostwork.bgenhance.ModuleLog;
@@ -18,11 +19,11 @@ public final class NirvanaHook implements FeatureHook {
     public String install(ClassLoader loader) {
         int count = HookUtils.hookMatching(CLASS_NAME, loader, this::isTarget, chain -> {
             Object value = HookUtils.objectArg(chain, 0);
-            if (!(value instanceof Bundle)) return chain.proceed();
-            Bundle bundle = (Bundle) value;
-            String scene = bundle.getString("scene", "");
-            Mapping mapping = map(scene);
+            Mapping mapping = recordInvocation(value, (target, parsed, identity, error) ->
+                    HookDiagnostics.recordRawHookHit(
+                            target, parsed, identity, error));
             if (mapping == null) return chain.proceed();
+            String scene = ((Bundle) value).getString("scene", "");
             ModuleLog.d("osense scene request feature=" + mapping.featureId
                     + " code=" + mapping.code + " scene=" + scene);
             return chain.proceed();
@@ -36,7 +37,23 @@ public final class NirvanaHook implements FeatureHook {
                 && Bundle.class.isAssignableFrom(p[0]) && method.getReturnType() == boolean.class;
     }
 
-    private Mapping map(String scene) {
+    static Mapping recordInvocation(Object value, RawHitRecorder recorder) {
+        boolean parsed = value instanceof Bundle;
+        try {
+            recorder.record(
+                    HookTargetIds.OSENSE_GROUP_CLEAN,
+                    parsed,
+                    false,
+                    parsed ? "" : "hook_arguments_unparsed");
+        } catch (Throwable ignored) {
+            // Diagnostics must never change the vendor scene decision.
+        }
+        if (!parsed) return null;
+        Object scene = ((Bundle) value).get("scene");
+        return scene instanceof String ? map((String) scene) : null;
+    }
+
+    private static Mapping map(String scene) {
         if ("NirvanaLowFree".equals(scene))
             return new Mapping(FeatureIds.NIRVANA, 1026);
         if ("CamLowFree".equals(scene))
@@ -53,10 +70,18 @@ public final class NirvanaHook implements FeatureHook {
         return "INSTALLED:1";
     }
 
-    private static final class Mapping {
+    static final class Mapping {
         final String featureId; final int code;
         Mapping(String featureId, int code) {
             this.featureId = featureId; this.code = code;
         }
+    }
+
+    interface RawHitRecorder {
+        void record(
+                String hookTargetId,
+                boolean parsed,
+                boolean identityResolved,
+                String errorCode);
     }
 }

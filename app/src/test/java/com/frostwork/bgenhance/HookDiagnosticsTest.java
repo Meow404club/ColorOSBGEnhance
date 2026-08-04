@@ -765,6 +765,25 @@ public final class HookDiagnosticsTest {
     }
 
     @Test
+    public void osenseSceneRawHitsUseTheGroupCleanTargetWithoutAUserEvent()
+            throws Exception {
+        setEpoch(EPOCH);
+        provider.enqueue(request -> acceptedAck(request, EPOCH));
+
+        HookDiagnostics.recordRawHookHit(
+                HookTargetIds.OSENSE_GROUP_CLEAN, true, false, "");
+        flushSnapshot();
+
+        DiagnosticsWriteBatch batch = parse(provider.requests.get(0));
+        assertEquals(1, batch.rawHits.size());
+        assertEquals(FeatureIds.NIRVANA, batch.rawHits.get(0).featureId);
+        assertEquals(
+                HookTargetIds.OSENSE_GROUP_CLEAN,
+                batch.rawHits.get(0).hookTargetId);
+        assertTrue(batch.events.isEmpty());
+    }
+
+    @Test
     public void fallbackMappingsKeepFreezeAndUnknownAthenaEventsOnVerifiedTargets() {
         HookEvent superFreeze = new HookEvent(
                 FeatureIds.SUPER_FREEZE, -1, 10_001,
