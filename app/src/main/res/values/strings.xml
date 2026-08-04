@@ -27,6 +27,10 @@
     <string name="preset_strong">增强</string>
     <string name="preset_custom">自定义</string>
     <string name="preset_applied">已应用“%1$s”</string>
+    <string name="preset_risk_dialog_title">应用“增强”模式？</string>
+    <string name="preset_risk_dialog_message">此模式会一次开启 %1$d 项高风险保护，可能增加内存占用和待机耗电；内存不足时也可能影响相机、游戏或其他前台应用启动。建议先开启观察模式。</string>
+    <string name="apply_anyway">仍然应用</string>
+    <string name="master_disabled_banner">后台保护已关闭；当前设置会保留，重新开启后可继续修改</string>
 
     <string name="basic_title">基础保护</string>
     <string name="periodic_title">定期清理保护</string>

@@ -14,8 +14,10 @@ import com.frostwork.bgenhance.R;
 import com.frostwork.bgenhance.ui.residency.ResidencyAppsActivity;
 import com.frostwork.bgenhance.ui.residency.ResidencyRuleStore;
 import com.google.android.material.button.MaterialButtonToggleGroup;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.materialswitch.MaterialSwitch;
 import com.google.android.material.snackbar.Snackbar;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,6 +33,7 @@ public final class SettingsActivity extends AppCompatActivity {
     private TextView statusTitle;
     private TextView statusSummary;
     private TextView dryRunBanner;
+    private TextView masterDisabledBanner;
     private TextView effectNotice;
     private View customAdvancedSection;
     private StatsOverviewView statsOverview;
@@ -98,6 +101,7 @@ public final class SettingsActivity extends AppCompatActivity {
         statusTitle = findViewById(R.id.text_module_status);
         statusSummary = findViewById(R.id.text_module_summary);
         dryRunBanner = findViewById(R.id.banner_dry_run);
+        masterDisabledBanner = findViewById(R.id.banner_master_disabled);
         effectNotice = findViewById(R.id.text_effect_notice);
         customAdvancedSection = findViewById(R.id.custom_advanced_section);
         statsOverview = findViewById(R.id.home_stats_overview);
@@ -126,8 +130,11 @@ public final class SettingsActivity extends AppCompatActivity {
 
         presetGroup.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
             if (!isChecked || binding) return;
-            if (checkedId == R.id.button_preset_balanced) applyPreset(ModuleSettings.PRESET_BALANCED);
-            else if (checkedId == R.id.button_preset_strong) applyPreset(ModuleSettings.PRESET_STRONG);
+            if (checkedId == R.id.button_preset_balanced) {
+                requestPreset(ModuleSettings.PRESET_BALANCED);
+            } else if (checkedId == R.id.button_preset_strong) {
+                requestPreset(ModuleSettings.PRESET_STRONG);
+            }
             else if (checkedId == R.id.button_preset_custom) {
                 boolean saved = ModuleSettings.setString(
                         this,
@@ -155,6 +162,7 @@ public final class SettingsActivity extends AppCompatActivity {
 
     private void bindNavigation(int viewId, String group) {
         findViewById(viewId).setOnClickListener(v -> {
+            if (!v.isEnabled()) return;
             Intent intent = new Intent(this, FeatureSettingsActivity.class);
             intent.putExtra(FeatureSettingsActivity.EXTRA_GROUP, group);
             startActivity(intent);
@@ -179,7 +187,45 @@ public final class SettingsActivity extends AppCompatActivity {
         refreshAll();
     }
 
-    private void applyPreset(String preset) {
+    private void requestPreset(String preset) {
+        if (!ModuleSettings.PRESET_STRONG.equals(preset)) {
+            applyPreset(preset);
+            return;
+        }
+        Map<String, Boolean> values = presetValues(this, true);
+        List<FeatureCatalog.FeatureSpec> pending = new ArrayList<>();
+        for (FeatureCatalog.FeatureSpec spec : FeatureCatalog.all()) {
+            if (Boolean.TRUE.equals(values.get(spec.prefKey))
+                    && FeatureCatalog.needsRiskConfirmation(spec)
+                    && !ModuleSettings.prefs(this).getBoolean(
+                            FeatureCatalog.riskConfirmationKey(spec), false)) {
+                pending.add(spec);
+            }
+        }
+        if (pending.isEmpty()) {
+            applyPreset(preset);
+            return;
+        }
+
+        refreshAll();
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.preset_risk_dialog_title)
+                .setMessage(getString(R.string.preset_risk_dialog_message, pending.size()))
+                .setNegativeButton(R.string.cancel, (dialog, which) -> refreshAll())
+                .setPositiveButton(R.string.apply_anyway, (dialog, which) -> {
+                    if (!applyPreset(ModuleSettings.PRESET_STRONG)) return;
+                    android.content.SharedPreferences.Editor editor =
+                            ModuleSettings.prefs(this).edit();
+                    for (FeatureCatalog.FeatureSpec spec : pending) {
+                        editor.putBoolean(FeatureCatalog.riskConfirmationKey(spec), true);
+                    }
+                    editor.apply();
+                })
+                .setOnCancelListener(dialog -> refreshAll())
+                .show();
+    }
+
+    private boolean applyPreset(String preset) {
         binding = true;
         boolean strong = ModuleSettings.PRESET_STRONG.equals(preset);
         Map<String, Boolean> values = presetValues(this, strong);
@@ -194,6 +240,7 @@ public final class SettingsActivity extends AppCompatActivity {
                 findViewById(android.R.id.content),
                 text,
                 saved ? Snackbar.LENGTH_SHORT : Snackbar.LENGTH_LONG).show();
+        return saved;
     }
 
     static Map<String, Boolean> presetValues(Context context, boolean strong) {
@@ -234,8 +281,10 @@ public final class SettingsActivity extends AppCompatActivity {
         customAdvancedSection.setVisibility(custom ? View.VISIBLE : View.GONE);
 
         boolean master = masterSwitch.isChecked();
+        refreshProtectionEditorAvailability(master);
         refreshBasicSwitchAvailability(master, lastHomeDiagnosticsStatus);
-        dryRunBanner.setVisibility(dryRunSwitch.isChecked() ? View.VISIBLE : View.GONE);
+        dryRunBanner.setVisibility(master && dryRunSwitch.isChecked() ? View.VISIBLE : View.GONE);
+        masterDisabledBanner.setVisibility(master ? View.GONE : View.VISIBLE);
 
         refreshNavigationCounts();
         refreshResidencySummary();
@@ -327,6 +376,27 @@ public final class SettingsActivity extends AppCompatActivity {
         updateBasicSwitch(
                 oguardStopSwitch, R.id.row_oguard_stop, HookTargetIds.OGUARD_FORCE_STOP,
                 masterEnabled, status);
+    }
+
+    private void refreshProtectionEditorAvailability(boolean masterEnabled) {
+        presetGroup.setEnabled(masterEnabled);
+        for (int index = 0; index < presetGroup.getChildCount(); index++) {
+            presetGroup.getChildAt(index).setEnabled(masterEnabled);
+        }
+        updateEditableRow(dryRunSwitch, R.id.row_dry_run, masterEnabled);
+        int[] navigationRows = {
+                R.id.row_fast_clear, R.id.row_memory, R.id.row_nirvana, R.id.row_freeze
+        };
+        for (int rowId : navigationRows) {
+            View row = findViewById(rowId);
+            row.setEnabled(masterEnabled);
+        }
+        customAdvancedSection.setAlpha(masterEnabled ? 1f : 0.55f);
+    }
+
+    private void updateEditableRow(MaterialSwitch switchView, int rowId, boolean editable) {
+        switchView.setEnabled(editable);
+        findViewById(rowId).setAlpha(editable ? 1f : 0.55f);
     }
 
     private void updateBasicSwitch(

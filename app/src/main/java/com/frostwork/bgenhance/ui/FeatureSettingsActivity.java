@@ -20,6 +20,7 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
     public static final String EXTRA_GROUP = "group";
     private String group;
     private LinearLayout container;
+    private TextView masterDisabledBanner;
     private boolean masterEnabled;
     private HookStatusViewModel hookStatusViewModel;
     private HookStatusViewModel.State hookStatus;
@@ -36,6 +37,7 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
                 .setNavigationOnClickListener(v -> finish());
         ((TextView) findViewById(R.id.page_title)).setText(FeatureCatalog.titleForGroup(group));
         ((TextView) findViewById(R.id.page_subtitle)).setText(FeatureCatalog.subtitleForGroup(group));
+        masterDisabledBanner = findViewById(R.id.banner_master_disabled);
         container = findViewById(R.id.card_container);
         hookStatusViewModel = HookStatusViewModel.create(this);
         hookStatusViewModel.setListener(state -> {
@@ -68,8 +70,9 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
         container.removeAllViews();
         List<FeatureCatalog.FeatureSpec> specs = FeatureCatalog.forGroup(group);
         masterEnabled = ModuleSettings.getLocalBoolean(this, ModuleSettings.KEY_MASTER_ENABLE);
+        masterDisabledBanner.setVisibility(masterEnabled ? View.GONE : View.VISIBLE);
         ((TextView) findViewById(R.id.banner_dry_run)).setVisibility(
-                ModuleSettings.getLocalBoolean(this, ModuleSettings.KEY_DRY_RUN)
+                masterEnabled && ModuleSettings.getLocalBoolean(this, ModuleSettings.KEY_DRY_RUN)
                         ? View.VISIBLE : View.GONE);
 
         List<List<FeatureCatalog.FeatureSpec>> sections = groupByRisk(specs);
@@ -121,8 +124,12 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
             row.bind(spec, ModuleSettings.getLocalBoolean(this, spec.prefKey));
             boolean unsupported = isExplicitlyUnsupported(spec);
             if (spec.diagnosticOnly) row.showDiagnosticOnly();
-            else if (unsupported) row.showUnsupported();
-            else row.setRowEnabled(masterEnabled);
+            else if (unsupported) {
+                row.showUnsupported();
+                if (!masterEnabled) row.setRowEnabled(false);
+            } else {
+                row.setRowEnabled(masterEnabled);
+            }
             row.setListener((changedRow, checked) -> onSwitchRequested(spec, changedRow, checked));
             content.addView(row, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -148,15 +155,16 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
     private void onSwitchRequested(FeatureCatalog.FeatureSpec spec,
                                    SettingSwitchRow row,
                                    boolean checked) {
-        if (checked && needsRiskConfirmation(spec)
-                && !ModuleSettings.prefs(this).getBoolean("confirmed_risk." + spec.prefKey, false)) {
+        if (checked && FeatureCatalog.needsRiskConfirmation(spec)
+                && !ModuleSettings.prefs(this).getBoolean(
+                        FeatureCatalog.riskConfirmationKey(spec), false)) {
             new MaterialAlertDialogBuilder(this)
                     .setTitle(getString(R.string.risk_dialog_title, getString(spec.titleRes)))
                     .setMessage(R.string.risk_dialog_message)
                     .setNegativeButton(R.string.cancel, (dialog, which) -> row.setCheckedSilently(false))
                     .setPositiveButton(R.string.enable_anyway, (dialog, which) -> {
                         ModuleSettings.prefs(this).edit()
-                                .putBoolean("confirmed_risk." + spec.prefKey, true).apply();
+                                .putBoolean(FeatureCatalog.riskConfirmationKey(spec), true).apply();
                         persist(spec, row, true);
                     })
                     .setOnCancelListener(dialog -> row.setCheckedSilently(false))
@@ -180,12 +188,6 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
         Snackbar.make(findViewById(android.R.id.content),
                 saved ? R.string.settings_saved : R.string.settings_save_failed,
                 saved ? Snackbar.LENGTH_SHORT : Snackbar.LENGTH_LONG).show();
-    }
-
-    private boolean needsRiskConfirmation(FeatureCatalog.FeatureSpec spec) {
-        return spec.risk == FeatureCatalog.Risk.HIGH
-                || spec.risk == FeatureCatalog.Risk.VERY_HIGH
-                || spec.experimental;
     }
 
     private boolean isExplicitlyUnsupported(FeatureCatalog.FeatureSpec spec) {

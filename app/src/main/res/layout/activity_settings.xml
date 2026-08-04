@@ -129,6 +129,18 @@
             </com.google.android.material.card.MaterialCardView>
 
             <TextView
+                android:id="@+id/banner_master_disabled"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/card_spacing"
+                android:background="@drawable/bg_notice_info"
+                android:padding="16dp"
+                android:text="@string/master_disabled_banner"
+                android:textColor="@color/brand"
+                android:textSize="14sp"
+                android:visibility="gone" />
+
+            <TextView
                 android:id="@+id/banner_dry_run"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

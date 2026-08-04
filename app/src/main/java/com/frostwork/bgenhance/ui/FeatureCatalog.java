@@ -4,11 +4,14 @@ import com.frostwork.bgenhance.FeatureIds;
 import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
 public final class FeatureCatalog {
+    private static final String RISK_CONFIRMATION_PREFIX = "confirmed_risk.";
+
     private FeatureCatalog() {}
 
     public static final String GROUP_FAST_CLEAR = "fast_clear";
@@ -99,6 +102,25 @@ public final class FeatureCatalog {
         if (GROUP_NIRVANA.equals(group)) return NIRVANA;
         if (GROUP_FREEZE.equals(group)) return FREEZE;
         return Collections.emptyList();
+    }
+
+    public static List<FeatureSpec> all() {
+        List<FeatureSpec> specs = new ArrayList<>();
+        specs.addAll(FAST_CLEAR);
+        specs.addAll(MEMORY);
+        specs.addAll(NIRVANA);
+        specs.addAll(FREEZE);
+        return Collections.unmodifiableList(specs);
+    }
+
+    public static boolean needsRiskConfirmation(FeatureSpec spec) {
+        return spec != null && (spec.risk == Risk.HIGH
+                || spec.risk == Risk.VERY_HIGH
+                || spec.experimental);
+    }
+
+    public static String riskConfirmationKey(FeatureSpec spec) {
+        return RISK_CONFIRMATION_PREFIX + spec.prefKey;
     }
 
     public static int titleForGroup(String group) {
