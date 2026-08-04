@@ -149,34 +149,35 @@
                 android:layout_height="match_parent"
                 android:background="@color/divider" />
 
-            <LinearLayout
+            <ScrollView
+                android:id="@+id/residency_import_actions_scroll"
                 android:layout_width="168dp"
                 android:layout_height="match_parent"
-                android:orientation="vertical"
+                android:clipToPadding="false"
+                android:fillViewport="true"
+                android:scrollbars="vertical"
                 android:paddingStart="12dp"
                 android:paddingEnd="0dp"
                 android:paddingTop="10dp"
                 android:paddingBottom="10dp">
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/residency_import_select_all"
-                    style="@style/Widget.Material3.Button.TextButton"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:minHeight="48dp"
-                    android:text="@string/residency_import_select_all" />
+                    android:orientation="vertical">
 
-                <ScrollView
-                    android:layout_width="match_parent"
-                    android:layout_height="0dp"
-                    android:layout_weight="1"
-                    android:clipToPadding="false"
-                    android:fillViewport="true"
-                    android:scrollbars="vertical">
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/residency_import_select_all"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
+                        android:text="@string/residency_import_select_all" />
 
                     <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
-                        android:layout_height="wrap_content">
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp">
 
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -184,55 +185,48 @@
                             android:orientation="vertical"
                             android:padding="12dp">
 
-                            <LinearLayout
+                            <TextView
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
-                                android:gravity="center_vertical"
-                                android:orientation="horizontal">
+                                android:importantForAccessibility="no"
+                                android:text="@string/residency_import_kill_title"
+                                android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" />
 
-                                <TextView
-                                    android:layout_width="0dp"
-                                    android:layout_height="wrap_content"
-                                    android:layout_weight="1"
-                                    android:paddingStart="0dp"
-                                    android:paddingEnd="6dp"
-                                    android:text="@string/residency_import_kill_title"
-                                    android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" />
-
-                                <com.google.android.material.materialswitch.MaterialSwitch
-                                    android:id="@+id/residency_import_kill"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:contentDescription="@string/residency_import_kill_title" />
-                            </LinearLayout>
+                            <com.google.android.material.materialswitch.MaterialSwitch
+                                android:id="@+id/residency_import_kill"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_gravity="end"
+                                android:contentDescription="@string/residency_import_kill_accessibility" />
 
                             <TextView
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="4dp"
+                                android:importantForAccessibility="no"
                                 android:text="@string/residency_import_kill_summary"
                                 android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
                         </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>
-                </ScrollView>
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/residency_import_apply"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:minHeight="48dp"
-                    android:text="@string/residency_import_apply" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/residency_import_apply"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:minHeight="48dp"
+                        android:text="@string/residency_import_apply" />
 
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/residency_import_reselect"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:minHeight="48dp"
-                    android:text="@string/residency_import_reselect" />
-            </LinearLayout>
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/residency_import_reselect"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:minHeight="48dp"
+                        android:text="@string/residency_import_reselect" />
+                </LinearLayout>
+            </ScrollView>
         </LinearLayout>
     </LinearLayout>
 

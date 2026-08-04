@@ -15,6 +15,7 @@
     <string name="residency_filter_status_hint">状态</string>
     <string name="residency_show_system_apps">显示系统应用</string>
     <string name="residency_show_system_apps_summary">系统应用中包含重要组件，不能更改的项目会明确标出</string>
+    <string name="residency_show_system_apps_accessibility">显示系统应用，系统应用中包含重要组件，不能更改的项目会明确标出</string>
     <string name="residency_add_app">添加应用</string>
     <string name="residency_retry">重试</string>
     <string name="residency_clear_filters">清除筛选</string>
@@ -36,6 +37,7 @@
     <string name="residency_import_choose">选择文件</string>
     <string name="residency_import_kill_title">同时开启后台保护</string>
     <string name="residency_import_kill_summary">旧文件只包含冻结相关设置。开启后，也会为选中的应用减少系统后台关闭。</string>
+    <string name="residency_import_kill_accessibility">同时开启后台保护，旧文件只包含冻结相关设置。开启后，也会为选中的应用减少系统后台关闭。</string>
     <string name="residency_import_select_all">全选</string>
     <string name="residency_import_clear_all">取消全选</string>
     <string name="residency_import_apply">导入所选设置</string>

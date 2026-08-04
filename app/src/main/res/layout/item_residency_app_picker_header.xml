@@ -66,9 +66,11 @@
             android:paddingBottom="12dp">
 
             <LinearLayout
+                android:id="@+id/residency_show_system_text"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:importantForAccessibility="noHideDescendants"
                 android:orientation="vertical"
                 android:paddingEnd="12dp">
 
@@ -91,7 +93,7 @@
                 android:id="@+id/residency_show_system"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:contentDescription="@string/residency_show_system_apps" />
+                android:contentDescription="@string/residency_show_system_apps_accessibility" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 

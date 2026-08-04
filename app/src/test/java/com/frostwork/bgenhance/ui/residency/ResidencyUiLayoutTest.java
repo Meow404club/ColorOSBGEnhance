@@ -19,6 +19,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import androidx.core.graphics.ColorUtils;
 import com.frostwork.bgenhance.R;
@@ -99,6 +100,23 @@ public final class ResidencyUiLayoutTest {
         assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS,
                 policy.findViewById(R.id.residency_policy_enabled_text)
                         .getImportantForAccessibility());
+
+        View picker = inflate(R.layout.item_residency_app_picker_header);
+        assertSingleSwitchAction(
+                picker, R.id.residency_show_system_row, R.id.residency_show_system);
+        assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS,
+                picker.findViewById(R.id.residency_show_system_text)
+                        .getImportantForAccessibility());
+
+        View importer = inflate(R.layout.activity_residency_import);
+        assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS,
+                importer.findViewById(R.id.residency_import_kill_text)
+                        .getImportantForAccessibility());
+        assertDescriptionContains(
+                importer,
+                R.id.residency_import_kill,
+                R.string.residency_import_kill_title,
+                R.string.residency_import_kill_summary);
     }
 
     @Test
@@ -494,10 +512,14 @@ public final class ResidencyUiLayoutTest {
         View list = importer.findViewById(R.id.residency_import_list);
         View apply = importer.findViewById(R.id.residency_import_apply);
         View reselect = importer.findViewById(R.id.residency_import_reselect);
+        ScrollView actions = importer.findViewById(R.id.residency_import_actions_scroll);
         assertTrue(list.getMeasuredHeight() >= dp(context, 48));
         assertTrue(apply.getMeasuredHeight() > 0);
         assertTrue(reselect.getMeasuredHeight() > 0);
-        assertTrue(reselect.getBottom() <= importer.getMeasuredHeight());
+        assertTrue(actions.getMeasuredHeight() >= dp(context, 48));
+        assertTrue(isDescendant(actions, reselect));
+        assertTrue(reselect.getBottom() <= actions.getMeasuredHeight()
+                || actions.canScrollVertically(1));
     }
 
     @Test
@@ -513,7 +535,7 @@ public final class ResidencyUiLayoutTest {
         importer.findViewById(R.id.residency_import_page_subtitle).setVisibility(View.GONE);
         importer.findViewById(R.id.residency_import_initial).setVisibility(View.GONE);
         importer.findViewById(R.id.residency_import_preview).setVisibility(View.VISIBLE);
-        measure(importer, context, 360, 640);
+        measure(importer, context, 320, 640);
         assertTrue(importer.findViewById(R.id.residency_import_list).getMeasuredHeight()
                 >= dp(context, 48));
         assertTrue(importer.findViewById(R.id.residency_import_reselect).getBottom()
@@ -524,6 +546,14 @@ public final class ResidencyUiLayoutTest {
         CharSequence description = root.findViewById(id).getContentDescription();
         assertNotNull(description);
         assertTrue(description.length() > 0);
+    }
+
+    private static void assertDescriptionContains(
+            View root, int id, int titleResource, int summaryResource) {
+        CharSequence description = root.findViewById(id).getContentDescription();
+        assertNotNull(description);
+        assertTrue(description.toString().contains(root.getContext().getString(titleResource)));
+        assertTrue(description.toString().contains(root.getContext().getString(summaryResource)));
     }
 
     private static void assertPolite(View root, int id) {
