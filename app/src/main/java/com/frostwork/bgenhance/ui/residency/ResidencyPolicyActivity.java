@@ -22,7 +22,7 @@ import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.materialswitch.MaterialSwitch;
 import com.google.android.material.snackbar.Snackbar;
-import com.google.android.material.textfield.MaterialAutoCompleteTextView;
+import com.google.android.material.textfield.TextInputLayout;
 import java.util.EnumSet;
 import java.util.Set;
 
@@ -46,6 +46,7 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
     private ResidencyAppItem app;
     private boolean existingRule;
     private boolean bound;
+    private boolean formEditable;
     private ResidencyMode selectedMode = ResidencyMode.BALANCED;
 
     private final ActivityResultLauncher<Intent> sectionEditor = registerForActivityResult(
@@ -54,7 +55,8 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
                 pendingSection = null;
                 if (result.getResultCode() != RESULT_OK
                         || expected == null
-                        || workingDraft == null) {
+                        || workingDraft == null
+                        || !isPolicyEditorEditable()) {
                     return;
                 }
                 try {
@@ -80,7 +82,9 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
     private TextView experimentalRiskSummary;
     private TextView applyNotice;
     private TextView modeSummary;
-    private MaterialAutoCompleteTextView modeSelector;
+    private TextInputLayout modeSelectorLayout;
+    private CenteredDropdownTextView modeSelector;
+    private View enabledRow;
     private MaterialSwitch enabledSwitch;
     private MaterialButton saveButton;
     private MaterialButton deleteButton;
@@ -162,7 +166,9 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
         adaptRiskNoticeLayout();
         applyNotice = findViewById(R.id.residency_policy_apply_notice);
         modeSummary = findViewById(R.id.residency_mode_selected_summary);
+        modeSelectorLayout = findViewById(R.id.residency_mode_selector_layout);
         modeSelector = findViewById(R.id.residency_mode_selector);
+        enabledRow = findViewById(R.id.residency_policy_enabled_row);
         enabledSwitch = findViewById(R.id.residency_policy_enabled);
         saveButton = findViewById(R.id.residency_policy_save);
         deleteButton = findViewById(R.id.residency_policy_delete);
@@ -212,14 +218,18 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
         findViewById(R.id.residency_policy_retry).setOnClickListener(view -> viewModel.load());
         saveButton.setOnClickListener(view -> save());
         deleteButton.setOnClickListener(view -> confirmDelete());
-        findViewById(R.id.residency_policy_enabled_row).setOnClickListener(view -> {
-            if (enabledSwitch.isEnabled()) enabledSwitch.toggle();
+        enabledRow.setOnClickListener(view -> {
+            if (isFormEditable() && view.isEnabled() && enabledSwitch.isEnabled()) {
+                enabledSwitch.toggle();
+            }
         });
+        enabledSwitch.setOnCheckedChangeListener(
+                (button, checked) -> updatePolicyEditorEnabledState());
 
         String[] modes = getResources().getStringArray(R.array.residency_policy_modes);
         ResidencyDropdowns.setItems(modeSelector, modes);
         modeSelector.setOnItemClickListener((parent, view, position, id) ->
-                selectMode(ResidencyMode.values()[position]));
+                selectModeFromDropdown(position));
 
         bindSectionRow(R.id.residency_kill_section_row,
                 ResidencyPolicyEditorContract.Section.KILL);
@@ -234,7 +244,9 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
     }
 
     private void bindSectionRow(int id, ResidencyPolicyEditorContract.Section section) {
-        findViewById(id).setOnClickListener(view -> showPresetDialog(section));
+        findViewById(id).setOnClickListener(view -> {
+            if (isPolicyEditorEditable() && view.isEnabled()) showPresetDialog(section);
+        });
     }
 
     private void render(ResidencyPolicyViewModel.State state) {
@@ -338,6 +350,17 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
         updateRiskNotices(mode);
     }
 
+    private void selectModeFromDropdown(int position) {
+        ResidencyMode[] modes = ResidencyMode.values();
+        if (!isModeSelectionEditable() || position < 0 || position >= modes.length) {
+            // Material may replace the visible text before dispatching OnItemClick.
+            // Restore the committed selection when a stale/disabled popup reports a choice.
+            selectMode(selectedMode);
+            return;
+        }
+        selectMode(modes[position]);
+    }
+
     private static int modeSummaryResource(ResidencyMode mode) {
         switch (mode) {
             case SYSTEM: return R.string.residency_mode_system_summary;
@@ -362,13 +385,14 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
     }
 
     private void showPresetDialog(ResidencyPolicyEditorContract.Section section) {
-        if (workingDraft == null) return;
+        if (workingDraft == null || !isPolicyEditorEditable()) return;
         String[] labels = presetLabels(section);
         int current = currentPresetIndex(section);
         new MaterialAlertDialogBuilder(this)
                 .setTitle(sectionTitle(section))
                 .setSingleChoiceItems(labels, current, (dialog, which) -> {
                     dialog.dismiss();
+                    if (!isPolicyEditorEditable()) return;
                     if (which == labels.length - 1) {
                         launchSectionEditor(section);
                     } else {
@@ -381,6 +405,7 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
     }
 
     private void launchSectionEditor(ResidencyPolicyEditorContract.Section section) {
+        if (!isPolicyEditorEditable()) return;
         pendingSection = section;
         sectionEditor.launch(ResidencyPolicyEditorContract.createIntent(
                 this, packageName, section, workingDraft));
@@ -548,6 +573,7 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
     }
 
     private void save() {
+        if (!isFormEditable()) return;
         ResidencyPolicyDraft draft = snapshotDraft();
         if (!ResidencyPolicyFormValidator.isValid(packageName, draft)) {
             Snackbar.make(
@@ -581,14 +607,41 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
                 .show();
     }
 
-    private void setBusy(boolean busy) {
+    void setBusy(boolean busy) {
         boolean editable = app != null && !app.safety().isRestricted() && !busy;
+        formEditable = editable;
+
         enabledSwitch.setEnabled(editable);
-        modeSelector.setEnabled(editable);
-        setEnabledRecursively(customSection, editable);
+        enabledRow.setEnabled(editable);
+        enabledRow.setClickable(editable);
+        enabledRow.setFocusable(editable);
+
+        updatePolicyEditorEnabledState();
         saveButton.setEnabled(editable);
         deleteButton.setEnabled(existingRule && !busy);
         if (!busy) progress.setVisibility(View.GONE);
+    }
+
+    private boolean isFormEditable() {
+        return formEditable && content != null && content.isEnabled();
+    }
+
+    private boolean isModeSelectionEditable() {
+        return isPolicyEditorEditable()
+                && modeSelectorLayout.isEnabled()
+                && modeSelector.isDropdownInteractionEnabled();
+    }
+
+    private boolean isPolicyEditorEditable() {
+        return isFormEditable() && enabledSwitch.isChecked();
+    }
+
+    private void updatePolicyEditorEnabledState() {
+        boolean editable = isPolicyEditorEditable();
+        if (!editable) modeSelector.dismissDropDown();
+        modeSelectorLayout.setEnabled(editable);
+        modeSelector.setEnabled(editable);
+        setEnabledRecursively(customSection, editable);
     }
 
     private static void setEnabledRecursively(View view, boolean enabled) {

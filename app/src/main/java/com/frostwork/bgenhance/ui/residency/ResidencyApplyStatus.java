@@ -5,30 +5,11 @@ import com.frostwork.bgenhance.BuildConfig;
 import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.R;
 import com.frostwork.bgenhance.ui.HookStatusViewModel;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 
 /** Maps current Hook and configuration state to the save-effect notice. */
 final class ResidencyApplyStatus {
-    static final List<String> REQUIRED_HOOKS = Collections.unmodifiableList(Arrays.asList(
-            HookTargetIds.ATHENA_PERIODIC,
-            HookTargetIds.OGUARD_KILL,
-            HookTargetIds.OGUARD_FORCE_STOP,
-            HookTargetIds.FAST_CLEAR_DISPATCH,
-            HookTargetIds.TOURNAMENT,
-            HookTargetIds.MEMORY_GUARD_DISPATCH,
-            HookTargetIds.OSENSE_PROCESS_KILL,
-            HookTargetIds.HANS_FREEZE_DISPATCH,
-            HookTargetIds.HANS_FAST_FREEZE_DISPATCH,
-            HookTargetIds.HANS_WAKE_DISPATCH,
-            HookTargetIds.ALARM_WAKE_DELIVERY,
-            HookTargetIds.HANS_RESOURCE_DISPATCH,
-            HookTargetIds.HANS_R_TO_M_TIMING,
-            HookTargetIds.HANS_M_TO_F_TIMING,
-            HookTargetIds.HANS_CORE_EXEMPTION,
-            HookTargetIds.HANS_LCD_ON_EXEMPTION,
-            HookTargetIds.HANS_ACTIVE_RECOVERY));
+    static final List<String> REQUIRED_HOOKS = HookTargetIds.residencyRequired();
 
     enum Tone { INFO, WARNING, ERROR, SUCCESS }
 

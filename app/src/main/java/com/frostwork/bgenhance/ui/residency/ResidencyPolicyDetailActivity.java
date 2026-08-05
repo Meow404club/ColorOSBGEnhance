@@ -83,17 +83,70 @@ public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
         findViewById(R.id.residency_detail_done).setOnClickListener(view -> finishWithResult());
 
         ((MaterialSwitch) findViewById(R.id.residency_freeze_custom_timing))
-                .setOnCheckedChangeListener((button, checked) -> updateFreezeControlState());
+                .setOnCheckedChangeListener((button, checked) -> {
+                    if (!binding) updateFreezeControlState();
+                });
         ((MaterialSwitch) findViewById(R.id.residency_freeze_full_exemption))
-                .setOnCheckedChangeListener((button, checked) -> updateFreezeControlState());
+                .setOnCheckedChangeListener((button, checked) -> {
+                    if (!binding) updateFreezeControlState();
+                });
+
+        int[] availabilitySwitches = {
+            R.id.residency_kill_power,
+            R.id.residency_kill_force_stop,
+            R.id.residency_kill_periodic,
+            R.id.residency_kill_fast_clear,
+            R.id.residency_kill_tournament,
+            R.id.residency_kill_memory,
+            R.id.residency_kill_grouped,
+            R.id.residency_kill_process,
+            R.id.residency_freeze_normal,
+            R.id.residency_freeze_fast,
+            R.id.residency_freeze_super,
+            R.id.residency_freeze_preload,
+            R.id.residency_freeze_core_exemption,
+            R.id.residency_freeze_lcd_exemption,
+            R.id.residency_wake_async,
+            R.id.residency_wake_transaction,
+            R.id.residency_wake_signal,
+            R.id.residency_wake_service,
+            R.id.residency_wake_broadcast,
+            R.id.residency_wake_job,
+            R.id.residency_wake_wakelock,
+            R.id.residency_wake_audio,
+            R.id.residency_wake_connectivity,
+            R.id.residency_resource_network,
+            R.id.residency_resource_service,
+            R.id.residency_resource_broadcast,
+            R.id.residency_resource_job,
+            R.id.residency_resource_sensor,
+            R.id.residency_resource_binder,
+            R.id.residency_resource_alarm,
+            R.id.residency_resource_wakelock,
+            R.id.residency_resource_gps,
+            R.id.residency_resource_audio,
+            R.id.residency_resource_bluetooth
+        };
+        for (int id : availabilitySwitches) {
+            ((MaterialSwitch) findViewById(id)).setOnCheckedChangeListener(
+                    (button, checked) -> {
+                        if (!binding) applyHookAvailability();
+                    });
+        }
 
         ((MaterialButtonToggleGroup) findViewById(R.id.residency_packet_group))
                 .addOnButtonCheckedListener((group, checkedId, checked) -> {
-                    if (checked) updateWakeCooldownVisibility();
+                    if (checked && !binding) {
+                        updateWakeCooldownVisibility();
+                        applyHookAvailability();
+                    }
                 });
         ((MaterialButtonToggleGroup) findViewById(R.id.residency_alarm_group))
                 .addOnButtonCheckedListener((group, checkedId, checked) -> {
-                    if (checked) updateWakeCooldownVisibility();
+                    if (checked && !binding) {
+                        updateWakeCooldownVisibility();
+                        applyHookAvailability();
+                    }
                 });
         ((RadioGroup) findViewById(R.id.residency_refreeze_group))
                 .setOnCheckedChangeListener((group, checkedId) -> {
@@ -103,6 +156,7 @@ public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
                     findViewById(R.id.residency_refreeze_fields).setVisibility(
                             checkedId == R.id.residency_refreeze_after_wake
                                     ? View.VISIBLE : View.GONE);
+                    if (!binding) applyHookAvailability();
                 });
     }
 
@@ -408,14 +462,7 @@ public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
                 partial = applyResourceAvailability();
                 break;
             case REFREEZE:
-                partial = setHookEnabled(
-                        R.id.residency_refreeze_group,
-                        HookTargetIds.HANS_M_TO_F_TIMING,
-                        true);
-                setHookEnabled(
-                        R.id.residency_refreeze_fields,
-                        HookTargetIds.HANS_M_TO_F_TIMING,
-                        true);
+                partial = applyRefreezeAvailability();
                 break;
             default:
                 throw new AssertionError(section);
@@ -426,21 +473,21 @@ public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
 
     private boolean applyKillAvailability() {
         boolean partial = false;
-        partial |= setHookEnabled(
+        partial |= setProtectionSwitchEnabled(
                 R.id.residency_kill_power, HookTargetIds.OGUARD_KILL, true);
-        partial |= setHookEnabled(
+        partial |= setProtectionSwitchEnabled(
                 R.id.residency_kill_force_stop, HookTargetIds.OGUARD_FORCE_STOP, true);
-        partial |= setHookEnabled(
+        partial |= setProtectionSwitchEnabled(
                 R.id.residency_kill_periodic, HookTargetIds.ATHENA_PERIODIC, true);
-        partial |= setHookEnabled(
+        partial |= setProtectionSwitchEnabled(
                 R.id.residency_kill_fast_clear, HookTargetIds.FAST_CLEAR_DISPATCH, true);
-        partial |= setHookEnabled(
+        partial |= setProtectionSwitchEnabled(
                 R.id.residency_kill_tournament, HookTargetIds.TOURNAMENT, true);
-        partial |= setHookEnabled(
+        partial |= setProtectionSwitchEnabled(
                 R.id.residency_kill_memory, HookTargetIds.MEMORY_GUARD_DISPATCH, true);
-        partial |= setHookEnabled(
+        partial |= setProtectionSwitchEnabled(
                 R.id.residency_kill_grouped, HookTargetIds.OSENSE_PROCESS_KILL, true);
-        partial |= setHookEnabled(
+        partial |= setProtectionSwitchEnabled(
                 R.id.residency_kill_process, HookTargetIds.OSENSE_PROCESS_KILL, true);
         return partial;
     }
@@ -451,25 +498,40 @@ public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
         boolean rToMUnavailable = isHookUnavailable(HookTargetIds.HANS_R_TO_M_TIMING);
         boolean mToFUnavailable = isHookUnavailable(HookTargetIds.HANS_M_TO_F_TIMING);
         boolean partial = false;
-        partial |= setHookEnabled(
-                R.id.residency_freeze_normal, HookTargetIds.HANS_FREEZE_DISPATCH, !exempt);
-        partial |= setHookEnabled(
-                R.id.residency_freeze_fast, HookTargetIds.HANS_FAST_FREEZE_DISPATCH, !exempt);
-        partial |= setHookEnabled(
-                R.id.residency_freeze_super, HookTargetIds.HANS_FREEZE_DISPATCH, !exempt);
-        partial |= setHookEnabled(
-                R.id.residency_freeze_preload, HookTargetIds.HANS_FREEZE_DISPATCH, !exempt);
-        partial |= setHookEnabled(
+        partial |= setHookSwitchEnabled(
+                R.id.residency_freeze_normal,
+                HookTargetIds.HANS_FREEZE_DISPATCH,
+                !exempt,
+                false);
+        partial |= setHookSwitchEnabled(
+                R.id.residency_freeze_fast,
+                HookTargetIds.HANS_FAST_FREEZE_DISPATCH,
+                !exempt,
+                false);
+        partial |= setHookSwitchEnabled(
+                R.id.residency_freeze_super,
+                HookTargetIds.HANS_FREEZE_DISPATCH,
+                !exempt,
+                false);
+        partial |= setHookSwitchEnabled(
+                R.id.residency_freeze_preload,
+                HookTargetIds.HANS_FREEZE_DISPATCH,
+                !exempt,
+                false);
+        partial |= setProtectionSwitchEnabled(
                 R.id.residency_freeze_full_exemption,
                 HookTargetIds.HANS_FREEZE_DISPATCH,
                 true);
-        partial |= setHookEnabled(
+        partial |= setProtectionSwitchEnabled(
                 R.id.residency_freeze_core_exemption,
                 HookTargetIds.HANS_CORE_EXEMPTION,
                 !exempt);
-        setEnabledRecursively(
-                findViewById(R.id.residency_freeze_custom_timing),
-                !exempt && !(rToMUnavailable && mToFUnavailable));
+        boolean timingUnavailable = rToMUnavailable || mToFUnavailable;
+        setSwitchEnabledForAvailability(
+                R.id.residency_freeze_custom_timing,
+                !exempt,
+                timingUnavailable,
+                true);
         setEnabledRecursively(
                 findViewById(R.id.residency_freeze_prepare_layout),
                 timing && !rToMUnavailable);
@@ -477,7 +539,7 @@ public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
                 findViewById(R.id.residency_freeze_execute_layout),
                 timing && !mToFUnavailable);
         partial |= rToMUnavailable || mToFUnavailable;
-        partial |= setHookEnabled(
+        partial |= setProtectionSwitchEnabled(
                 R.id.residency_freeze_lcd_exemption,
                 HookTargetIds.HANS_LCD_ON_EXEMPTION,
                 !exempt);
@@ -486,14 +548,22 @@ public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
 
     private boolean applyWakeAvailability() {
         boolean partial = false;
-        partial |= setHookEnabled(
-                R.id.residency_packet_group, HookTargetIds.HANS_WAKE_DISPATCH, true);
+        partial |= setWakeChannelEnabled(
+                R.id.residency_packet_group,
+                R.id.residency_packet_allow,
+                R.id.residency_packet_throttle,
+                R.id.residency_packet_block,
+                HookTargetIds.HANS_WAKE_DISPATCH);
         partial |= setHookEnabled(
                 R.id.residency_packet_cooldown_layout,
                 HookTargetIds.HANS_WAKE_DISPATCH,
                 true);
-        partial |= setHookEnabled(
-                R.id.residency_alarm_group, HookTargetIds.ALARM_WAKE_DELIVERY, true);
+        partial |= setWakeChannelEnabled(
+                R.id.residency_alarm_group,
+                R.id.residency_alarm_allow,
+                R.id.residency_alarm_throttle,
+                R.id.residency_alarm_block,
+                HookTargetIds.ALARM_WAKE_DELIVERY);
         partial |= setHookEnabled(
                 R.id.residency_alarm_cooldown_layout,
                 HookTargetIds.ALARM_WAKE_DELIVERY,
@@ -510,7 +580,8 @@ public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
             R.id.residency_wake_connectivity
         };
         for (int id : sourceControls) {
-            partial |= setHookEnabled(id, HookTargetIds.HANS_WAKE_DISPATCH, true);
+            partial |= setProtectionSwitchEnabled(
+                    id, HookTargetIds.HANS_WAKE_DISPATCH, true);
         }
         return partial;
     }
@@ -531,9 +602,73 @@ public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
         };
         boolean partial = false;
         for (int id : controls) {
-            partial |= setHookEnabled(id, HookTargetIds.HANS_RESOURCE_DISPATCH, true);
+            partial |= setProtectionSwitchEnabled(
+                    id, HookTargetIds.HANS_RESOURCE_DISPATCH, true);
         }
         return partial;
+    }
+
+    private boolean applyRefreezeAvailability() {
+        boolean unavailable = isHookUnavailable(HookTargetIds.HANS_M_TO_F_TIMING);
+        RadioGroup group = findViewById(R.id.residency_refreeze_group);
+        group.setEnabled(true);
+        findViewById(R.id.residency_refreeze_system).setEnabled(true);
+        findViewById(R.id.residency_refreeze_after_wake).setEnabled(!unavailable);
+        findViewById(R.id.residency_refreeze_disabled).setEnabled(!unavailable);
+        boolean afterWake = group.getCheckedRadioButtonId()
+                == R.id.residency_refreeze_after_wake;
+        setEnabledRecursively(
+                findViewById(R.id.residency_refreeze_fields),
+                afterWake && !unavailable);
+        return unavailable;
+    }
+
+    private boolean setProtectionSwitchEnabled(
+            int viewId, String hookTargetId, boolean baseEnabled) {
+        return setHookSwitchEnabled(viewId, hookTargetId, baseEnabled, true);
+    }
+
+    private boolean setHookSwitchEnabled(
+            int viewId,
+            String hookTargetId,
+            boolean baseEnabled,
+            boolean activeWhenChecked) {
+        boolean unavailable = isHookUnavailable(hookTargetId);
+        setSwitchEnabledForAvailability(
+                viewId, baseEnabled, unavailable, activeWhenChecked);
+        return unavailable;
+    }
+
+    private void setSwitchEnabledForAvailability(
+            int viewId,
+            boolean baseEnabled,
+            boolean unavailable,
+            boolean activeWhenChecked) {
+        MaterialSwitch switchView = findViewById(viewId);
+        boolean protectionActive = activeWhenChecked
+                ? switchView.isChecked() : !switchView.isChecked();
+        switchView.setEnabled(isUnsupportedSwitchEditable(
+                baseEnabled, unavailable, protectionActive));
+    }
+
+    static boolean isUnsupportedSwitchEditable(
+            boolean baseEnabled, boolean unavailable, boolean protectionActive) {
+        return baseEnabled && (!unavailable || protectionActive);
+    }
+
+    private boolean setWakeChannelEnabled(
+            int groupId,
+            int allowId,
+            int throttleId,
+            int blockId,
+            String hookTargetId) {
+        boolean unavailable = isHookUnavailable(hookTargetId);
+        MaterialButtonToggleGroup group = findViewById(groupId);
+        group.setEnabled(true);
+        findViewById(allowId).setEnabled(true);
+        findViewById(throttleId).setEnabled(!unavailable);
+        findViewById(blockId).setEnabled(!unavailable);
+        return unavailable;
     }
 
     private boolean setHookEnabled(int viewId, String hookTargetId, boolean baseEnabled) {
@@ -544,7 +679,6 @@ public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
 
     private boolean isHookUnavailable(String hookTargetId) {
         return hookStatus != null
-                && hookStatus.status() == HookStatusViewModel.Status.READY
                 && hookStatus.isExplicitlyUnavailable(hookTargetId);
     }
 

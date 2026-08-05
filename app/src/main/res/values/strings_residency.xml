@@ -77,7 +77,7 @@
     <string name="residency_mode_balanced">均衡</string>
     <string name="residency_mode_balanced_summary">尽量保留应用进程，冻结和唤醒方式跟随系统</string>
     <string name="residency_mode_low_power">低功耗</string>
-    <string name="residency_mode_low_power_summary">保留应用进程，并更积极地冻结和限制频繁唤醒</string>
+    <string name="residency_mode_low_power_summary">尽量保留应用进程，并更积极地冻结和限制频繁唤醒</string>
     <string name="residency_mode_active">活跃</string>
     <string name="residency_mode_active_summary">尽量避免冻结，适合需要持续工作的应用；耗电可能增加</string>
     <string name="residency_mode_custom">自定义</string>
@@ -102,10 +102,10 @@
     <string name="residency_mode_section_summary">选择预设模式，或使用自定义进行详细设置</string>
     <string name="residency_custom_title">自定义策略</string>
     <string name="residency_custom_summary">以下设置只在选择“自定义”时使用</string>
-    <string name="residency_section_preset_value">预置：%1$s</string>
-    <string name="residency_section_row_accessibility">%1$s。%2$s。当前预置：%3$s。点击编辑。</string>
+    <string name="residency_section_preset_value">预设：%1$s</string>
+    <string name="residency_section_row_accessibility">%1$s。%2$s。当前预设：%3$s。点击编辑。</string>
     <string name="residency_detail_done">完成</string>
-    <string name="residency_section_partial_support">部分设置在当前系统上不可用，已暂时禁用。可在“运行诊断”的“功能状态”中查看详情。</string>
+    <string name="residency_section_partial_support">部分设置在当前系统上不可用。已开启的设置仍可关闭，关闭后无法再次开启；可在“运行诊断”的“功能状态”中查看详情。</string>
     <string name="residency_preset_follow_system">跟随系统</string>
     <string name="residency_preset_full_protection">全面保护</string>
     <string name="residency_preset_power_saving_freeze">省电冻结</string>
@@ -188,18 +188,18 @@
     <string name="residency_wake_block_connectivity">阻止网络状态变化唤醒</string>
 
     <string name="residency_resource_title">后台资源</string>
-    <string name="residency_resource_summary">选择应用冻结后仍需保留的能力</string>
-    <string name="residency_resource_network">保留网络连接</string>
-    <string name="residency_resource_service">保留服务处理</string>
-    <string name="residency_resource_broadcast">保留广播接收</string>
-    <string name="residency_resource_job">保留后台任务</string>
-    <string name="residency_resource_sensor">保留传感器</string>
-    <string name="residency_resource_binder">保留应用间通信</string>
-    <string name="residency_resource_alarm">保留定时任务</string>
-    <string name="residency_resource_wakelock">保留设备唤醒</string>
-    <string name="residency_resource_gps">保留定位</string>
-    <string name="residency_resource_audio">保留音频</string>
-    <string name="residency_resource_bluetooth">保留蓝牙扫描</string>
+    <string name="residency_resource_summary">选择应用冻结后需要尽量维持的能力；仅覆盖当前系统中已验证的冻结处理路径</string>
+    <string name="residency_resource_network">尽量维持网络连接</string>
+    <string name="residency_resource_service">尽量保留服务处理</string>
+    <string name="residency_resource_broadcast">尽量接收广播</string>
+    <string name="residency_resource_job">尽量保留后台任务</string>
+    <string name="residency_resource_sensor">尽量保留传感器访问</string>
+    <string name="residency_resource_binder">尽量保留应用间通信</string>
+    <string name="residency_resource_alarm">尽量保留定时任务</string>
+    <string name="residency_resource_wakelock">尽量允许保持设备唤醒</string>
+    <string name="residency_resource_gps">尽量保留定位</string>
+    <string name="residency_resource_audio">尽量保留音频</string>
+    <string name="residency_resource_bluetooth">尽量保留蓝牙扫描</string>
 
     <string name="residency_refreeze_title">再次冻结</string>
     <string name="residency_refreeze_summary">控制应用临时唤醒后何时再次进入冻结</string>

@@ -24,6 +24,7 @@ import android.widget.TextView;
 import androidx.core.graphics.ColorUtils;
 import com.frostwork.bgenhance.R;
 import com.google.android.material.button.MaterialButtonToggleGroup;
+import com.google.android.material.checkbox.MaterialCheckBox;
 import com.google.android.material.textfield.MaterialAutoCompleteTextView;
 import com.google.android.material.textfield.TextInputLayout;
 import org.junit.Test;
@@ -182,20 +183,61 @@ public final class ResidencyUiLayoutTest {
     }
 
     @Test
-    public void primarySwitchRowsUseTheSharedMinimumHeight() {
+    public void primarySwitchRowsKeepSharedHeightAndDiagnosticsUsesCompactRows() {
         ContextThemeWrapper context = themedContext();
         int minimum = context.getResources().getDimensionPixelSize(
                 R.dimen.setting_row_min_height);
+        int compact = dp(context, 56);
         View home = inflate(context, R.layout.activity_settings);
         View popup = inflate(context, R.layout.popup_diagnostics_options);
         View importer = inflate(context, R.layout.activity_residency_import);
 
         assertEquals(minimum, home.findViewById(R.id.row_master).getMinimumHeight());
         assertEquals(minimum, home.findViewById(R.id.row_dry_run).getMinimumHeight());
-        assertEquals(minimum,
+        assertEquals(compact,
+                popup.findViewById(R.id.diagnostics_popup_save).getMinimumHeight());
+        assertEquals(compact,
+                popup.findViewById(R.id.diagnostics_popup_clear).getMinimumHeight());
+        assertEquals(compact,
                 popup.findViewById(R.id.diagnostics_popup_verbose_row).getMinimumHeight());
+        assertTrue(popup.findViewById(R.id.diagnostics_popup_verbose_switch)
+                instanceof MaterialCheckBox);
+        assertSameTextStyle(
+                popup.findViewById(R.id.diagnostics_popup_save),
+                popup.findViewById(R.id.diagnostics_popup_verbose_title));
+        assertEquals(0, countVisibleText(
+                popup, context.getString(R.string.verbose_summary)));
         View importRow = (View) importer.findViewById(R.id.residency_import_kill).getParent();
         assertEquals(minimum, importRow.getMinimumHeight());
+    }
+
+    @Test
+    public void diagnosticsCheckboxKeepsAccessibleDescriptionAtDoubleFontScale() {
+        ContextThemeWrapper context = portraitContext(2f);
+        View popup = inflate(context, R.layout.popup_diagnostics_options);
+        View verboseRow = popup.findViewById(R.id.diagnostics_popup_verbose_row);
+        View verboseView = popup.findViewById(R.id.diagnostics_popup_verbose_switch);
+
+        assertTrue(verboseView instanceof MaterialCheckBox);
+        MaterialCheckBox verbose = (MaterialCheckBox) verboseView;
+        assertEquals(dp(context, 56), verboseRow.getMinimumHeight());
+        assertTrue(verbose.isClickable());
+        assertTrue(verbose.getImportantForAccessibility()
+                != View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        assertNotNull(verbose.getContentDescription());
+        assertTrue(verbose.getContentDescription().toString().contains(
+                context.getString(R.string.verbose_title)));
+        assertTrue(verbose.getContentDescription().toString().contains(
+                context.getString(R.string.verbose_summary)));
+        assertEquals(0, countVisibleText(
+                popup, context.getString(R.string.verbose_summary)));
+
+        int width = dp(context, 324);
+        popup.measure(
+                View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        popup.layout(0, 0, width, popup.getMeasuredHeight());
+        assertTrue(verboseRow.getMeasuredHeight() >= dp(context, 56));
     }
 
     @Test
@@ -682,11 +724,25 @@ public final class ResidencyUiLayoutTest {
 
     private static int countText(View view, String expected) {
         int count = view instanceof TextView
-                && expected.contentEquals(((TextView) view).getText()) ? 1 : 0;
+                && android.text.TextUtils.equals(
+                        expected, ((TextView) view).getText()) ? 1 : 0;
         if (!(view instanceof ViewGroup)) return count;
         ViewGroup group = (ViewGroup) view;
         for (int index = 0; index < group.getChildCount(); index++) {
             count += countText(group.getChildAt(index), expected);
+        }
+        return count;
+    }
+
+    private static int countVisibleText(View view, CharSequence expected) {
+        int count = view.getVisibility() == View.VISIBLE
+                && view instanceof TextView
+                && android.text.TextUtils.equals(
+                        expected, ((TextView) view).getText()) ? 1 : 0;
+        if (!(view instanceof ViewGroup)) return count;
+        ViewGroup group = (ViewGroup) view;
+        for (int index = 0; index < group.getChildCount(); index++) {
+            count += countVisibleText(group.getChildAt(index), expected);
         }
         return count;
     }
