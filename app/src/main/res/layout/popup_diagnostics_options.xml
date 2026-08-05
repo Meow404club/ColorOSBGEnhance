@@ -61,7 +61,7 @@
                 android:foreground="?attr/selectableItemBackground"
                 android:gravity="center_vertical"
                 android:importantForAccessibility="no"
-                android:minHeight="@dimen/setting_row_min_height"
+                android:minHeight="@dimen/setting_option_min_height"
                 android:orientation="horizontal"
                 android:paddingStart="20dp"
                 android:paddingTop="10dp"
@@ -78,25 +78,21 @@
                     android:paddingEnd="10dp">
 
                     <TextView
+                        android:id="@+id/diagnostics_popup_verbose_title"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:text="@string/verbose_title"
-                        android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="3dp"
-                        android:text="@string/verbose_summary"
-                        android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
+                        android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Option" />
                 </LinearLayout>
 
-                <com.google.android.material.materialswitch.MaterialSwitch
+                <com.google.android.material.checkbox.MaterialCheckBox
                     android:id="@+id/diagnostics_popup_verbose_switch"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:contentDescription="@string/verbose_accessibility"
-                    android:showText="false" />
+                    android:minWidth="48dp"
+                    android:minHeight="48dp"
+                    android:padding="12dp" />
             </LinearLayout>
         </LinearLayout>
     </ScrollView>

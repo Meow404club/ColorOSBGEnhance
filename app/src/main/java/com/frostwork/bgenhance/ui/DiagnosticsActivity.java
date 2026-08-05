@@ -3,6 +3,7 @@ package com.frostwork.bgenhance.ui;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.drawable.ColorDrawable;
@@ -33,10 +34,11 @@ import com.frostwork.bgenhance.diagnostics.DiagnosticsReportMetadata;
 import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
 import com.frostwork.bgenhance.ui.diagnostics.DiagnosticsViewModel;
 import com.frostwork.bgenhance.ui.diagnostics.FullDiagnosticsExportViewModel;
+import com.frostwork.bgenhance.ui.residency.ResidencyPolicyActivity;
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButtonToggleGroup;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
-import com.google.android.material.materialswitch.MaterialSwitch;
+import com.google.android.material.checkbox.MaterialCheckBox;
 
 /** Material diagnostics screen backed exclusively by the bounded SQLite store. */
 public final class DiagnosticsActivity extends AppCompatActivity {
@@ -68,6 +70,7 @@ public final class DiagnosticsActivity extends AppCompatActivity {
     private boolean exportInFlight;
     private boolean started;
     private boolean destroyed;
+    private boolean resumedOnce;
 
     private final ModuleApplication.StateListener moduleStateListener = () ->
             runOnUiThread(() -> {
@@ -108,7 +111,11 @@ public final class DiagnosticsActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (viewModel != null && !clearInFlight) viewModel.refresh();
+        if (resumedOnce) {
+            if (viewModel != null && !clearInFlight) viewModel.refresh();
+        } else {
+            resumedOnce = true;
+        }
     }
 
     @Override
@@ -149,8 +156,16 @@ public final class DiagnosticsActivity extends AppCompatActivity {
         emptyTitle = findViewById(R.id.diagnostics_empty_title);
         emptySummary = findViewById(R.id.diagnostics_empty_summary);
         errorState = findViewById(R.id.diagnostics_error_state);
-        adapter = new DiagnosticsRowsAdapter(this, behavior -> startActivity(
-                DiagnosticsBehaviorDetailActivity.createIntent(this, behavior)));
+        adapter = new DiagnosticsRowsAdapter(
+                this,
+                packageName -> {
+                    Intent intent = new Intent(this, ResidencyPolicyActivity.class);
+                    intent.putExtra(
+                            ResidencyPolicyActivity.EXTRA_PACKAGE_NAME, packageName);
+                    startActivity(intent);
+                },
+                behavior -> startActivity(
+                        DiagnosticsBehaviorDetailActivity.createIntent(this, behavior)));
         list.setLayoutManager(new LinearLayoutManager(this));
         list.setAdapter(adapter);
         findViewById(R.id.diagnostics_retry).setOnClickListener(view -> viewModel.refresh());
@@ -217,7 +232,7 @@ public final class DiagnosticsActivity extends AppCompatActivity {
         FrameLayout popupParent = new FrameLayout(this);
         View content = LayoutInflater.from(this).inflate(
                 R.layout.popup_diagnostics_options, popupParent, false);
-        MaterialSwitch verbose = content.findViewById(
+        MaterialCheckBox verbose = content.findViewById(
                 R.id.diagnostics_popup_verbose_switch);
         verbose.setContentDescription(getString(
                 R.string.setting_switch_accessibility_summary,
@@ -228,14 +243,19 @@ public final class DiagnosticsActivity extends AppCompatActivity {
         boolean[] bindingVerbose = { false };
         verbose.setOnCheckedChangeListener((button, checked) -> {
             if (bindingVerbose[0]) return;
-            if (ModuleSettings.setBoolean(this, ModuleSettings.KEY_VERBOSE_LOG, checked)) {
-                Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show();
+            if (checked) {
+                bindingVerbose[0] = true;
+                button.setChecked(false);
+                bindingVerbose[0] = false;
+                dismissOptionsPopup();
+                confirmVerboseLogging();
                 return;
             }
-            bindingVerbose[0] = true;
-            button.setChecked(!checked);
-            bindingVerbose[0] = false;
-            Toast.makeText(this, R.string.settings_save_failed, Toast.LENGTH_LONG).show();
+            if (!saveVerboseLogging(false)) {
+                bindingVerbose[0] = true;
+                button.setChecked(true);
+                bindingVerbose[0] = false;
+            }
         });
         content.findViewById(R.id.diagnostics_popup_verbose_row).setOnClickListener(
                 view -> verbose.toggle());
@@ -284,6 +304,24 @@ public final class DiagnosticsActivity extends AppCompatActivity {
 
     private void dismissOptionsPopup() {
         if (optionsPopup != null) optionsPopup.dismiss();
+    }
+
+    private void confirmVerboseLogging() {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.verbose_confirm_title)
+                .setMessage(R.string.verbose_confirm_message)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.verbose_confirm_enable,
+                        (dialog, which) -> saveVerboseLogging(true))
+                .show();
+    }
+
+    private boolean saveVerboseLogging(boolean enabled) {
+        boolean saved = ModuleSettings.setBoolean(
+                this, ModuleSettings.KEY_VERBOSE_LOG, enabled);
+        Toast.makeText(this, saved ? R.string.settings_saved : R.string.settings_save_failed,
+                saved ? Toast.LENGTH_SHORT : Toast.LENGTH_LONG).show();
+        return saved;
     }
 
     private int dp(int value) {
@@ -400,7 +438,7 @@ public final class DiagnosticsActivity extends AppCompatActivity {
                     clipboard.setPrimaryClip(ClipData.newPlainText(
                             getString(R.string.app_name), encoded.json));
                     Toast.makeText(this, R.string.diagnostics_export_copied,
-                            Toast.LENGTH_SHORT).show();
+                            Toast.LENGTH_LONG).show();
                 }));
     }
 
@@ -456,6 +494,10 @@ public final class DiagnosticsActivity extends AppCompatActivity {
         } else if (FullDiagnosticsExportViewModel.ERROR_INCOMPLETE_REPORT.equals(
                 completion.errorCode)) {
             Toast.makeText(this, R.string.diagnostics_full_export_incomplete,
+                    Toast.LENGTH_LONG).show();
+        } else if (FullDiagnosticsExportViewModel.ERROR_HISTORY_TRUNCATED.equals(
+                completion.errorCode)) {
+            Toast.makeText(this, R.string.diagnostics_full_export_history_truncated,
                     Toast.LENGTH_LONG).show();
         } else if (completion.destinationCreated
                 && !completion.incompleteDocumentDeleted) {

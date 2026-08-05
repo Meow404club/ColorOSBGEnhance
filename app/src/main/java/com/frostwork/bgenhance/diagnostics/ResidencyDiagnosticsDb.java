@@ -702,31 +702,35 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         }
         db.execSQL("UPDATE " + TABLE_HOOK_STATES + " SET "
                         + "feature_id=CASE WHEN ?<>'' THEN ? ELSE feature_id END,"
-                        + "install_status=CASE WHEN ?=1 THEN ? ELSE install_status END,"
+                        + "install_status=CASE WHEN ?=1 AND ?>=updated_at "
+                        + "THEN ? ELSE install_status END,"
                         + "boot_id=CASE WHEN ?<>'' THEN ? ELSE boot_id END,"
                         + "last_hook_at=MAX(last_hook_at,?),"
                         + "last_event_at=MAX(last_event_at,?),"
                         + "raw_hit_count=raw_hit_count+?,parsed_count=parsed_count+?,"
                         + "identity_resolved_count=identity_resolved_count+?,"
-                        + "config_revision=CASE WHEN ?>=0 THEN ? ELSE config_revision END,"
-                        + "policy_revision=CASE WHEN ?>=0 THEN ? ELSE policy_revision END,"
-                        + "install_error=CASE WHEN ?=1 THEN ? ELSE install_error END,"
+                        + "config_revision=CASE WHEN ?>=0 AND ?>=updated_at "
+                        + "THEN ? ELSE config_revision END,"
+                        + "policy_revision=CASE WHEN ?>=0 AND ?>=updated_at "
+                        + "THEN ? ELSE policy_revision END,"
+                        + "install_error=CASE WHEN ?=1 AND ?>=updated_at "
+                        + "THEN ? ELSE install_error END,"
                         + "runtime_error=CASE WHEN ?=0 AND ?>=last_hook_at "
                         + "THEN ? ELSE runtime_error END,"
                         + "updated_at=MAX(updated_at,?) WHERE process_id=? AND hook_target_id=? "
                         + "AND (boot_id=? OR boot_id='' OR ?='')",
                 new Object[] {
                         state.featureId, state.featureId,
-                        authoritative ? 1 : 0, state.installStatus,
+                        authoritative ? 1 : 0, state.updatedAt, state.installStatus,
                         state.bootId, state.bootId,
                         state.lastHookAt,
                         state.lastEventAt,
                         state.rawHitCount,
                         state.parsedCount,
                         state.identityResolvedCount,
-                        state.configRevision, state.configRevision,
-                        state.policyRevision, state.policyRevision,
-                        authoritative ? 1 : 0, state.lastError,
+                        state.configRevision, state.updatedAt, state.configRevision,
+                        state.policyRevision, state.updatedAt, state.policyRevision,
+                        authoritative ? 1 : 0, state.updatedAt, state.lastError,
                         authoritative ? 1 : 0, state.lastHookAt, state.lastError,
                         state.updatedAt,
                         state.processId,

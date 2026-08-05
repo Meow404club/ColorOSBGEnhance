@@ -14,12 +14,15 @@ import com.frostwork.bgenhance.DiagnosticsTargetIds;
 import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.R;
 import com.frostwork.bgenhance.ui.diagnostics.DiagnosticsBehavior;
+import com.frostwork.bgenhance.ui.diagnostics.DiagnosticsDataSource;
 import com.frostwork.bgenhance.ui.diagnostics.DiagnosticsUiMapper;
 import com.frostwork.bgenhance.ui.residency.ResidencyAppIconLoader;
 import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Renders application, behavior and Hook diagnostics with one stable row geometry. */
 final class DiagnosticsRowsAdapter
@@ -29,16 +32,30 @@ final class DiagnosticsRowsAdapter
         void onBehaviorClicked(DiagnosticsBehavior behavior);
     }
 
+    interface ApplicationClickListener {
+        void onApplicationClicked(String packageName);
+    }
+
     private final ResidencyAppIconLoader iconLoader;
+    private final ApplicationClickListener applicationClickListener;
     private final BehaviorClickListener behaviorClickListener;
     private List<DiagnosticsUiMapper.UiRow> items = new ArrayList<>();
+    private Map<String, Long> stableIds = java.util.Collections.emptyMap();
 
     DiagnosticsRowsAdapter(Context context) {
-        this(context, null);
+        this(context, null, null);
     }
 
     DiagnosticsRowsAdapter(Context context, BehaviorClickListener behaviorClickListener) {
+        this(context, null, behaviorClickListener);
+    }
+
+    DiagnosticsRowsAdapter(
+            Context context,
+            ApplicationClickListener applicationClickListener,
+            BehaviorClickListener behaviorClickListener) {
         iconLoader = new ResidencyAppIconLoader(context);
+        this.applicationClickListener = applicationClickListener;
         this.behaviorClickListener = behaviorClickListener;
         setHasStableIds(true);
     }
@@ -47,13 +64,17 @@ final class DiagnosticsRowsAdapter
         List<DiagnosticsUiMapper.UiRow> replacement = nextItems == null
                 ? new ArrayList<>() : new ArrayList<>(nextItems);
         DiffUtil.DiffResult diff = DiffUtil.calculateDiff(new RowDiff(items, replacement));
+        Map<String, Long> replacementIds = DiagnosticsStableIds.reconcile(stableIds, replacement);
         items = replacement;
+        stableIds = replacementIds;
         diff.dispatchUpdatesTo(this);
     }
 
     @Override
     public long getItemId(int position) {
-        return items.get(position).stableId().hashCode();
+        Long stableId = stableIds.get(items.get(position).stableId());
+        if (stableId == null) throw new IllegalStateException("missing diagnostics stable ID");
+        return stableId;
     }
 
     @NonNull
@@ -82,6 +103,7 @@ final class DiagnosticsRowsAdapter
 
     @Override
     public void close() {
+        stableIds = java.util.Collections.emptyMap();
         iconLoader.close();
     }
 
@@ -93,6 +115,7 @@ final class DiagnosticsRowsAdapter
         private final TextView detail;
         private final TextView badge;
         private final ImageView chevron;
+        private int actionDescriptionRes;
 
         RowViewHolder(View itemView) {
             super(itemView);
@@ -120,7 +143,22 @@ final class DiagnosticsRowsAdapter
         private void bindApplication(DiagnosticsUiMapper.ApplicationRow row) {
             Context context = itemView.getContext();
             if (row.unidentified) {
-                title.setText(R.string.diagnostics_application_unidentified);
+                DiagnosticsDataSource.ResolvedApplication application =
+                        uniqueIdentityApplication(row);
+                if (application != null
+                        && application.currentUser
+                        && application.identityConfirmed) {
+                    iconLoader.bind(icon, application.packageName);
+                } else {
+                    icon.setImageResource(uidIdentityIcon(row));
+                }
+                icon.setVisibility(View.VISIBLE);
+                if (application == null) {
+                    title.setText(uidIdentityTitle(row));
+                } else {
+                    title.setText(application.displayName);
+                }
+                setSubtitle(uidIdentitySubtitle(context, row));
             } else {
                 icon.setVisibility(View.VISIBLE);
                 iconLoader.bind(icon, row.packageName);
@@ -129,6 +167,14 @@ final class DiagnosticsRowsAdapter
             }
             metrics.setText(metricsSummary(context, row.totals));
             setDetail(applicationDetail(context, row));
+            if (row.manageable && applicationClickListener != null) {
+                chevron.setVisibility(View.VISIBLE);
+                itemView.setClickable(true);
+                itemView.setFocusable(true);
+                actionDescriptionRes = R.string.diagnostics_manage_application;
+                itemView.setOnClickListener(view ->
+                        applicationClickListener.onApplicationClicked(row.packageName));
+            }
         }
 
         private void bindBehavior(DiagnosticsUiMapper.BehaviorRow row) {
@@ -139,18 +185,17 @@ final class DiagnosticsRowsAdapter
                 chevron.setVisibility(View.VISIBLE);
                 itemView.setClickable(true);
                 itemView.setFocusable(true);
+                actionDescriptionRes = R.string.diagnostics_behavior_detail_action;
                 itemView.setOnClickListener(view ->
                         behaviorClickListener.onBehaviorClicked(row.behavior));
             }
             if (row.metrics.isEmpty()) {
-                setDetail(context.getString(R.string.diagnostics_behavior_detail_action)
-                        + "\n" + context.getString(R.string.diagnostics_no_activity));
+                setDetail(context.getString(R.string.diagnostics_no_activity));
             } else {
-                String value = context.getString(R.string.diagnostics_behavior_detail_action);
-                String resultDetails = resultDetails(context, row.metrics);
-                if (!resultDetails.isEmpty()) value += "\n" + resultDetails;
+                String value = resultDetails(context, row.metrics);
                 if (row.metrics.lastAt > 0L) {
-                    value += "\n" + context.getString(
+                    if (!value.isEmpty()) value += "\n";
+                    value += context.getString(
                             R.string.diagnostics_recent_activity,
                             formatTime(row.metrics.lastAt));
                 }
@@ -204,6 +249,7 @@ final class DiagnosticsRowsAdapter
             detail.setVisibility(View.GONE);
             badge.setVisibility(View.GONE);
             chevron.setVisibility(View.GONE);
+            actionDescriptionRes = 0;
             itemView.setOnClickListener(null);
             itemView.setClickable(false);
             itemView.setFocusable(false);
@@ -240,6 +286,21 @@ final class DiagnosticsRowsAdapter
                     textRes = R.string.diagnostics_status_installed;
                     backgroundRes = R.drawable.bg_diagnostics_status_success;
                     colorRes = R.color.status_success_text;
+                    break;
+                case ENTRY_LOADED:
+                    textRes = R.string.diagnostics_status_entry_loaded;
+                    backgroundRes = R.drawable.bg_diagnostics_status_warning;
+                    colorRes = R.color.banner_warning_text;
+                    break;
+                case BOOTSTRAP_FAILED:
+                    textRes = R.string.diagnostics_status_bootstrap_failed;
+                    backgroundRes = R.drawable.bg_diagnostics_status_error;
+                    colorRes = R.color.status_error_text;
+                    break;
+                case VERSION_MISMATCH:
+                    textRes = R.string.diagnostics_status_version_mismatch;
+                    backgroundRes = R.drawable.bg_diagnostics_status_warning;
+                    colorRes = R.color.banner_warning_text;
                     break;
                 case FAILED:
                     textRes = R.string.diagnostics_status_failed;
@@ -286,7 +347,53 @@ final class DiagnosticsRowsAdapter
             if (badge.getVisibility() == View.VISIBLE) values.add(badge.getText());
             values.add(metrics.getText());
             if (detail.getVisibility() == View.VISIBLE) values.add(detail.getText());
+            if (actionDescriptionRes != 0) {
+                values.add(itemView.getContext().getString(actionDescriptionRes));
+            }
             return android.text.TextUtils.join("，", values);
+        }
+
+        private int uidIdentityTitle(DiagnosticsUiMapper.ApplicationRow row) {
+            switch (row.uidKind) {
+                case SHARED_UID: return R.string.diagnostics_application_shared_uid;
+                case SYSTEM_UID: return R.string.diagnostics_application_system_uid;
+                case APP_ZYGOTE_UID:
+                    return R.string.diagnostics_application_app_zygote_uid;
+                case ISOLATED_UID: return R.string.diagnostics_application_isolated_uid;
+                case SDK_SANDBOX_UID: return R.string.diagnostics_application_sdk_sandbox_uid;
+                case RESOLUTION_FAILED:
+                    return R.string.diagnostics_application_resolution_failed;
+                case SINGLE_APPLICATION:
+                case UNKNOWN:
+                default:
+                    return row.identityUid >= 0
+                            ? R.string.diagnostics_application_uid_only
+                            : R.string.diagnostics_application_unidentified;
+            }
+        }
+
+        private int uidIdentityIcon(DiagnosticsUiMapper.ApplicationRow row) {
+            switch (row.uidKind) {
+                case SHARED_UID:
+                    return R.drawable.ic_diagnostics_group;
+                case SYSTEM_UID:
+                    return R.drawable.ic_diagnostics_system;
+                case APP_ZYGOTE_UID:
+                case ISOLATED_UID:
+                case SDK_SANDBOX_UID:
+                case RESOLUTION_FAILED:
+                case UNKNOWN:
+                case SINGLE_APPLICATION:
+                default:
+                    return R.drawable.ic_diagnostics_process;
+            }
+        }
+
+        private DiagnosticsDataSource.ResolvedApplication uniqueIdentityApplication(
+                DiagnosticsUiMapper.ApplicationRow row) {
+            return row.uidKind == DiagnosticsDataSource.UidKind.SINGLE_APPLICATION
+                    && row.identityApplications.size() == 1
+                    ? row.identityApplications.get(0) : null;
         }
 
         private int behaviorTitle(DiagnosticsBehavior behavior) {
@@ -405,6 +512,56 @@ final class DiagnosticsRowsAdapter
                     formatTime(row.totals.lastAt)));
         }
         return joinLines(values);
+    }
+
+    private static String uidIdentitySubtitle(
+            Context context, DiagnosticsUiMapper.ApplicationRow row) {
+        if (row.identityUid < 0) return "";
+        LinkedHashMap<String, DiagnosticsDataSource.ResolvedApplication> applications =
+                new LinkedHashMap<>();
+        for (DiagnosticsDataSource.ResolvedApplication application
+                : row.identityApplications) {
+            if (application != null && !application.packageName.isEmpty()) {
+                applications.putIfAbsent(application.packageName, application);
+            }
+        }
+        if (applications.isEmpty()) {
+            return context.getString(R.string.diagnostics_uid_value, row.identityUid);
+        }
+        if (row.uidKind == DiagnosticsDataSource.UidKind.SINGLE_APPLICATION
+                && applications.size() == 1) {
+            return context.getString(
+                    R.string.diagnostics_uid_with_applications,
+                    row.identityUid,
+                    applications.keySet().iterator().next());
+        }
+        LinkedHashMap<String, Integer> labelCounts = new LinkedHashMap<>();
+        for (DiagnosticsDataSource.ResolvedApplication application
+                : applications.values()) {
+            String label = application.displayName.isEmpty()
+                    ? application.packageName : application.displayName;
+            labelCounts.put(label, labelCounts.getOrDefault(label, 0) + 1);
+        }
+        ArrayList<String> visible = new ArrayList<>();
+        for (DiagnosticsDataSource.ResolvedApplication application
+                : applications.values()) {
+            String label = application.displayName.isEmpty()
+                    ? application.packageName : application.displayName;
+            if (labelCounts.get(label) > 1 && !label.equals(application.packageName)) {
+                label += " (" + application.packageName + ")";
+            }
+            visible.add(label);
+            if (visible.size() == 3) break;
+        }
+        String names = android.text.TextUtils.join("、", visible);
+        if (applications.size() > visible.size()) {
+            names = context.getString(
+                    R.string.diagnostics_uid_applications_more,
+                    names,
+                    applications.size());
+        }
+        return context.getString(
+                R.string.diagnostics_uid_with_applications, row.identityUid, names);
     }
 
     private static int behaviorTitleRes(DiagnosticsBehavior behavior) {

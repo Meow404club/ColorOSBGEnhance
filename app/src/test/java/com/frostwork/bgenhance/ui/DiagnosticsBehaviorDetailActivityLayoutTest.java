@@ -6,7 +6,9 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import android.app.Application;
+import android.app.Dialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.view.ContextThemeWrapper;
@@ -14,8 +16,10 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.PopupWindow;
 import android.widget.TextView;
+import androidx.appcompat.app.AlertDialog;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
 import com.frostwork.bgenhance.diagnostics.BehaviorDetailStats;
 import com.frostwork.bgenhance.diagnostics.RecentBehaviorStats;
@@ -23,7 +27,7 @@ import com.frostwork.bgenhance.ui.diagnostics.DiagnosticsBehavior;
 import com.frostwork.bgenhance.ui.diagnostics.DiagnosticsUiMapper;
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.card.MaterialCardView;
-import com.google.android.material.materialswitch.MaterialSwitch;
+import com.google.android.material.checkbox.MaterialCheckBox;
 import java.lang.reflect.Field;
 import java.util.Collections;
 import org.junit.Test;
@@ -34,6 +38,8 @@ import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadow.api.Shadow;
 import org.robolectric.shadows.ShadowActivity;
+import org.robolectric.shadows.ShadowDialog;
+import org.robolectric.shadows.ShadowLooper;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 34, application = Application.class)
@@ -113,7 +119,8 @@ public final class DiagnosticsBehaviorDetailActivityLayoutTest {
     }
 
     @Test
-    public void verboseLoggingLivesOnlyInRoundedOverflowSurface() throws Exception {
+    public void verboseLoggingUsesAccessibleCheckboxInCompactRoundedOverflowSurface()
+            throws Exception {
         DiagnosticsActivity activity = Robolectric.buildActivity(
                 DiagnosticsActivity.class).setup().get();
         assertEquals(0, activity.getResources().getIdentifier(
@@ -125,22 +132,87 @@ public final class DiagnosticsBehaviorDetailActivityLayoutTest {
                 R.id.action_more_diagnostics, 0));
         PopupWindow popup = popup(activity);
         assertNotNull(popup);
-        MaterialSwitch verbose = popup.getContentView().findViewById(
+        View verboseRow = popup.getContentView().findViewById(
+                R.id.diagnostics_popup_verbose_row);
+        View verboseView = popup.getContentView().findViewById(
                 R.id.diagnostics_popup_verbose_switch);
-        assertNotNull(verbose);
+        assertTrue(verboseView instanceof MaterialCheckBox);
+        MaterialCheckBox verbose = (MaterialCheckBox) verboseView;
+        assertEquals(dp(activity, 56), verboseRow.getMinimumHeight());
+        assertTrue(verboseRow.isClickable());
+        assertTrue(verbose.isClickable());
+        assertTrue(verbose.getImportantForAccessibility()
+                != View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO,
-                popup.getContentView().findViewById(
-                        R.id.diagnostics_popup_verbose_row)
-                        .getImportantForAccessibility());
+                verboseRow.getImportantForAccessibility());
+        assertEquals(dp(activity, 56), popup.getContentView().findViewById(
+                R.id.diagnostics_popup_save).getMinimumHeight());
+        assertEquals(dp(activity, 56), popup.getContentView().findViewById(
+                R.id.diagnostics_popup_clear).getMinimumHeight());
+        assertTrue(popup.getContentView().findViewById(
+                R.id.diagnostics_popup_save).isClickable());
+        assertTrue(popup.getContentView().findViewById(
+                R.id.diagnostics_popup_clear).isClickable());
+        assertEquals(0, countVisibleText(
+                popup.getContentView(), activity.getString(R.string.verbose_summary)));
         String description = verbose.getContentDescription().toString();
         assertTrue(description.contains(activity.getString(R.string.verbose_title)));
         assertTrue(description.contains(activity.getString(R.string.verbose_summary)));
+        ModuleSettings.setBoolean(activity, ModuleSettings.KEY_VERBOSE_LOG, false);
+        verbose.setChecked(false);
+        assertTrue(verboseRow.performClick());
+        assertFalse(verbose.isChecked());
+        Dialog latest = ShadowDialog.getLatestDialog();
+        assertTrue(latest instanceof AlertDialog);
+        AlertDialog confirmation = (AlertDialog) latest;
+        TextView confirmationMessage = confirmation.findViewById(android.R.id.message);
+        assertNotNull(confirmationMessage);
+        assertEquals(activity.getString(R.string.verbose_confirm_message),
+                confirmationMessage.getText().toString());
+        confirmation.getButton(DialogInterface.BUTTON_POSITIVE).performClick();
+        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+        assertTrue(ModuleSettings.getLocalBoolean(
+                activity, ModuleSettings.KEY_VERBOSE_LOG));
+        ModuleSettings.prefs(activity).edit()
+                .remove(ModuleSettings.KEY_VERBOSE_LOG)
+                .commit();
         MaterialCardView card = (MaterialCardView) popup.getContentView();
         android.graphics.RectF bounds = new android.graphics.RectF(0f, 0f, 100f, 100f);
         assertTrue(card.getShapeAppearanceModel().getTopLeftCornerSize()
                 .getCornerSize(bounds) > 0f);
         popup.dismiss();
         activity.finish();
+    }
+
+    @Test
+    public void diagnosticMenuKeepsCheckboxAccessibleAtDoubleFontScaleWithoutVisualSummary()
+            {
+        Context context = configuredContext(false);
+        View popup = LayoutInflater.from(context).inflate(
+                R.layout.popup_diagnostics_options, null, false);
+        View verboseRow = popup.findViewById(R.id.diagnostics_popup_verbose_row);
+        View verboseView = popup.findViewById(R.id.diagnostics_popup_verbose_switch);
+
+        assertTrue(verboseView instanceof MaterialCheckBox);
+        MaterialCheckBox verbose = (MaterialCheckBox) verboseView;
+        assertEquals(dp(context, 56), verboseRow.getMinimumHeight());
+        assertTrue(verbose.isClickable());
+        assertTrue(verbose.getImportantForAccessibility()
+                != View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        assertNotNull(verbose.getContentDescription());
+        assertTrue(verbose.getContentDescription().toString().contains(
+                context.getString(R.string.verbose_title)));
+        assertTrue(verbose.getContentDescription().toString().contains(
+                context.getString(R.string.verbose_summary)));
+        assertEquals(0, countVisibleText(
+                popup, context.getString(R.string.verbose_summary)));
+
+        int width = dp(context, 324);
+        popup.measure(
+                View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        popup.layout(0, 0, width, popup.getMeasuredHeight());
+        assertTrue(verboseRow.getMeasuredHeight() >= dp(context, 56));
     }
 
     @Test
@@ -224,5 +296,18 @@ public final class DiagnosticsBehaviorDetailActivityLayoutTest {
                 View.MeasureSpec.makeMeasureSpec(dp(context, 324), View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
         return view.getMeasuredHeight();
+    }
+
+    private static int countVisibleText(View view, CharSequence expected) {
+        int count = view.getVisibility() == View.VISIBLE
+                && view instanceof TextView
+                && android.text.TextUtils.equals(
+                        expected, ((TextView) view).getText()) ? 1 : 0;
+        if (!(view instanceof android.view.ViewGroup)) return count;
+        android.view.ViewGroup group = (android.view.ViewGroup) view;
+        for (int index = 0; index < group.getChildCount(); index++) {
+            count += countVisibleText(group.getChildAt(index), expected);
+        }
+        return count;
     }
 }

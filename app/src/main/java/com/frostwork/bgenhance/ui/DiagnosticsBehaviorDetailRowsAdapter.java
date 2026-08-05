@@ -13,11 +13,13 @@ import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 
 /** Renders compact, unframed rows inside one grouped behavior detail surface. */
 final class DiagnosticsBehaviorDetailRowsAdapter
         extends RecyclerView.Adapter<DiagnosticsBehaviorDetailRowsAdapter.RowViewHolder> {
     private List<DiagnosticsUiMapper.BehaviorDetailRow> items = new ArrayList<>();
+    private Map<String, Long> stableIds = java.util.Collections.emptyMap();
 
     DiagnosticsBehaviorDetailRowsAdapter() {
         setHasStableIds(true);
@@ -27,13 +29,17 @@ final class DiagnosticsBehaviorDetailRowsAdapter
         List<DiagnosticsUiMapper.BehaviorDetailRow> replacement = nextItems == null
                 ? new ArrayList<>() : new ArrayList<>(nextItems);
         DiffUtil.DiffResult diff = DiffUtil.calculateDiff(new RowDiff(items, replacement));
+        Map<String, Long> replacementIds = DiagnosticsStableIds.reconcile(stableIds, replacement);
         items = replacement;
+        stableIds = replacementIds;
         diff.dispatchUpdatesTo(this);
     }
 
     @Override
     public long getItemId(int position) {
-        return items.get(position).stableId().hashCode();
+        Long stableId = stableIds.get(items.get(position).stableId());
+        if (stableId == null) throw new IllegalStateException("missing diagnostics stable ID");
+        return stableId;
     }
 
     @NonNull

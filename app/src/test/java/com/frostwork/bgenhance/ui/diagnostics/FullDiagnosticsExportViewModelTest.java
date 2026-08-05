@@ -77,7 +77,15 @@ public final class FullDiagnosticsExportViewModelTest {
 
         fixture.source.complete(snapshotWithStatus(true, false));
 
-        assertIncompleteBeforeDestination(fixture);
+        FullDiagnosticsExportViewModel.State state = fixture.viewModel.state();
+        assertEquals(FullDiagnosticsExportViewModel.Status.ERROR, state.status);
+        assertEquals(FullDiagnosticsExportViewModel.ERROR_HISTORY_TRUNCATED,
+                state.errorCode);
+        assertFalse(state.destinationCreated);
+        assertNull(fixture.viewModel.takeDestinationRequest());
+        assertNull(fixture.writer.payload);
+        assertEquals(0, fixture.writer.writeCalls);
+        assertEquals(0, fixture.writer.deleteCalls);
     }
 
     @Test

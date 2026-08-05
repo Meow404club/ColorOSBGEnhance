@@ -102,6 +102,27 @@ public final class ResidencyDiagnosticsDbTest {
     }
 
     @Test
+    public void olderSameBootAuthoritativeStateCannotOverwriteNewerState() {
+        database = open(policy(20, 20, 20, 60_000L));
+        long now = System.currentTimeMillis();
+        database.writeBatch(DiagnosticsWriteBatch.builder()
+                .addHookState(authoritativeState(
+                        now + 10L, "INSTALLED", 9, 11, ""))
+                .build());
+        database.writeBatch(DiagnosticsWriteBatch.builder()
+                .addHookState(authoritativeState(
+                        now, "FAILED", 7, 8, "stale_install_failure"))
+                .build());
+
+        DiagnosticsHookState current = database.queryHookStates(10).get(0);
+        assertEquals("INSTALLED", current.installStatus);
+        assertEquals(9, current.configRevision);
+        assertEquals(11, current.policyRevision);
+        assertEquals("", current.lastError);
+        assertEquals(now + 10L, current.updatedAt);
+    }
+
+    @Test
     public void rawSummaryErrorComesFromLatestHitAndSuccessClearsIt() {
         database = open(policy(20, 20, 20, 60_000L));
         long firstDay = DiagnosticsValues.dayBucket(System.currentTimeMillis())
@@ -1183,6 +1204,25 @@ public final class ResidencyDiagnosticsDbTest {
                 .bootId("42")
                 .configRevision(7)
                 .policyRevision(9)
+                .lastError(lastError)
+                .updatedAt(now)
+                .build();
+    }
+
+    private static DiagnosticsHookState authoritativeState(
+            long now,
+            String status,
+            int configRevision,
+            int policyRevision,
+            String lastError) {
+        return DiagnosticsHookState.builder()
+                .processId("system_server")
+                .featureId("freeze")
+                .hookTargetId("freeze_target")
+                .installStatus(status)
+                .bootId("42")
+                .configRevision(configRevision)
+                .policyRevision(policyRevision)
                 .lastError(lastError)
                 .updatedAt(now)
                 .build();

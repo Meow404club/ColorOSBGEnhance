@@ -28,6 +28,7 @@ import java.util.function.LongSupplier;
 /** Retains one explicitly authorized full-report export across configuration changes. */
 public final class FullDiagnosticsExportViewModel extends ViewModel {
     public static final String ERROR_INCOMPLETE_REPORT = "incomplete_report";
+    public static final String ERROR_HISTORY_TRUNCATED = "history_truncated";
     public static final String ERROR_MISSING_PAYLOAD = "missing_payload";
 
     private static final DateTimeFormatter EXPORT_FILE_TIME = DateTimeFormatter
@@ -401,8 +402,11 @@ public final class FullDiagnosticsExportViewModel extends ViewModel {
             finishError(operationId, "report_unavailable", false, true);
             return;
         }
+        if (snapshot.exportStatus != null && snapshot.exportStatus.truncated) {
+            finishError(operationId, ERROR_HISTORY_TRUNCATED, false, true);
+            return;
+        }
         if (snapshot.exportStatus == null
-                || snapshot.exportStatus.truncated
                 || snapshot.exportStatus.hasErrors
                 || !snapshot.packageNamesIncluded
                 || !snapshot.uidsIncluded

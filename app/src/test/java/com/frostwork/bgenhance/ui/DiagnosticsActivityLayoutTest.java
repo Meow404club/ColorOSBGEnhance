@@ -22,6 +22,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.PopupWindow;
 import android.widget.TextView;
 import androidx.appcompat.app.AlertDialog;
 import androidx.recyclerview.widget.RecyclerView;
@@ -30,6 +31,7 @@ import com.frostwork.bgenhance.R;
 import com.frostwork.bgenhance.FeatureIds;
 import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.ModuleApplication;
+import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
 import com.frostwork.bgenhance.diagnostics.NormalizedDiagnosticsEvent;
 import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
@@ -39,6 +41,7 @@ import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.appbar.AppBarLayout;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.button.MaterialButtonToggleGroup;
+import com.google.android.material.checkbox.MaterialCheckBox;
 import com.google.android.material.materialswitch.MaterialSwitch;
 import org.junit.Test;
 import org.json.JSONObject;
@@ -355,6 +358,45 @@ public final class DiagnosticsActivityLayoutTest {
     }
 
     @Test
+    public void verboseLoggingIsSavedOnlyAfterPrivacyConfirmation() throws Exception {
+        ModuleSettings.prefs(RuntimeEnvironment.getApplication()).edit()
+                .putBoolean(ModuleSettings.KEY_VERBOSE_LOG, false)
+                .commit();
+        DiagnosticsActivity activity = Robolectric.buildActivity(DiagnosticsActivity.class)
+                .setup()
+                .get();
+        MaterialToolbar toolbar = activity.findViewById(R.id.toolbar);
+
+        assertTrue(toolbar.getMenu().performIdentifierAction(
+                R.id.action_more_diagnostics, 0));
+        PopupWindow popup = optionsPopup(activity);
+        MaterialCheckBox verbose = popup.getContentView().findViewById(
+                R.id.diagnostics_popup_verbose_switch);
+        assertFalse(verbose.isChecked());
+
+        verbose.performClick();
+
+        assertFalse(ModuleSettings.getLocalBoolean(
+                activity, ModuleSettings.KEY_VERBOSE_LOG));
+        AlertDialog confirmation = (AlertDialog) ShadowDialog.getLatestDialog();
+        assertTrue(confirmation.isShowing());
+        TextView message = confirmation.findViewById(android.R.id.message);
+        assertNotNull(message);
+        assertEquals(activity.getString(R.string.verbose_confirm_message),
+                message.getText().toString());
+
+        confirmation.getButton(DialogInterface.BUTTON_POSITIVE).performClick();
+        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+
+        assertTrue(ModuleSettings.getLocalBoolean(
+                activity, ModuleSettings.KEY_VERBOSE_LOG));
+        ModuleSettings.prefs(activity).edit()
+                .remove(ModuleSettings.KEY_VERBOSE_LOG)
+                .commit();
+        activity.finish();
+    }
+
+    @Test
     public void unavailableSnapshotNeverLaunchesCreateDocument() throws Exception {
         DiagnosticsActivity activity = Robolectric.buildActivity(DiagnosticsActivity.class)
                 .setup()
@@ -667,6 +709,12 @@ public final class DiagnosticsActivityLayoutTest {
         Field field = DiagnosticsActivity.class.getDeclaredField("fullExportViewModel");
         field.setAccessible(true);
         return (FullDiagnosticsExportViewModel) field.get(activity);
+    }
+
+    private static PopupWindow optionsPopup(DiagnosticsActivity activity) throws Exception {
+        Field field = DiagnosticsActivity.class.getDeclaredField("optionsPopup");
+        field.setAccessible(true);
+        return (PopupWindow) field.get(activity);
     }
 
     private static long waitForNewEpoch(long before) throws Exception {

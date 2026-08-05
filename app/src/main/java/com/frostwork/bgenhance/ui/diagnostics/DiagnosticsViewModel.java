@@ -7,8 +7,10 @@ import com.frostwork.bgenhance.diagnostics.RecentBehaviorStats;
 import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
@@ -100,6 +102,8 @@ public final class DiagnosticsViewModel implements AutoCloseable {
     private View selectedView = View.APPLICATION;
     private DiagnosticsDataSource.ManagedApplicationPage managedApplications =
             DiagnosticsDataSource.ManagedApplicationPage.unsupported();
+    private DiagnosticsDataSource.UidResolutionPage uidResolutions =
+            DiagnosticsDataSource.UidResolutionPage.unsupported();
     private long generation;
     private int visibleLimit;
     private boolean requestInFlight;
@@ -107,6 +111,8 @@ public final class DiagnosticsViewModel implements AutoCloseable {
     private boolean aggregateHistoryTruncated;
     private boolean contentHistoryTruncated;
     private boolean managedApplicationsComplete;
+    private boolean uidResolutionComplete;
+    private boolean uidResolutionStarted;
     private boolean applicationMappingStarted;
     private boolean closed;
 
@@ -186,10 +192,13 @@ public final class DiagnosticsViewModel implements AutoCloseable {
             aggregateRows.clear();
             allRows = Collections.emptyList();
             managedApplications = DiagnosticsDataSource.ManagedApplicationPage.unsupported();
+            uidResolutions = DiagnosticsDataSource.UidResolutionPage.unsupported();
             aggregateComplete = false;
             aggregateHistoryTruncated = false;
             contentHistoryTruncated = false;
             managedApplicationsComplete = view != View.APPLICATION;
+            uidResolutionComplete = view != View.APPLICATION;
+            uidResolutionStarted = false;
             applicationMappingStarted = false;
             loading = new State(
                     view, Status.LOADING, Collections.emptyList(), 0,
@@ -308,9 +317,46 @@ public final class DiagnosticsViewModel implements AutoCloseable {
     }
 
     private void finishApplicationAggregateMapping(long requestGeneration) {
+        Set<Integer> observedUids = new LinkedHashSet<>();
         synchronized (lock) {
             if (!isCurrentLocked(requestGeneration, View.APPLICATION)) return;
             aggregateComplete = true;
+            if (uidResolutionStarted) return;
+            uidResolutionStarted = true;
+            for (DiagnosticsQuery.AggregateRow row : aggregateRows) {
+                if (row != null && row.uid >= 0) observedUids.add(row.uid);
+            }
+        }
+        requestUidResolutions(requestGeneration, observedUids);
+    }
+
+    private void requestUidResolutions(long requestGeneration, Set<Integer> observedUids) {
+        CompletableFuture<DiagnosticsDataSource.UidResolutionPage> future;
+        try {
+            future = dataSource.resolveUidsAsync(observedUids);
+        } catch (RuntimeException error) {
+            finishUidResolutions(
+                    requestGeneration, DiagnosticsDataSource.UidResolutionPage.unsupported());
+            return;
+        }
+        if (future == null) {
+            finishUidResolutions(
+                    requestGeneration, DiagnosticsDataSource.UidResolutionPage.unsupported());
+            return;
+        }
+        future.whenComplete((page, failure) -> finishUidResolutions(
+                requestGeneration,
+                failure != null || page == null || !page.isSuccessful()
+                        ? DiagnosticsDataSource.UidResolutionPage.unsupported() : page));
+    }
+
+    private void finishUidResolutions(
+            long requestGeneration,
+            DiagnosticsDataSource.UidResolutionPage page) {
+        synchronized (lock) {
+            if (!isCurrentLocked(requestGeneration, View.APPLICATION)) return;
+            uidResolutions = page;
+            uidResolutionComplete = true;
         }
         tryStartApplicationMapping(requestGeneration);
     }
@@ -381,21 +427,24 @@ public final class DiagnosticsViewModel implements AutoCloseable {
     private void tryStartApplicationMapping(long requestGeneration) {
         List<DiagnosticsQuery.AggregateRow> aggregates;
         DiagnosticsDataSource.ManagedApplicationPage applications;
+        DiagnosticsDataSource.UidResolutionPage resolutions;
         synchronized (lock) {
             if (!isCurrentLocked(requestGeneration, View.APPLICATION)
                     || !aggregateComplete
                     || !managedApplicationsComplete
+                    || !uidResolutionComplete
                     || applicationMappingStarted) return;
             applicationMappingStarted = true;
             aggregates = new ArrayList<>(aggregateRows);
             applications = managedApplications;
+            resolutions = uidResolutions;
         }
 
         List<DiagnosticsUiMapper.ApplicationRow> mapped;
         try {
             mapped = applications.authoritative
-                    ? mapper.mapApplications(applications.items, aggregates)
-                    : mapper.mapApplications(aggregates);
+                    ? mapper.mapApplications(applications.items, resolutions, aggregates)
+                    : mapper.mapApplications(resolutions, aggregates);
         } catch (RuntimeException error) {
             finishError(requestGeneration, View.APPLICATION, "mapping_failed");
             return;
@@ -480,6 +529,8 @@ public final class DiagnosticsViewModel implements AutoCloseable {
             aggregateHistoryTruncated = false;
             contentHistoryTruncated = false;
             managedApplicationsComplete = false;
+            uidResolutionComplete = false;
+            uidResolutionStarted = false;
             applicationMappingStarted = false;
             String errorCode = normalizeError(requestedErrorCode);
             error = new State(view, Status.ERROR, Collections.emptyList(), 0,
