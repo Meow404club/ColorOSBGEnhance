@@ -14,7 +14,9 @@ import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
 import com.frostwork.bgenhance.diagnostics.RecentBehaviorStats;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.junit.Test;
 
 public final class DiagnosticsUiMapperTest {
@@ -75,6 +77,104 @@ public final class DiagnosticsUiMapperTest {
         assertTrue(rows.get(3).unidentified);
         assertEquals("application:@unidentified", rows.get(3).stableId);
         assertEquals(4L, rows.get(3).totals.observedOnly);
+    }
+
+    @Test
+    public void uidOnlyEventsMergeIntoTheirUniqueResolvedApplication() {
+        int uid = 10_321;
+        String packageName = "com.example.resolved";
+        DiagnosticsDataSource.UidResolutionPage resolutions =
+                DiagnosticsDataSource.UidResolutionPage.success(Map.of(
+                        uid,
+                        DiagnosticsDataSource.UidResolution.single(
+                                uid,
+                                new DiagnosticsDataSource.ResolvedApplication(
+                                        packageName, "Resolved App", true))));
+
+        List<DiagnosticsUiMapper.ApplicationRow> rows = mapper.mapApplications(
+                resolutions,
+                Arrays.asList(
+                        row("", uid, "WAKE", DiagnosticsResult.PASSED,
+                                7L, 0L, 0L, 7L, 10L),
+                        row(packageName, uid, "KILL", DiagnosticsResult.BLOCKED,
+                                3L, 3L, 0L, 3L, 20L)));
+
+        assertEquals(1, rows.size());
+        DiagnosticsUiMapper.ApplicationRow item = rows.get(0);
+        assertEquals("application:" + packageName, item.stableId);
+        assertEquals(packageName, item.packageName);
+        assertEquals("Resolved App", item.displayName);
+        assertTrue(item.manageable);
+        assertEquals(10L, item.totals.observed);
+        assertEquals(7L, item.behavior(DiagnosticsBehavior.WAKE).observed);
+    }
+
+    @Test
+    public void unsafeUidKindsStaySeparateAndCannotOpenApplicationManagement() {
+        int sharedUid = 10_777;
+        LinkedHashMap<Integer, DiagnosticsDataSource.UidResolution> identities =
+                new LinkedHashMap<>();
+        identities.put(sharedUid, DiagnosticsDataSource.UidResolution.shared(
+                sharedUid,
+                Arrays.asList(
+                        new DiagnosticsDataSource.ResolvedApplication(
+                                "com.example.shared.one", "First", false),
+                        new DiagnosticsDataSource.ResolvedApplication(
+                                "com.example.shared.two", "Second", false))));
+
+        List<DiagnosticsUiMapper.ApplicationRow> rows = mapper.mapApplications(
+                DiagnosticsDataSource.UidResolutionPage.success(identities),
+                Arrays.asList(
+                        row("", sharedUid, "WAKE", DiagnosticsResult.PASSED,
+                                8L, 0L, 0L, 8L, 10L),
+                        row("", 1_000, "WAKE", DiagnosticsResult.PASSED,
+                                7L, 0L, 0L, 7L, 9L),
+                        row("", 99_004, "WAKE", DiagnosticsResult.PASSED,
+                                6L, 0L, 0L, 6L, 8L),
+                        row("", 20_123, "WAKE", DiagnosticsResult.PASSED,
+                                5L, 0L, 0L, 5L, 7L)));
+
+        assertEquals(4, rows.size());
+        assertUidRow(rows.get(0), sharedUid, DiagnosticsDataSource.UidKind.SHARED_UID);
+        assertUidRow(rows.get(1), 1_000, DiagnosticsDataSource.UidKind.SYSTEM_UID);
+        assertUidRow(rows.get(2), 99_004, DiagnosticsDataSource.UidKind.ISOLATED_UID);
+        assertUidRow(rows.get(3), 20_123,
+                DiagnosticsDataSource.UidKind.SDK_SANDBOX_UID);
+        assertEquals(2, rows.get(0).identityApplications.size());
+    }
+
+    @Test
+    public void namedOtherUserUidStaysSeparateFromCurrentUserPolicyRow() {
+        int currentUid = 10_321;
+        int otherUid = currentUid + 100_000;
+        String packageName = "com.example.reader";
+        DiagnosticsDataSource.UidResolutionPage resolutions =
+                DiagnosticsDataSource.UidResolutionPage.success(Map.of(
+                        otherUid,
+                        DiagnosticsDataSource.UidResolution.single(
+                                otherUid,
+                                new DiagnosticsDataSource.ResolvedApplication(
+                                        packageName, "Reader Clone", false,
+                                        false, false))));
+
+        List<DiagnosticsUiMapper.ApplicationRow> rows = mapper.mapApplications(
+                Collections.singletonList(new DiagnosticsDataSource.ManagedApplication(
+                        packageName, "Reader", true)),
+                resolutions,
+                Arrays.asList(
+                        row(packageName, currentUid, "KILL", DiagnosticsResult.BLOCKED,
+                                2L, 2L, 0L, 2L, 20L),
+                        row(packageName, otherUid, "WAKE", DiagnosticsResult.PASSED,
+                                5L, 0L, 0L, 5L, 10L)));
+
+        assertEquals(2, rows.size());
+        assertEquals("application:" + packageName, rows.get(0).stableId);
+        assertEquals(2L, rows.get(0).totals.observed);
+        assertUidRow(rows.get(1), otherUid,
+                DiagnosticsDataSource.UidKind.SINGLE_APPLICATION);
+        assertEquals("Reader Clone", rows.get(1).displayName);
+        assertEquals("Reader Clone",
+                rows.get(1).identityApplications.get(0).displayName);
     }
 
     @Test
@@ -335,7 +435,7 @@ public final class DiagnosticsUiMapperTest {
     }
 
     @Test
-    public void processEntryBeforeFeatureInstallationRemainsPending() {
+    public void processEntryBeforeFeatureInstallationHasDedicatedStatus() {
         DiagnosticsHookState entry = hookState(
                 DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
                 DiagnosticsTargetIds.RUNTIME_PROCESS,
@@ -351,11 +451,11 @@ public final class DiagnosticsUiMapperTest {
                 DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
                 DiagnosticsTargetIds.RUNTIME_PROCESS);
 
-        assertEquals(DiagnosticsUiMapper.HookStatus.PENDING, row.status);
+        assertEquals(DiagnosticsUiMapper.HookStatus.ENTRY_LOADED, row.status);
     }
 
     @Test
-    public void runtimeFromAnotherModuleVersionRemainsPending() {
+    public void runtimeFromAnotherModuleVersionHasDedicatedStatus() {
         DiagnosticsHookState stale = hookState(
                 DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
                 DiagnosticsTargetIds.RUNTIME_PROCESS,
@@ -371,7 +471,27 @@ public final class DiagnosticsUiMapperTest {
                 DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
                 DiagnosticsTargetIds.RUNTIME_PROCESS);
 
-        assertEquals(DiagnosticsUiMapper.HookStatus.PENDING, row.status);
+        assertEquals(DiagnosticsUiMapper.HookStatus.VERSION_MISMATCH, row.status);
+    }
+
+    @Test
+    public void bootstrapFailureHasDedicatedStatus() {
+        DiagnosticsHookState failed = hookState(
+                DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                DiagnosticsTargetIds.RUNTIME_PROCESS,
+                "current_boot",
+                "BOOTSTRAP_FAILED",
+                0L);
+
+        DiagnosticsUiMapper.HookTargetRow row = findHook(
+                mapper.mapHookTargets(
+                        DiagnosticsDataSource.HookStatePage.success(
+                                Collections.singletonList(failed)),
+                        "current_boot"),
+                DiagnosticsHookCatalog.PROCESS_SYSTEM_SERVER,
+                DiagnosticsTargetIds.RUNTIME_PROCESS);
+
+        assertEquals(DiagnosticsUiMapper.HookStatus.BOOTSTRAP_FAILED, row.status);
     }
 
     private static String currentStage() {
@@ -454,5 +574,16 @@ public final class DiagnosticsUiMapperTest {
                 eventCount,
                 1L,
                 lastAt);
+    }
+
+    private static void assertUidRow(
+            DiagnosticsUiMapper.ApplicationRow row,
+            int uid,
+            DiagnosticsDataSource.UidKind kind) {
+        assertEquals("application:@uid:" + uid, row.stableId);
+        assertEquals(uid, row.identityUid);
+        assertEquals(kind, row.uidKind);
+        assertTrue(row.unidentified);
+        assertFalse(row.manageable);
     }
 }
