@@ -113,20 +113,28 @@ public final class HansWakeHook implements FeatureHook {
 
     Object interceptKernel(XposedInterface.Chain chain) throws Throwable {
         if (!active) return chain.proceed();
+        Object typeValue = HookUtils.objectArg(chain, 0);
+        Object targetUidValue = HookUtils.objectArg(chain, 4);
+        if (!(typeValue instanceof Number) || !(targetUidValue instanceof Number)) {
+            recordUnparsedArguments();
+            return chain.proceed();
+        }
         int type = HookUtils.intArg(chain, 0, UNKNOWN_SOURCE_CODE);
         int targetUid = HookUtils.intArg(chain, 4, ResidencyTarget.UNKNOWN_UID);
         HansWakeSourceClassifier.Resolution classified;
         try {
             classified = HansWakeSourceClassifier.classifyKernel(type);
         } catch (Throwable error) {
+            if (targetUid < 0) {
+                recordUnparsedArguments();
+                return chain.proceed();
+            }
             recordFailure(kernelEvent(targetUid, null, type));
-            return targetUid < 0
-                    ? chain.proceed()
-                    : proceedWithinFrame(
-                            chain, WakeFrame.unknownKernel(targetUid));
+            return proceedWithinFrame(
+                    chain, WakeFrame.unknownKernel(targetUid));
         }
         if (targetUid < 0) {
-            recordFailure(kernelEvent(targetUid, null, type));
+            recordUnparsedArguments();
             return chain.proceed();
         }
         if (!classified.isResolved()) {
@@ -145,7 +153,6 @@ public final class HansWakeHook implements FeatureHook {
                 new WakeFrame(
                         targetUid,
                         source,
-                        result == RuntimeResult.FAIL_OPEN,
                         false));
     }
 
@@ -153,6 +160,11 @@ public final class HansWakeHook implements FeatureHook {
         if (!active) return chain.proceed();
         Object reasonValue = HookUtils.objectArg(chain, 1);
         Object componentValue = HookUtils.objectArg(chain, 2);
+        if ((reasonValue != null && !(reasonValue instanceof String))
+                || (componentValue != null && !(componentValue instanceof String))) {
+            recordUnparsedArguments();
+            return chain.proceed();
+        }
         String reason = reasonValue instanceof String ? (String) reasonValue : null;
         String component = componentValue instanceof String ? (String) componentValue : null;
         if (HansWakeSourceClassifier.isModuleRecovery(reason, component)) {
@@ -163,11 +175,11 @@ public final class HansWakeHook implements FeatureHook {
         try {
             objectResolution = HansObjectAdapter.resolve(HookUtils.objectArg(chain, 0));
         } catch (Throwable error) {
-            recordFailure(terminalEvent(null, null, reason));
+            recordUnparsedArguments();
             return chain.proceed();
         }
         if (!objectResolution.isResolved()) {
-            recordFailure(terminalEvent(null, null, reason));
+            recordUnparsedArguments();
             return chain.proceed();
         }
 
@@ -342,6 +354,14 @@ public final class HansWakeHook implements FeatureHook {
         }
     }
 
+    private void recordUnparsedArguments() {
+        try {
+            diagnosticsRecorder.recordUnparsedArguments();
+        } catch (Throwable ignored) {
+            // Raw diagnostics must never alter a system-server wake decision.
+        }
+    }
+
     private Object proceedWithinFrame(
             XposedInterface.Chain chain, WakeFrame frame) throws Throwable {
         WakeFrame previous = activeFrame.get();
@@ -395,6 +415,8 @@ public final class HansWakeHook implements FeatureHook {
                 WakeThrottleState.Outcome throttleOutcome);
 
         void recordFailOpen(HookEvent event);
+
+        void recordUnparsedArguments();
     }
 
     private static final class DefaultWakeDiagnosticsRecorder
@@ -411,6 +433,15 @@ public final class HansWakeHook implements FeatureHook {
         public void recordFailOpen(HookEvent event) {
             HookDiagnostics.recordEventFromLockedPath(event, "fail_open");
         }
+
+        @Override
+        public void recordUnparsedArguments() {
+            HookDiagnostics.recordRawHookHit(
+                    HookTargetIds.HANS_WAKE_DISPATCH,
+                    false,
+                    false,
+                    "hook_arguments_unparsed");
+        }
     }
 
     private enum RuntimeResult {
@@ -424,31 +455,28 @@ public final class HansWakeHook implements FeatureHook {
     private static final class WakeFrame {
         private final int uid;
         private final WakeSource source;
-        private final boolean allowUidAlias;
         private final boolean bypassAllSources;
 
         private WakeFrame(
                 int uid,
                 WakeSource source,
-                boolean allowUidAlias,
                 boolean bypassAllSources) {
             this.uid = uid;
             this.source = source;
-            this.allowUidAlias = allowUidAlias;
             this.bypassAllSources = bypassAllSources;
         }
 
         private static WakeFrame unknownKernel(int uid) {
-            return new WakeFrame(uid, null, true, true);
+            return new WakeFrame(uid, null, true);
         }
 
         private boolean matches(int candidateUid, WakeSource candidateSource) {
+            // An isolated UID cannot be safely associated with an owning application
+            // from these callback arguments alone. Only an exact UID can inherit the
+            // upstream decision; every other terminal callback is evaluated itself.
+            if (uid != candidateUid) return false;
             if (bypassAllSources) return true;
-            if (source != candidateSource) return false;
-            // Firmware may translate an isolated Kernel UID to its owning app UID
-            // before the terminal object callback. Never enforce a second decision
-            // after the upstream path has already failed open.
-            return uid == candidateUid || allowUidAlias;
+            return source == candidateSource;
         }
     }
 }

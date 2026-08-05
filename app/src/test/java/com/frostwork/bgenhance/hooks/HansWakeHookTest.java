@@ -206,7 +206,8 @@ public final class HansWakeHookTest {
     }
 
     @Test
-    public void typedFailedOpenKernelFrameAcceptsOwningUidAtTerminal() throws Throwable {
+    public void typedFailedOpenKernelFrameDoesNotAssumeIsolatedUidOwnership()
+            throws Throwable {
         int isolatedUid = 99_902;
         AtomicInteger decisions = new AtomicInteger();
         RecordingReporter reporter = new RecordingReporter();
@@ -226,18 +227,53 @@ public final class HansWakeHookTest {
         }, () -> 1_000L, reporter);
         FakeChain terminal = terminalChain(Boolean.TRUE, true, "AsyncBinder", "aidl");
         FakeChain kernel = FakeChain.calling(() -> {
-            assertEquals(Boolean.TRUE, hook.interceptTerminal(terminal));
+            assertEquals(Boolean.FALSE, hook.interceptTerminal(terminal));
             return null;
         }, 0, 101, 1_001, 202, isolatedUid, "aidl", 7);
 
         assertNull(hook.interceptKernel(kernel));
-        assertEquals(1, decisions.get());
-        assertEquals(1, reporter.records.size());
+        assertEquals(2, decisions.get());
+        assertEquals(2, reporter.records.size());
         assertEquals(DecisionDisposition.FAIL_OPEN,
                 reporter.records.get(0).decision.trace().disposition());
+        assertEquals(WakeDecision.Action.BLOCK_WAKE,
+                reporter.records.get(1).decision.effectiveAction());
         assertEquals(0, reporter.failOpenEvents.size());
+        assertEquals(0, reporter.unparsedArgumentHits);
+        assertEquals(1, kernel.proceedCalls());
+        assertEquals(0, terminal.proceedCalls());
+    }
+
+    @Test
+    public void typedFailedOpenKernelFrameDoesNotAliasAnotherOrdinaryUid() throws Throwable {
+        AtomicInteger decisions = new AtomicInteger();
+        RecordingReporter reporter = new RecordingReporter();
+        HansWakeHook hook = hook((target, source) -> {
+            decisions.incrementAndGet();
+            return decision(
+                    target,
+                    source,
+                    WakePolicy.allowAll(),
+                    false,
+                    true,
+                    false,
+                    1L,
+                    2L,
+                    0L,
+                    Map.of());
+        }, () -> 1_000L, reporter);
+        FakeChain terminal = terminalChain(
+                UID + 1, Boolean.TRUE, true, "AsyncBinder", "aidl");
+        FakeChain kernel = FakeChain.calling(() -> {
+            assertEquals(Boolean.TRUE, hook.interceptTerminal(terminal));
+            return null;
+        }, 0, 101, 1_001, 202, UID, "aidl", 7);
+
+        assertNull(hook.interceptKernel(kernel));
+        assertEquals(2, decisions.get());
         assertEquals(1, kernel.proceedCalls());
         assertEquals(1, terminal.proceedCalls());
+        assertEquals(2, reporter.records.size());
     }
 
     @Test
@@ -255,6 +291,71 @@ public final class HansWakeHookTest {
 
         assertNull(hook.interceptKernel(kernel));
         assertEquals(1, reporter.failOpenEvents.size());
+        assertEquals(1, kernel.proceedCalls());
+        assertEquals(1, terminal.proceedCalls());
+    }
+
+    @Test
+    public void unknownKernelFrameDoesNotBypassAnotherUid() throws Throwable {
+        AtomicInteger decisions = new AtomicInteger();
+        RecordingReporter reporter = new RecordingReporter();
+        HansWakeHook hook = hook((target, source) -> {
+            decisions.incrementAndGet();
+            return decision(
+                    target,
+                    source,
+                    WakePolicy.allowAll(),
+                    false,
+                    true,
+                    false,
+                    1L,
+                    2L,
+                    0L,
+                    Map.of());
+        }, () -> 1_000L, reporter);
+        FakeChain terminal = terminalChain(
+                UID + 1, Boolean.TRUE, true, "Broadcast", "future");
+        FakeChain kernel = FakeChain.calling(() -> {
+            assertEquals(Boolean.TRUE, hook.interceptTerminal(terminal));
+            return null;
+        }, 99, 101, 1_001, 202, UID, "future", 7);
+
+        assertNull(hook.interceptKernel(kernel));
+        assertEquals(1, decisions.get());
+        assertEquals(1, reporter.failOpenEvents.size());
+        assertEquals(1, kernel.proceedCalls());
+        assertEquals(1, terminal.proceedCalls());
+    }
+
+    @Test
+    public void isolatedAliasCannotCrossUsers() throws Throwable {
+        int isolatedUid = 99_902;
+        int otherUserOwnerUid = 110_902;
+        AtomicInteger decisions = new AtomicInteger();
+        RecordingReporter reporter = new RecordingReporter();
+        HansWakeHook hook = hook((target, source) -> {
+            decisions.incrementAndGet();
+            return decision(
+                    target,
+                    source,
+                    WakePolicy.allowAll(),
+                    false,
+                    true,
+                    false,
+                    1L,
+                    2L,
+                    0L,
+                    Map.of());
+        }, () -> 1_000L, reporter);
+        FakeChain terminal = terminalChain(
+                otherUserOwnerUid, Boolean.TRUE, true, "AsyncBinder", "aidl");
+        FakeChain kernel = FakeChain.calling(() -> {
+            assertEquals(Boolean.TRUE, hook.interceptTerminal(terminal));
+            return null;
+        }, 0, 101, 1_001, 202, isolatedUid, "aidl", 7);
+
+        assertNull(hook.interceptKernel(kernel));
+        assertEquals(2, decisions.get());
         assertEquals(1, kernel.proceedCalls());
         assertEquals(1, terminal.proceedCalls());
     }
@@ -337,6 +438,72 @@ public final class HansWakeHookTest {
         assertEquals(1, kernel.proceedCalls());
         assertEquals(1, terminal.proceedCalls());
         assertEquals(2, reporter.failOpenEvents.size());
+    }
+
+    @Test
+    public void invalidKernelUidLeavesIndependentTerminalDecisionIntact() throws Throwable {
+        AtomicInteger decisions = new AtomicInteger();
+        RecordingReporter reporter = new RecordingReporter();
+        HansWakeHook hook = hook((target, source) -> {
+            decisions.incrementAndGet();
+            return decision(
+                    target,
+                    source,
+                    blockedWake(source),
+                    true,
+                    true,
+                    false,
+                    1L,
+                    2L,
+                    0L,
+                    Map.of(PACKAGE, UID));
+        }, () -> 1_000L, reporter);
+        FakeChain terminal = terminalChain(Boolean.TRUE, true, "Broadcast", "receiver");
+        FakeChain kernel = FakeChain.calling(() -> {
+            assertEquals(Boolean.FALSE, hook.interceptTerminal(terminal));
+            return null;
+        }, 99, 101, 1_001, 202, -1, "future", 7);
+
+        assertNull(hook.interceptKernel(kernel));
+        assertEquals(1, decisions.get());
+        assertEquals(0, reporter.failOpenEvents.size());
+        assertEquals(1, reporter.unparsedArgumentHits);
+        assertEquals(1, reporter.records.size());
+        assertEquals(1, kernel.proceedCalls());
+        assertEquals(0, terminal.proceedCalls());
+    }
+
+    @Test
+    public void malformedKernelUidIsRecordedOnlyAsRawUnparsedHit() throws Throwable {
+        RecordingReporter reporter = new RecordingReporter();
+        HansWakeHook hook = hook((target, source) -> {
+            throw new AssertionError("malformed UID must not reach policy");
+        }, () -> 1_000L, reporter);
+        FakeChain kernel = FakeChain.returning(
+                null, 0, 101, 1_001, 202, "not-a-uid", "aidl", 7);
+
+        assertNull(hook.interceptKernel(kernel));
+        assertEquals(1, kernel.proceedCalls());
+        assertEquals(0, reporter.records.size());
+        assertEquals(0, reporter.failOpenEvents.size());
+        assertEquals(1, reporter.unparsedArgumentHits);
+    }
+
+    @Test
+    public void unresolvedTerminalObjectIsRecordedOnlyAsRawUnparsedHit()
+            throws Throwable {
+        RecordingReporter reporter = new RecordingReporter();
+        HansWakeHook hook = hook((target, source) -> {
+            throw new AssertionError("unresolved object must not reach policy");
+        }, () -> 1_000L, reporter);
+        FakeChain terminal = FakeChain.returning(
+                Boolean.TRUE, null, "Broadcast", "receiver");
+
+        assertEquals(Boolean.TRUE, hook.interceptTerminal(terminal));
+        assertEquals(1, terminal.proceedCalls());
+        assertEquals(0, reporter.records.size());
+        assertEquals(0, reporter.failOpenEvents.size());
+        assertEquals(1, reporter.unparsedArgumentHits);
     }
 
     @Test
@@ -483,9 +650,14 @@ public final class HansWakeHookTest {
 
     private static FakeChain terminalChain(
             Object result, boolean frozen, String reason, String component) {
+        return terminalChain(UID, result, frozen, reason, component);
+    }
+
+    private static FakeChain terminalChain(
+            int uid, Object result, boolean frozen, String reason, String component) {
         return FakeChain.returning(
                 result,
-                new OplusHansPackage(UID, PACKAGE, frozen, false, new Object()),
+                new OplusHansPackage(uid, PACKAGE, frozen, false, new Object()),
                 reason,
                 component);
     }
@@ -573,6 +745,7 @@ public final class HansWakeHookTest {
             implements HansWakeHook.WakeDiagnosticsRecorder {
         private final List<Record> records = new ArrayList<>();
         private final List<HookEvent> failOpenEvents = new ArrayList<>();
+        private int unparsedArgumentHits;
 
         @Override
         public void recordDecision(
@@ -585,6 +758,11 @@ public final class HansWakeHookTest {
         @Override
         public void recordFailOpen(HookEvent event) {
             failOpenEvents.add(event);
+        }
+
+        @Override
+        public void recordUnparsedArguments() {
+            unparsedArgumentHits++;
         }
     }
 
