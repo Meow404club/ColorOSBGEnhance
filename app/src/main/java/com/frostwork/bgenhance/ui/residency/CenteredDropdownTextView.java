@@ -4,6 +4,8 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.drawable.Drawable;
 import android.util.AttributeSet;
+import android.view.View;
+import android.view.ViewParent;
 import android.widget.PopupWindow;
 import androidx.appcompat.widget.ListPopupWindow;
 import com.google.android.material.textfield.MaterialAutoCompleteTextView;
@@ -38,8 +40,35 @@ public final class CenteredDropdownTextView extends MaterialAutoCompleteTextView
 
     @Override
     public void showDropDown() {
+        if (!isDropdownInteractionEnabled()) {
+            dismissDropDown();
+            return;
+        }
+        ResidencyDropdowns.updatePopupHeight(this);
         synchronizeAccessiblePopup();
         super.showDropDown();
+    }
+
+    @Override
+    public boolean performClick() {
+        return isDropdownInteractionEnabled() && super.performClick();
+    }
+
+    @Override
+    public void setEnabled(boolean enabled) {
+        super.setEnabled(enabled);
+        if (!enabled) dismissDropDown();
+    }
+
+    boolean isDropdownInteractionEnabled() {
+        if (!isEnabled()) return false;
+        ViewParent parent = getParent();
+        while (parent instanceof View) {
+            View ancestor = (View) parent;
+            if (!ancestor.isEnabled()) return false;
+            parent = ancestor.getParent();
+        }
+        return true;
     }
 
     float horizontalCenterCorrection() {

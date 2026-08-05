@@ -6,6 +6,9 @@ import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.Filter;
 import android.widget.TextView;
+import androidx.core.view.AccessibilityDelegateCompat;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
 import com.frostwork.bgenhance.R;
 import com.google.android.material.textfield.MaterialAutoCompleteTextView;
 
@@ -43,7 +46,17 @@ final class ResidencyDropdownAdapter extends ArrayAdapter<String> {
     @Override
     public View getView(int position, View convertView, ViewGroup parent) {
         TextView view = (TextView) super.getView(position, convertView, parent);
-        view.setActivated(TextUtils.equals(view.getText(), field.getText()));
+        boolean isCurrentItem = TextUtils.equals(view.getText(), field.getText());
+        view.setSelected(isCurrentItem);
+        view.setActivated(isCurrentItem);
+        ViewCompat.setAccessibilityDelegate(view, new AccessibilityDelegateCompat() {
+            @Override
+            public void onInitializeAccessibilityNodeInfo(
+                    View host, AccessibilityNodeInfoCompat info) {
+                super.onInitializeAccessibilityNodeInfo(host, info);
+                info.setSelected(host.isSelected());
+            }
+        });
         return view;
     }
 }

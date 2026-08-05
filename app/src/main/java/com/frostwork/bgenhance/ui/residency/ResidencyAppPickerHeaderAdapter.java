@@ -12,11 +12,14 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.frostwork.bgenhance.R;
 import com.google.android.material.materialswitch.MaterialSwitch;
 import com.google.android.material.textfield.TextInputEditText;
+import java.util.List;
 import java.util.Objects;
 
 /** Scrollable controls shown before the application picker results. */
 final class ResidencyAppPickerHeaderAdapter
         extends RecyclerView.Adapter<ResidencyAppPickerHeaderAdapter.HeaderViewHolder> {
+    private static final Object PAYLOAD_RESULT_COUNT = new Object();
+
     interface Listener {
         void onQueryChanged(String query);
         void onShowSystemAppsChanged(boolean showSystemApps);
@@ -48,6 +51,18 @@ final class ResidencyAppPickerHeaderAdapter
     }
 
     @Override
+    public void onBindViewHolder(
+            @NonNull HeaderViewHolder holder,
+            int position,
+            @NonNull List<Object> payloads) {
+        if (containsOnlyResultCountPayload(payloads)) {
+            holder.bindResultCount();
+            return;
+        }
+        onBindViewHolder(holder, position);
+    }
+
+    @Override
     public int getItemCount() {
         return 1;
     }
@@ -63,7 +78,15 @@ final class ResidencyAppPickerHeaderAdapter
     void setResultCount(@Nullable String resultCount) {
         if (Objects.equals(this.resultCount, resultCount)) return;
         this.resultCount = resultCount;
-        notifyItemChanged(0);
+        notifyItemChanged(0, PAYLOAD_RESULT_COUNT);
+    }
+
+    private static boolean containsOnlyResultCountPayload(List<Object> payloads) {
+        if (payloads.isEmpty()) return false;
+        for (Object payload : payloads) {
+            if (payload != PAYLOAD_RESULT_COUNT) return false;
+        }
+        return true;
     }
 
     void resetFilters() {
@@ -119,9 +142,13 @@ final class ResidencyAppPickerHeaderAdapter
                 search.setSelection(search.length());
             }
             showSystem.setChecked(showSystemApps);
+            bindResultCount();
+            binding = false;
+        }
+
+        void bindResultCount() {
             count.setText(resultCount == null ? "" : resultCount);
             count.setVisibility(resultCount == null ? View.GONE : View.VISIBLE);
-            binding = false;
         }
     }
 }

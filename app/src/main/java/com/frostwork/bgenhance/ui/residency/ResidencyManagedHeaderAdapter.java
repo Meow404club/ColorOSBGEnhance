@@ -12,11 +12,14 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.frostwork.bgenhance.R;
 import com.google.android.material.textfield.MaterialAutoCompleteTextView;
 import com.google.android.material.textfield.TextInputEditText;
+import java.util.List;
 import java.util.Objects;
 
 /** Scrollable heading and filters shown before managed residency rules. */
 final class ResidencyManagedHeaderAdapter
         extends RecyclerView.Adapter<ResidencyManagedHeaderAdapter.HeaderViewHolder> {
+    private static final Object PAYLOAD_RESULT_COUNT = new Object();
+
     interface Listener {
         void onQueryChanged(String query);
         void onModeFilterChanged(int position);
@@ -54,6 +57,18 @@ final class ResidencyManagedHeaderAdapter
     }
 
     @Override
+    public void onBindViewHolder(
+            @NonNull HeaderViewHolder holder,
+            int position,
+            @NonNull List<Object> payloads) {
+        if (containsOnlyResultCountPayload(payloads)) {
+            holder.bindResultCount();
+            return;
+        }
+        onBindViewHolder(holder, position);
+    }
+
+    @Override
     public int getItemCount() {
         return 1;
     }
@@ -75,13 +90,25 @@ final class ResidencyManagedHeaderAdapter
     }
 
     void setPresentation(boolean filtersVisible, @Nullable String resultCount) {
-        if (this.filtersVisible == filtersVisible
-                && Objects.equals(this.resultCount, resultCount)) {
-            return;
-        }
+        boolean filtersChanged = this.filtersVisible != filtersVisible;
+        boolean resultCountChanged = !Objects.equals(this.resultCount, resultCount);
+        if (!filtersChanged && !resultCountChanged) return;
+
         this.filtersVisible = filtersVisible;
         this.resultCount = resultCount;
-        notifyItemChanged(0);
+        if (filtersChanged) {
+            notifyItemChanged(0);
+        } else {
+            notifyItemChanged(0, PAYLOAD_RESULT_COUNT);
+        }
+    }
+
+    private static boolean containsOnlyResultCountPayload(List<Object> payloads) {
+        if (payloads.isEmpty()) return false;
+        for (Object payload : payloads) {
+            if (payload != PAYLOAD_RESULT_COUNT) return false;
+        }
+        return true;
     }
 
     void resetFilters() {
@@ -165,9 +192,13 @@ final class ResidencyManagedHeaderAdapter
             modeFilter.setText(modes[modeFilterIndex], false);
             statusFilter.setText(statuses[statusFilterIndex], false);
             filters.setVisibility(filtersVisible ? View.VISIBLE : View.GONE);
+            bindResultCount();
+            binding = false;
+        }
+
+        void bindResultCount() {
             count.setText(resultCount == null ? "" : resultCount);
             count.setVisibility(resultCount == null ? View.GONE : View.VISIBLE);
-            binding = false;
         }
     }
 }

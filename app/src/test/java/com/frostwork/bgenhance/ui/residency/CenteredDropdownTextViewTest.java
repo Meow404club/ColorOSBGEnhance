@@ -1,9 +1,13 @@
 package com.frostwork.bgenhance.ui.residency;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import android.app.Application;
 import android.view.ContextThemeWrapper;
+import android.widget.FrameLayout;
+import android.widget.ArrayAdapter;
 import androidx.appcompat.widget.ListPopupWindow;
 import com.frostwork.bgenhance.R;
 import org.junit.Test;
@@ -62,5 +66,45 @@ public final class CenteredDropdownTextViewTest {
         assertEquals(0, popup.getHorizontalOffset());
         assertEquals(8, popup.getVerticalOffset());
         org.junit.Assert.assertNotNull(popup.getBackground());
+    }
+
+    @Test
+    public void interactionRequiresTheFieldAndEveryAncestorToBeEnabled() {
+        ContextThemeWrapper context = new ContextThemeWrapper(
+                RuntimeEnvironment.getApplication(), R.style.AppTheme);
+        FrameLayout parent = new FrameLayout(context);
+        CenteredDropdownTextView field = new CenteredDropdownTextView(context);
+        parent.addView(field);
+
+        assertTrue(field.isDropdownInteractionEnabled());
+
+        field.setEnabled(false);
+        assertFalse(field.isDropdownInteractionEnabled());
+        assertFalse(field.performClick());
+        field.showDropDown();
+        assertFalse(field.isPopupShowing());
+
+        field.setEnabled(true);
+        parent.setEnabled(false);
+        assertFalse(field.isDropdownInteractionEnabled());
+        assertFalse(field.performClick());
+        field.showDropDown();
+        assertFalse(field.isPopupShowing());
+    }
+
+    @Test
+    public void openingRecomputesPopupHeightFromCurrentWindowSpace() {
+        ContextThemeWrapper context = new ContextThemeWrapper(
+                RuntimeEnvironment.getApplication(), R.style.AppTheme);
+        CenteredDropdownTextView field = new CenteredDropdownTextView(context);
+        field.setAdapter(new ArrayAdapter<>(context, android.R.layout.simple_list_item_1,
+                new String[] { "one", "two", "three" }));
+        field.layout(0, 0, 300, 56);
+        field.setDropDownHeight(1);
+
+        field.showDropDown();
+
+        assertTrue(field.getDropDownHeight() > 1);
+        field.dismissDropDown();
     }
 }

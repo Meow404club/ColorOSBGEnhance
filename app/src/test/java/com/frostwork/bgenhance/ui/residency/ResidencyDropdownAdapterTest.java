@@ -2,12 +2,14 @@ package com.frostwork.bgenhance.ui.residency;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import android.app.Application;
-import android.content.res.Configuration;
+import android.graphics.Rect;
 import android.view.ContextThemeWrapper;
 import android.view.Gravity;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.FrameLayout;
 import android.widget.ListAdapter;
 import android.widget.TextView;
@@ -25,7 +27,7 @@ import org.robolectric.shadows.ShadowLooper;
 @Config(sdk = 34, application = Application.class)
 public final class ResidencyDropdownAdapterTest {
     @Test
-    public void optionsAreCenteredAndOnlyCurrentValueIsActivated() {
+    public void optionsExposeCurrentValueAsSelectedAndClearRecycledState() {
         ContextThemeWrapper context = new ContextThemeWrapper(
                 RuntimeEnvironment.getApplication(), R.style.AppTheme);
         MaterialAutoCompleteTextView field = new MaterialAutoCompleteTextView(context);
@@ -39,33 +41,45 @@ public final class ResidencyDropdownAdapterTest {
         TextView other = (TextView) adapter.getView(1, null, parent);
 
         assertEquals(Gravity.CENTER, selected.getGravity());
+        assertTrue(selected.isSelected());
         assertTrue(selected.isActivated());
+        AccessibilityNodeInfo selectedNode = selected.createAccessibilityNodeInfo();
+        assertTrue(selectedNode.isSelected());
+        assertFalse(other.isSelected());
         assertFalse(other.isActivated());
+
+        TextView rebound = (TextView) adapter.getView(1, selected, parent);
+        assertSame(selected, rebound);
+        assertFalse(rebound.isSelected());
+        assertFalse(rebound.isActivated());
         assertEquals(ResidencyDropdowns.popupHeightPx(context, items.length),
                 field.getDropDownHeight());
     }
 
     @Test
-    public void popupHeightShowsWholeRowsAndStaysBoundedOnShortScreens() {
-        ContextThemeWrapper context = new ContextThemeWrapper(
-                RuntimeEnvironment.getApplication(), R.style.AppTheme);
-        Configuration configuration = context.getResources().getConfiguration();
-        int previousHeight = configuration.screenHeightDp;
-        try {
-            configuration.screenHeightDp = 360;
-            int rowHeight = context.getResources().getDimensionPixelSize(
-                    R.dimen.field_min_height);
-            int padding = context.getResources().getDimensionPixelSize(
-                    R.dimen.dropdown_popup_padding) * 2;
+    public void availableHeightUsesTheLargerSideOfTheAnchor() {
+        Rect visibleFrame = new Rect(0, 100, 1000, 500);
 
-            int popupHeight = ResidencyDropdowns.popupHeightPx(context, 6);
+        int availableHeight = ResidencyDropdowns.maxAvailableHeightPx(
+                visibleFrame, 350, 406, 4);
 
-            assertEquals(0, (popupHeight - padding) % rowHeight);
-            assertTrue(popupHeight >= rowHeight * 2 + padding);
-            assertTrue(popupHeight < rowHeight * 6 + padding);
-        } finally {
-            configuration.screenHeightDp = previousHeight;
-        }
+        assertEquals(254, availableHeight);
+    }
+
+    @Test
+    public void popupHeightContainsOnlyWholeRowsWithinShortWindowSpace() {
+        int rowHeight = 56;
+        int padding = 12;
+        int oneRowShortOfTwo = rowHeight * 2 + padding - 1;
+
+        int popupHeight = ResidencyDropdowns.popupHeightPx(
+                6, rowHeight, padding, oneRowShortOfTwo);
+
+        assertEquals(rowHeight + padding, popupHeight);
+        assertEquals(0, (popupHeight - padding) % rowHeight);
+        assertTrue(popupHeight <= oneRowShortOfTwo);
+        assertEquals(0, ResidencyDropdowns.popupHeightPx(
+                6, rowHeight, padding, rowHeight + padding - 1));
     }
 
     @Test
