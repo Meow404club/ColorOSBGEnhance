@@ -1,17 +1,22 @@
 package com.frostwork.bgenhance.hooks;
 
-import com.frostwork.bgenhance.Decision;
 import com.frostwork.bgenhance.FeatureHook;
 import com.frostwork.bgenhance.FeatureIds;
 import com.frostwork.bgenhance.HookEvent;
+import com.frostwork.bgenhance.HookResidencyRuntime;
+import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.HookUtils;
 import com.frostwork.bgenhance.ModuleSettings;
+import com.frostwork.bgenhance.ResidencyDecisionReporter;
+import com.frostwork.bgenhance.hooks.oguard.OguardTargetAdapter;
+import com.frostwork.bgenhance.residency.decision.KillContext;
+import com.frostwork.bgenhance.residency.decision.KillDecision;
 import java.lang.reflect.Method;
 
 public final class OguardKillHook implements FeatureHook {
     private static final String CLASS_NAME = "com.android.server.hans.oguard.policy.AppPowerPolicy";
 
-    @Override public String id() { return FeatureIds.OGUARD_KILL; }
+    @Override public String hookTargetId() { return HookTargetIds.OGUARD_KILL; }
     @Override public String prefKey() { return ModuleSettings.KEY_OGUARD_KILL; }
 
     @Override
@@ -20,8 +25,17 @@ public final class OguardKillHook implements FeatureHook {
             int uid = HookUtils.intArg(chain, 0, -1);
             String pkg = HookUtils.stringArg(chain, 1);
             String reason = HookUtils.stringArg(chain, 2);
-            HookEvent event = new HookEvent(id(), 502, uid, pkg, pkg, reason);
-            if (Decision.shouldBlock(prefKey(), event)) return true;
+            HookEvent event = new HookEvent(FeatureIds.OGUARD_KILL, 502, uid, pkg, pkg, reason);
+            KillDecision decision = HookResidencyRuntime.decideKill(
+                    new KillContext(
+                            OguardTargetAdapter.from(pkg, uid),
+                            KillContext.Path.OGUARD_KILL,
+                            FeatureIds.OGUARD_KILL,
+                            HookTargetIds.OGUARD_KILL),
+                    prefKey(),
+                    ModuleSettings.defaultFor(prefKey()));
+            ResidencyDecisionReporter.recordKill(event, decision);
+            if (decision.blocksAction()) return true;
             return chain.proceed();
         });
         return status(count);
@@ -35,8 +49,10 @@ public final class OguardKillHook implements FeatureHook {
                 && method.getReturnType() == boolean.class;
     }
 
-    private static String status(int count) {
-        return count < 0 ? "UNSUPPORTED_CLASS"
-                : count == 0 ? "UNSUPPORTED_SIGNATURE" : "INSTALLED:" + count;
+    static String status(int count) {
+        if (count < 0) return "UNSUPPORTED_CLASS";
+        if (count == 0) return "UNSUPPORTED_SIGNATURE";
+        if (count != 2) return "UNSUPPORTED_SIGNATURE:EXPECTED=2:FOUND=" + count;
+        return "INSTALLED:2";
     }
 }

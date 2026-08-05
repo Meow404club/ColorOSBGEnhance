@@ -10,8 +10,8 @@ android {
         applicationId = "com.frostwork.bgenhance"
         minSdk = 29
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.0.0"
+        versionCode = 7
+        versionName = "1.1.0-rc2"
     }
 
     buildTypes {
@@ -33,6 +33,14 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
+    buildFeatures {
+        buildConfig = true
+    }
+
     packaging {
         resources {
             merges += "META-INF/xposed/*"
@@ -42,7 +50,13 @@ android {
 }
 
 dependencies {
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("com.google.android.material:material:1.12.0")
     compileOnly("io.github.libxposed:api:102.0.0")
     implementation("io.github.libxposed:service:102.0.0")
+
+    testImplementation("io.github.libxposed:api:102.0.0")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
+    testImplementation("org.robolectric:robolectric:4.14.1")
 }

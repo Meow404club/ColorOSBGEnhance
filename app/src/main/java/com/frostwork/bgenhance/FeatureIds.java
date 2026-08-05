@@ -1,6 +1,7 @@
 package com.frostwork.bgenhance;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 public final class FeatureIds {
@@ -13,23 +14,36 @@ public final class FeatureIds {
     public static final String FAST_CAMERA_OPERATION = "fast_clear_camera_operation";
     public static final String FAST_GAME_START = "fast_clear_game_start";
     public static final String FAST_AI = "fast_clear_ai";
+    public static final String FAST_CLEAR_OTHER = "fast_clear_other";
     public static final String TOURNAMENT = "tournament";
     public static final String MEMORY_FORCE = "memory_guard_force";
     public static final String MEMORY_OVER = "memory_guard_over";
+    public static final String MEMORY_GUARD_OTHER = "memory_guard_other";
+    public static final String ATHENA_OTHER = "athena_other";
     public static final String NIRVANA = "nirvana";
     public static final String CAMERA_LOW_FREE = "camera_low_free";
     public static final String GAME_LOW_FREE = "game_low_free";
+    public static final String OSENSE_PER_PROCESS = "osense_per_process";
     public static final String HANS = "hans_freeze";
+    public static final String HANS_FREEZE_TIMING = "hans_freeze_timing";
+    public static final String HANS_FREEZE_EXEMPTION = "hans_freeze_exemption";
+    public static final String HANS_WAKE = "hans_wake";
+    public static final String HANS_RESOURCE = "hans_resource";
+    public static final String HANS_REFREEZE = "hans_refreeze";
+    public static final String HANS_RECOVERY = "hans_recovery";
     public static final String SUPER_FREEZE = "super_freeze";
-    public static final String ANDROID_FREEZE = "android_freeze";
+
+    private static final List<String> ALL = Collections.unmodifiableList(Arrays.asList(
+            ATHENA_PERIODIC, OGUARD_KILL, OGUARD_FORCE_STOP,
+            FAST_CAMERA_START, FAST_CAMERA_OPERATION, FAST_GAME_START, FAST_AI,
+            TOURNAMENT, MEMORY_FORCE, MEMORY_OVER,
+            NIRVANA, CAMERA_LOW_FREE, GAME_LOW_FREE, OSENSE_PER_PROCESS,
+            HANS, HANS_FREEZE_TIMING, HANS_FREEZE_EXEMPTION,
+            HANS_WAKE, SUPER_FREEZE, HANS_RESOURCE, HANS_REFREEZE,
+            HANS_RECOVERY, FAST_CLEAR_OTHER, MEMORY_GUARD_OTHER, ATHENA_OTHER
+    ));
 
     public static List<String> all() {
-        return Arrays.asList(
-                ATHENA_PERIODIC, OGUARD_KILL, OGUARD_FORCE_STOP,
-                FAST_CAMERA_START, FAST_CAMERA_OPERATION, FAST_GAME_START, FAST_AI,
-                TOURNAMENT, MEMORY_FORCE, MEMORY_OVER,
-                NIRVANA, CAMERA_LOW_FREE, GAME_LOW_FREE,
-                HANS, SUPER_FREEZE, ANDROID_FREEZE
-        );
+        return ALL;
     }
 }

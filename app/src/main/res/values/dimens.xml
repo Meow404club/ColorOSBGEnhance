@@ -2,11 +2,21 @@
 <resources>
     <dimen name="screen_horizontal">24dp</dimen>
     <dimen name="screen_top">22dp</dimen>
+    <dimen name="page_heading_top">10dp</dimen>
+    <dimen name="page_heading_summary_top">8dp</dimen>
+    <dimen name="page_heading_bottom">20dp</dimen>
     <dimen name="card_spacing">16dp</dimen>
     <dimen name="card_radius">28dp</dimen>
     <dimen name="card_padding">20dp</dimen>
+    <dimen name="field_radius">18dp</dimen>
+    <dimen name="field_min_height">56dp</dimen>
+    <dimen name="dropdown_popup_padding">6dp</dimen>
     <dimen name="setting_row_min_height">92dp</dimen>
+    <dimen name="setting_option_min_height">56dp</dimen>
     <dimen name="page_title_size">30sp</dimen>
+    <dimen name="card_title_size">19sp</dimen>
     <dimen name="setting_title_size">17sp</dimen>
     <dimen name="setting_summary_size">14sp</dimen>
+    <dimen name="large_font_status_spacing">8dp</dimen>
+    <dimen name="diagnostics_state_top_padding">64dp</dimen>
 </resources>

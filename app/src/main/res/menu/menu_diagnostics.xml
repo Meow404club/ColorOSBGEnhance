@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <item
+        android:id="@+id/action_refresh_diagnostics"
+        android:icon="@drawable/ic_diagnostics_refresh"
+        android:title="@string/refresh_diagnostics"
+        app:showAsAction="ifRoom" />
+
+    <item
+        android:id="@+id/action_export_diagnostics"
+        android:icon="@drawable/ic_diagnostics_export"
+        android:title="@string/copy_debug"
+        app:showAsAction="ifRoom" />
+
+    <item
+        android:id="@+id/action_save_full_diagnostics"
+        android:title="@string/diagnostics_full_export_action"
+        android:visible="false"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_clear_diagnostics"
+        android:title="@string/reset_stats"
+        android:visible="false"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_more_diagnostics"
+        android:icon="@drawable/ic_more_vert"
+        android:title="@string/more_options"
+        app:showAsAction="always" />
+</menu>

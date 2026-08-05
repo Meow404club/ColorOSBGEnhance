@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/card_bg" />
+    <corners android:radius="@dimen/field_radius" />
+    <padding
+        android:left="@dimen/dropdown_popup_padding"
+        android:top="@dimen/dropdown_popup_padding"
+        android:right="@dimen/dropdown_popup_padding"
+        android:bottom="@dimen/dropdown_popup_padding" />
+</shape>

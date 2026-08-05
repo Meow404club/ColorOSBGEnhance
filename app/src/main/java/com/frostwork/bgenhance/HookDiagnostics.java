@@ -1,65 +1,132 @@
 package com.frostwork.bgenhance;
 
 import android.content.ContentResolver;
+import android.content.Context;
 import android.os.Bundle;
+import android.os.Process;
 import android.os.SystemClock;
 import android.util.Log;
+import com.frostwork.bgenhance.diagnostics.DiagnosticsBootId;
+import com.frostwork.bgenhance.diagnostics.DiagnosticsEventNormalizer;
+import com.frostwork.bgenhance.diagnostics.DiagnosticsBehaviorClassifier;
+import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
+import com.frostwork.bgenhance.diagnostics.DiagnosticsWireEncoder;
+import com.frostwork.bgenhance.diagnostics.DiagnosticsWireParser;
+import com.frostwork.bgenhance.diagnostics.DiagnosticsWriteBatch;
+import com.frostwork.bgenhance.diagnostics.NormalizedDiagnosticsEvent;
+import com.frostwork.bgenhance.diagnostics.RawHookHit;
+import com.frostwork.bgenhance.residency.decision.DecisionTrace;
+import com.frostwork.bgenhance.residency.model.FreezeSource;
+import com.frostwork.bgenhance.residency.model.ResourceType;
+import com.frostwork.bgenhance.residency.model.WakeSource;
+import com.frostwork.bgenhance.residency.runtime.IdentityResolutionStatus;
+import com.frostwork.bgenhance.residency.runtime.ResidencyRuntimeState;
+import com.frostwork.bgenhance.residency.runtime.RuntimeConfigSnapshot;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Non-blocking diagnostics reporter used by hooked processes.
- * Install/process states are sticky and retried after the configuration bridge becomes available.
+ * Non-blocking, epoch-aware diagnostics sender used by hooked processes.
+ * Hook callbacks only update bounded memory; Provider IPC and serialization run on one worker.
  */
 public final class HookDiagnostics {
     private HookDiagnostics() {}
 
-    private static final long FLUSH_INTERVAL_MS = 5_000L;
-    private static final int FLUSH_EVENT_THRESHOLD = 32;
-    private static final Map<String, Counter> COUNTERS = new ConcurrentHashMap<>();
+    interface UserUnlockProbe {
+        boolean isUserUnlocked();
+    }
+
+    interface ElapsedRealtimeNanosProbe {
+        long elapsedRealtimeNanos();
+    }
+
+    private static final long PERIODIC_FLUSH_INTERVAL_MS = TimeUnit.MINUTES.toMillis(5L);
+    private static final long FLUSH_PROBE_INTERVAL_MS = TimeUnit.SECONDS.toMillis(5L);
+    private static final long INITIAL_TRANSPORT_RETRY_INTERVAL_MS =
+            TimeUnit.SECONDS.toMillis(15L);
+    private static final long MAX_TRANSPORT_RETRY_INTERVAL_MS =
+            PERIODIC_FLUSH_INTERVAL_MS;
+    private static final long DRAIN_CONTINUATION_DELAY_MS = 1_000L;
+    private static final long MAX_DRAIN_START_WINDOW_MS = 2_000L;
+    private static final int MAX_BATCHES_PER_DRAIN = 8;
+    private static final int PENDING_QUEUE_HIGH_WATERMARK = 256;
+    private static final int MAX_PENDING_RAW_HITS = 2_048;
+    private static final int MAX_PENDING_NORMALIZED_EVENTS = 2_048;
+    private static final int MAX_OUTBOX_CAS_ATTEMPTS = 32;
+    private static final int MAX_STICKY_STATES = 64;
+    private static final Object FLUSH_SCHEDULE_LOCK = new Object();
+    private static final AtomicReference<OutboxState> OUTBOX =
+            new AtomicReference<>(new OutboxState());
     private static final Map<String, String> FEATURE_STATUSES = new ConcurrentHashMap<>();
+    private static final Map<String, Long> FEATURE_UPDATED_AT = new ConcurrentHashMap<>();
     private static final Map<String, String> PROCESS_STAGES = new ConcurrentHashMap<>();
     private static final Map<String, String> PROCESS_ERRORS = new ConcurrentHashMap<>();
-    private static final AtomicInteger PENDING_EVENTS = new AtomicInteger();
+    private static final Map<String, Long> PROCESS_UPDATED_AT = new ConcurrentHashMap<>();
     private static final AtomicBoolean FLUSH_SCHEDULED = new AtomicBoolean();
-    private static final AtomicBoolean STICKY_RETRY_SCHEDULED = new AtomicBoolean();
+    private static final AtomicLong STICKY_GENERATION = new AtomicLong();
+    private static final AtomicLong REPORTED_STICKY_GENERATION = new AtomicLong(-1L);
+    private static final AtomicLong EVENT_SEQUENCE = new AtomicLong();
+    private static final AtomicInteger MODULE_UID = new AtomicInteger(-1);
     private static final ScheduledThreadPoolExecutor EXECUTOR = new ScheduledThreadPoolExecutor(
             1, runnable -> {
         Thread thread = new Thread(runnable, "BgEnhanceDiagnostics");
         thread.setDaemon(true);
         return thread;
     });
-    private static volatile int sLastReportedRevision = Integer.MIN_VALUE;
+    private static final AtomicReference<ConfigReportState> CURRENT_CONFIG_REPORT =
+            new AtomicReference<>(new ConfigReportState(
+                    Integer.MIN_VALUE, "", "", 0L, ""));
+    private static final AtomicReference<IdentityReportState> CURRENT_IDENTITY_REPORT =
+            new AtomicReference<>(IdentityReportState.empty());
+    private static final String BOOT_ID = DiagnosticsBootId.readCurrent();
+    private static final String SENDER_INSTANCE_ID = createSenderInstanceId();
+
+    private static volatile ConfigReportState sLastReportedConfig;
     private static volatile long sLastConfigReportAt;
-    private static volatile String sLastConfigSource = "";
-    private static volatile String sLastConfigPath = "";
-    private static volatile long sLastConfigLatencyMs;
-    private static volatile String sLastConfigError = "";
+    private static volatile long sConfigUpdatedAt;
+    private static volatile long sEpoch = -1L;
+    private static volatile long sNextBatchSequence;
+    private static volatile InFlightBatch sInFlight;
+    private static ScheduledFuture<?> sScheduledFlush;
+    private static long sScheduledFlushDeadlineNanos = Long.MAX_VALUE;
+    private static volatile String sTransportError = "";
+    private static volatile long sTransportRetryDelayMs = INITIAL_TRANSPORT_RETRY_INTERVAL_MS;
+    private static volatile long sTransportRetryNotBeforeNanos;
+    private static volatile long sLastEventBatchAt = SystemClock.elapsedRealtime();
+    private static volatile boolean sDrainContinuationPending;
+    private static volatile long sLastTransportLogAt;
+    private static volatile UserUnlockProbe sUserUnlockProbe = HookConfig::isUserUnlocked;
+    private static volatile ElapsedRealtimeNanosProbe sElapsedRealtimeNanosProbe =
+            SystemClock::elapsedRealtimeNanos;
 
     static {
         EXECUTOR.setRemoveOnCancelPolicy(true);
         EXECUTOR.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+        scheduleFlush(FLUSH_PROBE_INTERVAL_MS);
     }
 
     public static void reportProcess(String stage, Throwable error) {
         Bundle current = HookConfig.processExtras();
         String processId = current.getString(BridgeContract.EXTRA_PROCESS_ID, "unknown");
-        String stageValue = stage == null ? "UNKNOWN" : stage;
-        String errorValue = errorText(error);
-        PROCESS_STAGES.put(processId, stageValue);
-        PROCESS_ERRORS.put(processId, errorValue);
-        Bundle extras = processExtrasFor(processId);
-        extras.putString(BridgeContract.EXTRA_STAGE, stageValue);
-        extras.putString(BridgeContract.EXTRA_ERROR, errorValue);
-        submitCall(BridgeContract.METHOD_REPORT_PROCESS, extras);
+        PROCESS_STAGES.put(processId, stableId(stage, "UNKNOWN"));
+        PROCESS_ERRORS.put(processId, errorText(error));
+        PROCESS_UPDATED_AT.put(processId, System.currentTimeMillis());
+        STICKY_GENERATION.incrementAndGet();
+        scheduleFlush(0L);
     }
 
     public static void reportConfig(int revision, String source, String path,
@@ -72,184 +139,879 @@ public final class HookDiagnostics {
         reportConfigInternal(revision, source, path, reloadLatencyMs, error, true);
     }
 
-    private static void reportConfigInternal(int revision, String source, String path,
-                                             long reloadLatencyMs, String error,
-                                             boolean force) {
-        String sourceValue = source == null ? "" : source;
-        String pathValue = path == null ? "" : path;
-        String errorValue = error == null ? "" : error;
-        sLastConfigSource = sourceValue;
-        sLastConfigPath = pathValue;
-        sLastConfigLatencyMs = reloadLatencyMs;
-        sLastConfigError = errorValue;
+    private static void reportConfigInternal(
+            int revision, String source, String path,
+            long reloadLatencyMs, String error, boolean force) {
+        reportConfigInternal(new ConfigReportState(
+                revision,
+                source == null ? "" : source,
+                path == null ? "" : path,
+                reloadLatencyMs,
+                error == null ? "" : error), force);
+    }
 
+    private static synchronized void reportConfigInternal(
+            ConfigReportState report, boolean force) {
+        CURRENT_CONFIG_REPORT.set(report);
         long now = SystemClock.elapsedRealtime();
-        boolean failed = !errorValue.isEmpty();
-        if (!force && !failed && revision == sLastReportedRevision
+        if (!force && report.sameConfigurationAs(sLastReportedConfig)
                 && now - sLastConfigReportAt < 30_000L) return;
-        sLastReportedRevision = revision;
+        sLastReportedConfig = report;
         sLastConfigReportAt = now;
-
-        Set<String> processIds = new HashSet<>();
-        processIds.add(HookConfig.processExtras().getString(
-                BridgeContract.EXTRA_PROCESS_ID, "unknown"));
-        processIds.addAll(PROCESS_STAGES.keySet());
-        for (String feature : FEATURE_STATUSES.keySet()) {
-            processIds.add(featureProcessId(feature));
-        }
-        for (String processId : processIds) {
-            Bundle extras = processExtrasFor(processId);
-            extras.putInt(BridgeContract.EXTRA_CONFIG_REVISION, revision);
-            extras.putString(BridgeContract.EXTRA_CONFIG_SOURCE, sourceValue);
-            extras.putString(BridgeContract.EXTRA_CONFIG_PATH, pathValue);
-            extras.putLong(BridgeContract.EXTRA_RELOAD_LATENCY, reloadLatencyMs);
-            extras.putString(BridgeContract.EXTRA_ERROR, errorValue);
-            submitCall(BridgeContract.METHOD_REPORT_CONFIG, extras);
-        }
-        resendStickyStates();
+        sConfigUpdatedAt = System.currentTimeMillis();
+        STICKY_GENERATION.incrementAndGet();
+        scheduleFlush(0L);
     }
 
     public static void reportFeature(String feature, String status) {
-        String featureValue = feature == null ? "" : feature;
-        String statusValue = status == null ? "UNKNOWN" : status;
+        String featureValue = stableId(feature, "");
         if (featureValue.isEmpty()) return;
-        FEATURE_STATUSES.put(featureValue, statusValue);
-        submitFeature(featureValue, statusValue);
+        FEATURE_STATUSES.put(featureValue, stableId(status, "UNKNOWN"));
+        FEATURE_UPDATED_AT.put(featureValue, System.currentTimeMillis());
+        STICKY_GENERATION.incrementAndGet();
+        scheduleFlush(0L);
+    }
+
+    static void reportResidencyRuntime(ResidencyRuntimeState state) {
+        if (state == null) return;
+        String processId = safeCurrentProcessId();
+        String error = state.status() == ResidencyRuntimeState.Status.IDENTITY_REBUILD_FAILED
+                || state.status() == ResidencyRuntimeState.Status.IDENTITY_SOURCE_UNAVAILABLE
+                ? state.error() : "";
+        CURRENT_IDENTITY_REPORT.set(new IdentityReportState(
+                processId,
+                identityStatus(state.status()),
+                diagnosticRevision(state.snapshot().configRevision()),
+                diagnosticRevision(state.identityIndex().policyRevision()),
+                error,
+                System.currentTimeMillis()));
+        STICKY_GENERATION.incrementAndGet();
+        scheduleFlush(0L);
     }
 
     public static void recordEvent(HookEvent event, String result) {
-        if (event == null || event.feature == null || event.feature.isEmpty()) return;
-        Counter counter = COUNTERS.computeIfAbsent(event.feature, key -> new Counter());
-        counter.observed.incrementAndGet();
-        if ("blocked".equals(result)) counter.blocked.incrementAndGet();
-        if ("config_unavailable".equals(result)) counter.failOpen.incrementAndGet();
-        counter.last.set(new LastEvent(event, result, System.currentTimeMillis()));
-        int pending = PENDING_EVENTS.incrementAndGet();
-        scheduleFlush(pending >= FLUSH_EVENT_THRESHOLD ? 0L : FLUSH_INTERVAL_MS);
+        recordEvent(event, result, null);
     }
 
-    private static void resendStickyStates() {
-        for (Map.Entry<String, String> entry : PROCESS_STAGES.entrySet()) {
-            Bundle extras = processExtrasFor(entry.getKey());
-            extras.putString(BridgeContract.EXTRA_STAGE, entry.getValue());
-            extras.putString(BridgeContract.EXTRA_ERROR,
-                    PROCESS_ERRORS.getOrDefault(entry.getKey(), ""));
-            submitCall(BridgeContract.METHOD_REPORT_PROCESS, extras);
+    /** Updates bounded memory only while a system lock is held. */
+    public static void recordEventFromLockedPath(HookEvent event, String result) {
+        recordEvent(event, result, null);
+    }
+
+    public static void recordDecision(
+            HookEvent event, String result, DecisionTrace trace) {
+        recordEvent(event, result, trace);
+    }
+
+    public static void recordDecisionFromLockedPath(
+            HookEvent event, String result, DecisionTrace trace) {
+        recordEvent(event, result, trace);
+    }
+
+    /** Records a diagnostic-only Hook invocation without creating a user-visible event. */
+    public static void recordRawHookHit(
+            String hookTargetId,
+            boolean parsed,
+            boolean identityResolved,
+            String errorCode) {
+        recordRawHookHitInternal(
+                hookTargetId, parsed, identityResolved, errorCode);
+    }
+
+    public static void recordRawHookHit(
+            String hookTargetId,
+            int uid,
+            String packageName,
+            boolean parsed,
+            boolean identityResolved,
+            String errorCode) {
+        if (isModuleIdentity(uid, packageName)) return;
+        recordRawHookHitInternal(
+                hookTargetId, parsed, identityResolved, errorCode);
+    }
+
+    private static void recordRawHookHitInternal(
+            String hookTargetId,
+            boolean parsed,
+            boolean identityResolved,
+            String errorCode) {
+        try {
+            String target = stableId(hookTargetId, "");
+            if (target.isEmpty()) return;
+            RevisionPair revisions = currentRevisions(null);
+            RawHookHit rawHit = RawHookHit.builder()
+                    .timestampMillis(System.currentTimeMillis())
+                    .bootId(BOOT_ID)
+                    .processId(safeCurrentProcessId())
+                    .featureId(featureForHookTarget(target))
+                    .hookTargetId(target)
+                    .configRevision(revisions.configRevision)
+                    .policyRevision(revisions.policyRevision)
+                    .parsed(parsed)
+                    .identityResolved(identityResolved)
+                    .errorCode(errorCode)
+                    .build();
+            OutboxState outbox = OUTBOX.get();
+            OfferResult offered = outbox.offerRawHit(
+                    rawHit, elapsedRealtimeNanos());
+            if (offered == OfferResult.UNAVAILABLE) markQueueUnavailable("raw");
+        } catch (Throwable ignored) {
+            markRecordFailure();
         }
-        for (Map.Entry<String, String> entry : FEATURE_STATUSES.entrySet()) {
-            submitFeature(entry.getKey(), entry.getValue());
+    }
+
+    static void cacheModuleUid(Context context) {
+        if (context == null || MODULE_UID.get() >= 0) return;
+        try {
+            int uid = context.getPackageManager().getPackageUid(
+                    BridgeContract.MODULE_PACKAGE, 0);
+            if (uid >= 0) MODULE_UID.compareAndSet(-1, uid);
+        } catch (Throwable ignored) {
+            // Package identity remains available through exact package-name checks.
         }
     }
 
-    private static void submitFeature(String feature, String status) {
-        String processId = featureProcessId(feature);
-        Bundle extras = processExtrasFor(processId);
-        extras.putString(BridgeContract.EXTRA_FEATURE, feature);
-        extras.putString(BridgeContract.EXTRA_STATUS, status);
-        submitCall(BridgeContract.METHOD_REPORT_FEATURE, extras);
-    }
-
-    private static String featureProcessId(String feature) {
-        if (FeatureIds.ATHENA_PERIODIC.equals(feature)
-                || "fast_clear_dispatch".equals(feature)
-                || "memory_guard_dispatch".equals(feature)
-                || FeatureIds.TOURNAMENT.equals(feature)) {
-            return BridgeContract.PROCESS_ATHENA;
-        }
-        return BridgeContract.PROCESS_SYSTEM_SERVER;
-    }
-
-    private static Bundle processExtrasFor(String processId) {
-        Bundle extras = HookConfig.processExtras();
-        extras.putString(BridgeContract.EXTRA_PROCESS_ID, processId);
-        if (BridgeContract.PROCESS_SYSTEM_SERVER.equals(processId)) {
-            extras.putString(BridgeContract.EXTRA_PACKAGE, "android");
-            extras.putString(BridgeContract.EXTRA_PROCESS, "system_server");
-        } else if (BridgeContract.PROCESS_ATHENA.equals(processId)) {
-            extras.putString(BridgeContract.EXTRA_PACKAGE, "com.oplus.athena");
-            String process = extras.getString(BridgeContract.EXTRA_PROCESS, "");
-            if (process == null || !process.startsWith("com.oplus.athena")) {
-                extras.putString(BridgeContract.EXTRA_PROCESS, "com.oplus.athena");
+    private static void recordEvent(
+            HookEvent event, String result, DecisionTrace trace) {
+        try {
+            if (event == null
+                    || isModuleIdentity(event.uid, event.packageName)
+                    || stableId(event.feature, "").isEmpty()) return;
+            String stableResult = stableId(result, DiagnosticsResult.PASSED);
+            long timestamp = System.currentTimeMillis();
+            long recordedAtElapsedNanos = elapsedRealtimeNanos();
+            String processId = safeCurrentProcessId();
+            RevisionPair revisions = currentRevisions(trace);
+            String hookTarget = safeHookTargetFor(event, trace);
+            boolean resolved = safeIdentityResolved(trace, event);
+            String failOpen = DiagnosticsResult.countsAsFailOpen(stableResult)
+                    ? safeFailOpenReason(stableResult, trace) : "";
+            String rawError = DiagnosticsResult.countsAsAnomalousFailOpen(
+                    stableResult, failOpen) ? failOpen : "";
+            RawHookHit rawHit = RawHookHit.builder()
+                    .timestampMillis(timestamp)
+                    .bootId(BOOT_ID)
+                    .processId(processId)
+                    .featureId(event.feature)
+                    .hookTargetId(hookTarget)
+                    .configRevision(revisions.configRevision)
+                    .policyRevision(revisions.policyRevision)
+                    .parsed(true)
+                    .identityResolved(resolved)
+                    .errorCode(rawError)
+                    .build();
+            OutboxState outbox = OUTBOX.get();
+            OfferResult rawOffered = outbox.offerRawHit(
+                    rawHit, recordedAtElapsedNanos);
+            if (rawOffered == OfferResult.UNAVAILABLE) markQueueUnavailable("raw");
+            try {
+                DiagnosticsEventNormalizer.DecisionData decision =
+                        normalizedDecision(event, stableResult, trace, failOpen);
+                DiagnosticsEventNormalizer.Result normalized =
+                        DiagnosticsEventNormalizer.normalize(rawHit, decision);
+                if (normalized.accepted()) {
+                    OfferResult offered = outbox.offerNormalizedEvent(
+                            normalized.event, recordedAtElapsedNanos);
+                    if (offered == OfferResult.UNAVAILABLE) markQueueUnavailable("event");
+                }
+            } catch (Throwable ignored) {
+                markRecordFailure();
             }
+        } catch (Throwable ignored) {
+            markRecordFailure();
         }
-        return extras;
+    }
+
+    private static boolean isModuleIdentity(int uid, String packageName) {
+        if (BridgeContract.MODULE_PACKAGE.equals(packageName)) return true;
+        return (packageName == null || packageName.isEmpty())
+                && uid >= 0
+                && uid == MODULE_UID.get();
+    }
+
+    private static boolean hasPendingData() {
+        OutboxState outbox = OUTBOX.get();
+        return sInFlight != null
+                || outbox.pendingItemCount() > 0
+                || STICKY_GENERATION.get() > REPORTED_STICKY_GENERATION.get();
     }
 
     private static void scheduleFlush(long delayMs) {
-        if (!FLUSH_SCHEDULED.compareAndSet(false, true)) return;
-        EXECUTOR.schedule(() -> {
-            FLUSH_SCHEDULED.set(false);
-            flushSnapshot();
-            if (PENDING_EVENTS.get() > 0) scheduleFlush(FLUSH_INTERVAL_MS);
-        }, delayMs, TimeUnit.MILLISECONDS);
-    }
-
-    private static void flushSnapshot() {
-        Bundle extras = HookConfig.processExtras();
-        ArrayList<String> features = new ArrayList<>();
-        ArrayList<DrainedCounter> drained = new ArrayList<>();
-        int drainedObserved = 0;
-        for (Map.Entry<String, Counter> entry : COUNTERS.entrySet()) {
-            Counter counter = entry.getValue();
-            int observed = counter.observed.getAndSet(0);
-            int blocked = counter.blocked.getAndSet(0);
-            int failOpen = counter.failOpen.getAndSet(0);
-            if (observed == 0 && blocked == 0 && failOpen == 0) continue;
-            LastEvent last = counter.last.get();
-            Bundle feature = new Bundle();
-            feature.putInt("observed_delta", observed);
-            feature.putInt("blocked_delta", blocked);
-            feature.putInt("fail_open_delta", failOpen);
-            if (last != null) {
-                feature.putLong("last_at", last.timestamp);
-                feature.putString("last_pkg", last.event.packageName);
-                feature.putString("last_process", last.event.processName);
-                feature.putString("last_scene", last.event.scene);
-                feature.putString("last_reason", String.valueOf(last.event.code));
-                feature.putString("last_result", last.result);
+        long boundedDelayMs = Math.max(0L, delayMs);
+        synchronized (FLUSH_SCHEDULE_LOCK) {
+            long nowNanos = System.nanoTime();
+            long deadlineNanos = nowNanos + TimeUnit.MILLISECONDS.toNanos(boundedDelayMs);
+            long retryNotBefore = sTransportRetryNotBeforeNanos;
+            if (retryNotBefore > deadlineNanos) deadlineNanos = retryNotBefore;
+            ScheduledFuture<?> scheduled = sScheduledFlush;
+            if (scheduled != null && !scheduled.isDone()) {
+                boolean violatesBackoff = retryNotBefore > nowNanos
+                        && sScheduledFlushDeadlineNanos < retryNotBefore;
+                if (!violatesBackoff && sScheduledFlushDeadlineNanos <= deadlineNanos) return;
+                if (!scheduled.cancel(false)) return;
             }
-            features.add(entry.getKey());
-            extras.putBundle("feature." + entry.getKey(), feature);
-            drained.add(new DrainedCounter(counter, observed, blocked, failOpen));
-            drainedObserved += observed;
+            try {
+                FLUSH_SCHEDULED.set(true);
+                sScheduledFlushDeadlineNanos = deadlineNanos;
+                sScheduledFlush = EXECUTOR.schedule(
+                        HookDiagnostics::runScheduledFlush,
+                        Math.max(0L, deadlineNanos - System.nanoTime()),
+                        TimeUnit.NANOSECONDS);
+            } catch (Throwable error) {
+                sScheduledFlush = null;
+                sScheduledFlushDeadlineNanos = Long.MAX_VALUE;
+                FLUSH_SCHEDULED.set(false);
+                logTransportFailure("schedule_flush", error);
+            }
         }
-        if (features.isEmpty()) return;
-        extras.putStringArrayList(BridgeContract.EXTRA_FEATURES, features);
-        boolean success = callProvider(BridgeContract.METHOD_REPORT_SNAPSHOT, extras);
-        if (success) {
-            PENDING_EVENTS.addAndGet(-drainedObserved);
-            if (PENDING_EVENTS.get() < 0) PENDING_EVENTS.set(0);
-        } else {
-            for (DrainedCounter item : drained) item.restore();
+    }
+
+    private static void runScheduledFlush() {
+        synchronized (FLUSH_SCHEDULE_LOCK) {
+            sScheduledFlush = null;
+            sScheduledFlushDeadlineNanos = Long.MAX_VALUE;
+            FLUSH_SCHEDULED.set(false);
         }
-    }
-
-    private static void submitCall(String method, Bundle extras) {
-        EXECUTOR.execute(() -> {
-            if (!callProvider(method, extras)) scheduleStickyRetry();
-        });
-    }
-
-    private static void scheduleStickyRetry() {
-        if (!STICKY_RETRY_SCHEDULED.compareAndSet(false, true)) return;
-        EXECUTOR.schedule(() -> {
-            STICKY_RETRY_SCHEDULED.set(false);
-            reportConfigInternal(sLastReportedRevision, sLastConfigSource,
-                    sLastConfigPath, sLastConfigLatencyMs, sLastConfigError, true);
-            if (PENDING_EVENTS.get() > 0) scheduleFlush(0L);
-        }, FLUSH_INTERVAL_MS, TimeUnit.MILLISECONDS);
-    }
-
-    private static boolean callProvider(String method, Bundle extras) {
-        ContentResolver resolver = HookConfig.resolver();
-        if (resolver == null) return false;
         try {
-            Bundle response = resolver.call(BridgeContract.URI, method, null, extras);
-            return response != null && response.getBoolean(BridgeContract.EXTRA_OK, false);
-        } catch (Throwable t) {
-            Log.w(ModuleSettings.TAG, "diagnostics bridge failed method=" + method + ": " + t);
+            long retryDelayMs = transportRetryDelayRemainingMs();
+            if (retryDelayMs > 0L) {
+                scheduleFlush(retryDelayMs);
+                return;
+            }
+            if (!shouldAttemptProvider()) {
+                scheduleFlush(FLUSH_PROBE_INTERVAL_MS);
+                return;
+            }
+            sDrainContinuationPending = false;
+            drainPendingBatchesAndReschedule();
+        } catch (Throwable error) {
+            logTransportFailure("scheduled_flush", error);
+            scheduleTransportRetry();
+        }
+    }
+
+    private static void drainPendingBatchesAndReschedule() {
+        DrainResult result = new DrainResult();
+        long startedAt = SystemClock.elapsedRealtime();
+        // This bounds when another batch may start; each Provider call keeps its own timeout.
+        for (int batch = 0; batch < MAX_BATCHES_PER_DRAIN && hasPendingData(); batch++) {
+            if (batch > 0
+                    && SystemClock.elapsedRealtime() - startedAt
+                    >= MAX_DRAIN_START_WINDOW_MS) break;
+            FlushOutcome outcome = flushSnapshot();
+            if (outcome == FlushOutcome.PROGRESSED) {
+                result.progressed = true;
+                continue;
+            }
+            result.transportDeferred = outcome == FlushOutcome.TRANSPORT_DEFERRED;
+            break;
+        }
+        if (result.transportDeferred && isUserUnlockDeferred()) {
+            sDrainContinuationPending = false;
+            resetTransportRetryDelay();
+            scheduleFlush(FLUSH_PROBE_INTERVAL_MS);
+        } else if (result.transportDeferred) {
+            sDrainContinuationPending = false;
+            if (result.progressed) resetTransportRetryDelay();
+            scheduleTransportRetry();
+        } else if (!hasPendingData()) {
+            sDrainContinuationPending = false;
+            resetTransportRetryDelay();
+            scheduleFlush(FLUSH_PROBE_INTERVAL_MS);
+        } else if (result.progressed) {
+            sDrainContinuationPending = true;
+            resetTransportRetryDelay();
+            scheduleFlush(DRAIN_CONTINUATION_DELAY_MS);
+        } else {
+            scheduleFlush(FLUSH_PROBE_INTERVAL_MS);
+        }
+    }
+
+    private static boolean shouldAttemptProvider() {
+        if (!hasPendingData()) return false;
+        if (sDrainContinuationPending
+                || sInFlight != null
+                || STICKY_GENERATION.get() > REPORTED_STICKY_GENERATION.get()) return true;
+        OutboxState outbox = OUTBOX.get();
+        if (outbox.rawHitCount.get() >= PENDING_QUEUE_HIGH_WATERMARK
+                || outbox.eventCount.get() >= PENDING_QUEUE_HIGH_WATERMARK) return true;
+        return SystemClock.elapsedRealtime() - sLastEventBatchAt
+                >= PERIODIC_FLUSH_INTERVAL_MS;
+    }
+
+    private static boolean isUserUnlockDeferred() {
+        return "user_locked".equals(sTransportError)
+                || "user_unlock_state_unavailable".equals(sTransportError);
+    }
+
+    private static long nextTransportRetryDelay() {
+        long delay = sTransportRetryDelayMs;
+        sTransportRetryDelayMs = delay >= MAX_TRANSPORT_RETRY_INTERVAL_MS / 2L
+                ? MAX_TRANSPORT_RETRY_INTERVAL_MS
+                : delay * 2L;
+        return delay;
+    }
+
+    private static void resetTransportRetryDelay() {
+        sTransportRetryDelayMs = INITIAL_TRANSPORT_RETRY_INTERVAL_MS;
+        sTransportRetryNotBeforeNanos = 0L;
+    }
+
+    private static void scheduleTransportRetry() {
+        long delayMs = nextTransportRetryDelay();
+        sTransportRetryNotBeforeNanos = System.nanoTime()
+                + TimeUnit.MILLISECONDS.toNanos(delayMs);
+        scheduleFlush(delayMs);
+    }
+
+    private static long transportRetryDelayRemainingMs() {
+        long remainingNanos = sTransportRetryNotBeforeNanos - System.nanoTime();
+        if (remainingNanos <= 0L) return 0L;
+        return Math.max(1L, TimeUnit.NANOSECONDS.toMillis(remainingNanos));
+    }
+
+    private static FlushOutcome flushSnapshot() {
+        if (BOOT_ID.isEmpty()) {
+            sTransportError = "boot_id_unavailable";
+            return FlushOutcome.TRANSPORT_DEFERRED;
+        }
+        if (sEpoch < 0L && !refreshBridgeState()) return FlushOutcome.TRANSPORT_DEFERRED;
+        InFlightBatch inFlight = sInFlight;
+        if (inFlight == null) {
+            inFlight = buildInFlight();
+            sInFlight = inFlight;
+        }
+        if (inFlight == null) return FlushOutcome.NO_BATCH;
+        sendInFlight(inFlight);
+        if (sInFlight != null) return FlushOutcome.TRANSPORT_DEFERRED;
+        if (inFlight.rawHitCount > 0 || inFlight.normalizedEventCount > 0) {
+            sLastEventBatchAt = SystemClock.elapsedRealtime();
+        }
+        return FlushOutcome.PROGRESSED;
+    }
+
+    private static InFlightBatch buildInFlight() {
+        String processId = currentProcessId();
+        long stickyGeneration = STICKY_GENERATION.get();
+        boolean includeSticky = stickyGeneration > REPORTED_STICKY_GENERATION.get();
+        List<DiagnosticsHookState> states = includeSticky
+                ? stickyStates(processId) : Collections.emptyList();
+        int itemCapacity = Math.max(0, DiagnosticsWireParser.MAX_WIRE_ITEMS - states.size());
+        OutboxState outbox = OUTBOX.get();
+        Snapshot snapshot = outbox.snapshot(itemCapacity);
+        if (snapshot.isEmpty() && states.isEmpty()) return null;
+
+        DiagnosticsWriteBatch.Builder batch = DiagnosticsWriteBatch.builder()
+                .wireIdentity(
+                        DiagnosticsWireParser.WIRE_VERSION,
+                        BOOT_ID,
+                        processId,
+                        SENDER_INSTANCE_ID,
+                        sEpoch,
+                        sNextBatchSequence)
+                .countingMode(DiagnosticsWriteBatch.CountingMode.TYPED);
+        for (OutboxItem<RawHookHit> rawHit : snapshot.rawHits) {
+            batch.addRawHit(rawHit.value);
+        }
+        for (OutboxItem<NormalizedDiagnosticsEvent> event : snapshot.events) {
+            batch.addEvent(event.value);
+        }
+        for (DiagnosticsHookState state : states) batch.addHookState(state);
+        DiagnosticsWriteBatch payload = batch.build();
+        return new InFlightBatch(
+                DiagnosticsWireEncoder.encodeTyped(payload),
+                outbox,
+                snapshot,
+                includeSticky ? stickyGeneration : -1L,
+                payload.size(),
+                sEpoch,
+                sNextBatchSequence);
+    }
+
+    private static void sendInFlight(InFlightBatch inFlight) {
+        Bundle response = callProvider(BridgeContract.METHOD_REPORT_BATCH, inFlight.payload);
+        if (response == null) return;
+        if (response.getInt(BridgeContract.EXTRA_BRIDGE_VERSION, -1)
+                != BridgeContract.BRIDGE_VERSION) {
+            sTransportError = "bridge_version_mismatch";
+            return;
+        }
+        String remoteBoot = response.getString(BridgeContract.EXTRA_BOOT_ID, "");
+        long remoteEpoch = response.getLong(BridgeContract.EXTRA_DIAGNOSTICS_EPOCH, -1L);
+        if (!BOOT_ID.equals(remoteBoot)) {
+            sTransportError = "bridge_boot_mismatch";
+            return;
+        }
+        if (remoteEpoch < 0L) {
+            sTransportError = "bridge_epoch_missing";
+            return;
+        }
+        if (remoteEpoch != inFlight.epoch) {
+            long cutoffElapsedNanos = response.getLong(
+                    BridgeContract.EXTRA_DIAGNOSTICS_EPOCH_CUTOFF_ELAPSED_NANOS,
+                    -1L);
+            if (cutoffElapsedNanos < 0L) {
+                sTransportError = "bridge_epoch_cutoff_missing";
+                return;
+            }
+            advanceToEpoch(remoteEpoch, cutoffElapsedNanos);
+            return;
+        }
+        boolean accepted = response.getBoolean(BridgeContract.EXTRA_OK, false)
+                && response.getInt(BridgeContract.EXTRA_ACCEPTED_ITEMS, -1)
+                == inFlight.itemCount
+                && response.getInt(BridgeContract.EXTRA_DROPPED_ITEMS, 0) == 0;
+        if (!accepted) {
+            sTransportError = stableId(
+                    response.getString(BridgeContract.EXTRA_ERROR, "bridge_rejected"),
+                    "bridge_rejected");
+            return;
+        }
+        inFlight.outbox.commit(inFlight.snapshot);
+        if (inFlight.stickyGeneration >= 0L) {
+            REPORTED_STICKY_GENERATION.accumulateAndGet(
+                    inFlight.stickyGeneration, Math::max);
+        }
+        sNextBatchSequence = inFlight.sequence + 1L;
+        sInFlight = null;
+        sTransportError = "";
+    }
+
+    private static boolean refreshBridgeState() {
+        Bundle response = callProvider(BridgeContract.METHOD_PING, null);
+        if (response == null) return false;
+        if (response.getInt(BridgeContract.EXTRA_BRIDGE_VERSION, -1)
+                != BridgeContract.BRIDGE_VERSION) {
+            sTransportError = "bridge_version_mismatch";
             return false;
         }
+        String remoteBoot = response.getString(BridgeContract.EXTRA_BOOT_ID, "");
+        long remoteEpoch = response.getLong(BridgeContract.EXTRA_DIAGNOSTICS_EPOCH, -1L);
+        if (!response.getBoolean(BridgeContract.EXTRA_OK, false)
+                || !BOOT_ID.equals(remoteBoot)
+                || remoteEpoch < 0L) {
+            sTransportError = stableId(
+                    response.getString(BridgeContract.EXTRA_ERROR, "bridge_not_ready"),
+                    "bridge_not_ready");
+            return false;
+        }
+        if (sEpoch >= 0L && sEpoch != remoteEpoch) {
+            long cutoffElapsedNanos = response.getLong(
+                    BridgeContract.EXTRA_DIAGNOSTICS_EPOCH_CUTOFF_ELAPSED_NANOS,
+                    -1L);
+            if (cutoffElapsedNanos < 0L) {
+                sTransportError = "bridge_epoch_cutoff_missing";
+                return false;
+            }
+            advanceToEpoch(remoteEpoch, cutoffElapsedNanos);
+        } else if (sEpoch < 0L) {
+            long cutoffElapsedNanos = response.getLong(
+                    BridgeContract.EXTRA_DIAGNOSTICS_EPOCH_CUTOFF_ELAPSED_NANOS,
+                    -1L);
+            if (cutoffElapsedNanos < 0L) {
+                sTransportError = "bridge_epoch_cutoff_missing";
+                return false;
+            }
+            OUTBOX.get().discardAtOrBefore(cutoffElapsedNanos);
+            sEpoch = remoteEpoch;
+        } else {
+            sEpoch = remoteEpoch;
+        }
+        return true;
+    }
+
+    private static void resetForEpoch(long epoch) {
+        OUTBOX.set(new OutboxState());
+        resetEpochState(epoch);
+    }
+
+    private static void advanceToEpoch(long epoch, long cutoffElapsedNanos) {
+        OUTBOX.get().discardAtOrBefore(cutoffElapsedNanos);
+        resetEpochState(epoch);
+    }
+
+    private static void resetEpochState(long epoch) {
+        sInFlight = null;
+        sEpoch = Math.max(0L, epoch);
+        sNextBatchSequence = 0L;
+        REPORTED_STICKY_GENERATION.set(-1L);
+        sDrainContinuationPending = false;
+        sTransportError = "";
+    }
+
+    private static Bundle callProvider(String method, Bundle extras) {
+        if (!isUserUnlockedForDiagnostics()) return null;
+        ContentResolver resolver = HookConfig.resolver();
+        if (resolver == null) {
+            sTransportError = "diagnostics_context_unavailable";
+            return null;
+        }
+        try {
+            return resolver.call(BridgeContract.URI, method, null, extras);
+        } catch (Throwable error) {
+            sTransportError = "diagnostics_bridge_unavailable";
+            logTransportFailure(method, error);
+            return null;
+        }
+    }
+
+    private static boolean isUserUnlockedForDiagnostics() {
+        try {
+            if (sUserUnlockProbe.isUserUnlocked()) return true;
+            sTransportError = "user_locked";
+        } catch (Throwable ignored) {
+            sTransportError = "user_unlock_state_unavailable";
+        }
+        return false;
+    }
+
+    private static List<DiagnosticsHookState> stickyStates(String processId) {
+        ArrayList<DiagnosticsHookState> values = new ArrayList<>();
+        String stage = PROCESS_STAGES.get(processId);
+        if (stage != null) {
+            values.add(DiagnosticsHookState.builder()
+                    .processId(processId)
+                    .hookTargetId(DiagnosticsTargetIds.RUNTIME_PROCESS)
+                    .installStatus(stage)
+                    .bootId(BOOT_ID)
+                    .lastError(PROCESS_ERRORS.getOrDefault(processId, sTransportError))
+                    .updatedAt(PROCESS_UPDATED_AT.getOrDefault(
+                            processId, System.currentTimeMillis()))
+                    .build());
+        }
+        IdentityReportState identity = CURRENT_IDENTITY_REPORT.get();
+        if (identity.reported && processId.equals(identity.processId)) {
+            values.add(DiagnosticsHookState.builder()
+                    .processId(processId)
+                    .hookTargetId(DiagnosticsTargetIds.RUNTIME_IDENTITY)
+                    .installStatus(identity.status)
+                    .bootId(BOOT_ID)
+                    .configRevision(identity.configRevision)
+                    .policyRevision(identity.policyRevision)
+                    .lastError(identity.error)
+                    .updatedAt(identity.updatedAt)
+                    .build());
+        }
+        ConfigReportState config = CURRENT_CONFIG_REPORT.get();
+        if (config.revision != Integer.MIN_VALUE) {
+            values.add(DiagnosticsHookState.builder()
+                    .processId(processId)
+                    .hookTargetId(DiagnosticsTargetIds.RUNTIME_CONFIG)
+                    .installStatus(config.error.isEmpty() ? "CONFIG_READY" : "CONFIG_ERROR")
+                    .bootId(BOOT_ID)
+                    .configRevision(config.revision)
+                    .lastError(config.error)
+                    .updatedAt(sConfigUpdatedAt > 0L
+                            ? sConfigUpdatedAt : System.currentTimeMillis())
+                    .build());
+        }
+        ArrayList<String> targets = new ArrayList<>(FEATURE_STATUSES.keySet());
+        Collections.sort(targets);
+        for (String target : targets) {
+            if (values.size() >= MAX_STICKY_STATES) break;
+            values.add(DiagnosticsHookState.builder()
+                    .processId(processId)
+                    .featureId(featureForHookTarget(target))
+                    .hookTargetId(target)
+                    .installStatus(FEATURE_STATUSES.getOrDefault(target, "UNKNOWN"))
+                    .bootId(BOOT_ID)
+                    .configRevision(HookConfig.revision())
+                    .lastError("")
+                    .updatedAt(FEATURE_UPDATED_AT.getOrDefault(
+                            target, System.currentTimeMillis()))
+                    .build());
+        }
+        return values;
+    }
+
+    private static String currentProcessId() {
+        return stableId(HookConfig.processExtras().getString(
+                BridgeContract.EXTRA_PROCESS_ID, "unknown"), "unknown");
+    }
+
+    private static String safeCurrentProcessId() {
+        try {
+            return currentProcessId();
+        } catch (Throwable ignored) {
+            return "unknown";
+        }
+    }
+
+    private static RevisionPair currentRevisions(DecisionTrace trace) {
+        if (trace != null) {
+            try {
+                return new RevisionPair(
+                        diagnosticRevision(trace.configRevision()),
+                        diagnosticRevision(trace.policyRevision()));
+            } catch (Throwable ignored) {
+                return RevisionPair.unknown();
+            }
+        }
+        try {
+            RuntimeConfigSnapshot snapshot = HookConfig.runtimeSnapshot();
+            return new RevisionPair(
+                    diagnosticRevision(snapshot.configRevision()),
+                    diagnosticRevision(snapshot.policyRevision()));
+        } catch (Throwable ignored) {
+            return RevisionPair.unknown();
+        }
+    }
+
+    private static String safeHookTargetFor(HookEvent event, DecisionTrace trace) {
+        try {
+            return hookTargetFor(event, trace);
+        } catch (Throwable ignored) {
+            return "unmapped_event";
+        }
+    }
+
+    private static boolean safeIdentityResolved(DecisionTrace trace, HookEvent event) {
+        try {
+            return identityResolved(trace, event);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static String safeFailOpenReason(String result, DecisionTrace trace) {
+        try {
+            return trace == null ? result : trace.reason().name();
+        } catch (Throwable ignored) {
+            return result;
+        }
+    }
+
+    private static DiagnosticsEventNormalizer.DecisionData normalizedDecision(
+            HookEvent event, String result, DecisionTrace trace, String failOpen) {
+        DiagnosticsEventNormalizer.DecisionData decision =
+                new DiagnosticsEventNormalizer.DecisionData();
+        decision.behavior = behaviorFor(event.feature);
+        decision.source = sourceFor(event);
+        decision.packageName = event.packageName;
+        decision.uid = event.uid;
+        decision.scene = event.scene;
+        decision.reasonCode = event.code;
+        decision.mode = modeFor(trace);
+        decision.decision = decisionFor(result, trace);
+        decision.result = result;
+        decision.failOpenReason = failOpen;
+        decision.rawHitCount = 1;
+        return decision;
+    }
+
+    private static void markQueueUnavailable(String kind) {
+        sTransportError = "diagnostics_" + kind + "_queue_unavailable";
+        STICKY_GENERATION.incrementAndGet();
+    }
+
+    private static void markRecordFailure() {
+        sTransportError = "diagnostics_record_failed";
+        STICKY_GENERATION.incrementAndGet();
+    }
+
+    private static String featureForHookTarget(String target) {
+        if (HookTargetIds.ATHENA_PERIODIC.equals(target)) return FeatureIds.ATHENA_PERIODIC;
+        if (HookTargetIds.OGUARD_KILL.equals(target)) return FeatureIds.OGUARD_KILL;
+        if (HookTargetIds.OGUARD_FORCE_STOP.equals(target)) return FeatureIds.OGUARD_FORCE_STOP;
+        if (HookTargetIds.TOURNAMENT.equals(target)) return FeatureIds.TOURNAMENT;
+        if (HookTargetIds.OSENSE_GROUP_CLEAN.equals(target)) return FeatureIds.NIRVANA;
+        if (HookTargetIds.OSENSE_PROCESS_KILL.equals(target)) return FeatureIds.OSENSE_PER_PROCESS;
+        if (HookTargetIds.HANS_FREEZE_DISPATCH.equals(target)
+                || HookTargetIds.HANS_FAST_FREEZE_DISPATCH.equals(target)) return FeatureIds.HANS;
+        if (HookTargetIds.HANS_WAKE_DISPATCH.equals(target)
+                || HookTargetIds.ALARM_WAKE_DELIVERY.equals(target)) return FeatureIds.HANS_WAKE;
+        if (HookTargetIds.HANS_RESOURCE_DISPATCH.equals(target)) return FeatureIds.HANS_RESOURCE;
+        if (HookTargetIds.HANS_R_TO_M_TIMING.equals(target)) {
+            return FeatureIds.HANS_FREEZE_TIMING;
+        }
+        if (HookTargetIds.HANS_M_TO_F_TIMING.equals(target)) return FeatureIds.HANS_REFREEZE;
+        if (HookTargetIds.HANS_CORE_EXEMPTION.equals(target)
+                || HookTargetIds.HANS_LCD_ON_EXEMPTION.equals(target)) {
+            return FeatureIds.HANS_FREEZE_EXEMPTION;
+        }
+        if (HookTargetIds.HANS_ACTIVE_RECOVERY.equals(target)) return FeatureIds.HANS_RECOVERY;
+        return "";
+    }
+
+    private static String identityStatus(ResidencyRuntimeState.Status status) {
+        if (status == null) return "IDENTITY_UNKNOWN";
+        switch (status) {
+            case READY:
+                return "IDENTITY_READY";
+            case IDENTITY_REBUILD_PENDING:
+                return "PENDING_IDENTITY_REBUILD";
+            case IDENTITY_SOURCE_UNAVAILABLE:
+                return "PENDING_IDENTITY_SOURCE";
+            case CONFIG_UNAVAILABLE:
+                return "PENDING_IDENTITY_CONFIG";
+            case IDENTITY_REBUILD_FAILED:
+                return "FAILED_FAIL_OPEN_IDENTITY_REBUILD";
+            default:
+                return "IDENTITY_UNKNOWN";
+        }
+    }
+
+    static String hookTargetFor(HookEvent event, DecisionTrace trace) {
+        if (trace != null && !stableId(trace.hookTargetId(), "").isEmpty()) {
+            return stableId(trace.hookTargetId(), "unmapped_event");
+        }
+        String feature = event.feature;
+        if (FeatureIds.ATHENA_PERIODIC.equals(feature)) return HookTargetIds.ATHENA_PERIODIC;
+        if (FeatureIds.OGUARD_KILL.equals(feature)) return HookTargetIds.OGUARD_KILL;
+        if (FeatureIds.OGUARD_FORCE_STOP.equals(feature)) return HookTargetIds.OGUARD_FORCE_STOP;
+        if (FeatureIds.FAST_CAMERA_START.equals(feature)
+                || FeatureIds.FAST_CAMERA_OPERATION.equals(feature)
+                || FeatureIds.FAST_GAME_START.equals(feature)
+                || FeatureIds.FAST_AI.equals(feature)
+                || FeatureIds.FAST_CLEAR_OTHER.equals(feature)) {
+            return HookTargetIds.FAST_CLEAR_DISPATCH;
+        }
+        if (FeatureIds.TOURNAMENT.equals(feature)) return HookTargetIds.TOURNAMENT;
+        if (FeatureIds.MEMORY_FORCE.equals(feature)
+                || FeatureIds.MEMORY_OVER.equals(feature)
+                || FeatureIds.MEMORY_GUARD_OTHER.equals(feature)) {
+            return HookTargetIds.MEMORY_GUARD_DISPATCH;
+        }
+        if (FeatureIds.ATHENA_OTHER.equals(feature)) {
+            return HookTargetIds.MEMORY_GUARD_DISPATCH;
+        }
+        if (FeatureIds.NIRVANA.equals(feature)
+                || FeatureIds.CAMERA_LOW_FREE.equals(feature)
+                || FeatureIds.GAME_LOW_FREE.equals(feature)) {
+            return HookTargetIds.OSENSE_PROCESS_KILL;
+        }
+        if (FeatureIds.OSENSE_PER_PROCESS.equals(feature)) {
+            return HookTargetIds.OSENSE_PROCESS_KILL;
+        }
+        if (FeatureIds.SUPER_FREEZE.equals(feature)) {
+            return HookTargetIds.HANS_FREEZE_DISPATCH;
+        }
+        if (FeatureIds.HANS_FREEZE_TIMING.equals(feature)) {
+            return HookTargetIds.HANS_R_TO_M_TIMING;
+        }
+        if (FeatureIds.HANS_FREEZE_EXEMPTION.equals(feature)) {
+            return HookTargetIds.HANS_LCD_ON_EXEMPTION;
+        }
+        if (FeatureIds.HANS.equals(feature)) {
+            return event.scene.contains("cgroup_v2")
+                    ? HookTargetIds.HANS_FAST_FREEZE_DISPATCH
+                    : HookTargetIds.HANS_FREEZE_DISPATCH;
+        }
+        if (FeatureIds.HANS_WAKE.equals(feature)) {
+            return "alarm_delivery".equals(event.scene)
+                    ? HookTargetIds.ALARM_WAKE_DELIVERY
+                    : HookTargetIds.HANS_WAKE_DISPATCH;
+        }
+        if (FeatureIds.HANS_RESOURCE.equals(feature)) return HookTargetIds.HANS_RESOURCE_DISPATCH;
+        if (FeatureIds.HANS_REFREEZE.equals(feature)) return HookTargetIds.HANS_M_TO_F_TIMING;
+        if (FeatureIds.HANS_RECOVERY.equals(feature)) return HookTargetIds.HANS_ACTIVE_RECOVERY;
+        return "unmapped_event";
+    }
+
+    private static String behaviorFor(String feature) {
+        return DiagnosticsBehaviorClassifier.forFeatureId(feature);
+    }
+
+    static String sourceFor(HookEvent event) {
+        if (FeatureIds.ATHENA_OTHER.equals(event.feature)) return "OTHER";
+        if (FeatureIds.SUPER_FREEZE.equals(event.feature)) {
+            return FreezeSource.SUPER.name();
+        }
+        if (FeatureIds.HANS_FREEZE_TIMING.equals(event.feature)) {
+            return "m_to_f_timing".equals(event.scene) ? "M_TO_F" : "R_TO_M";
+        }
+        if (FeatureIds.HANS_FREEZE_EXEMPTION.equals(event.feature)) return "LCD_ON";
+        if (FeatureIds.HANS.equals(event.feature)) {
+            FreezeSource[] values = FreezeSource.values();
+            if (event.code >= 0 && event.code < values.length) return values[event.code].name();
+        }
+        if (FeatureIds.HANS_WAKE.equals(event.feature)) {
+            WakeSource[] values = WakeSource.values();
+            if (event.code >= 0 && event.code < values.length) return values[event.code].name();
+            return WakeSource.OTHER.name();
+        }
+        if (FeatureIds.HANS_RESOURCE.equals(event.feature)) {
+            if (event.code == 100) return "NETWORK";
+            ResourceType[] values = ResourceType.values();
+            if (event.code >= 1 && event.code <= values.length) {
+                return values[event.code - 1].name();
+            }
+        }
+        if (FeatureIds.HANS_REFREEZE.equals(event.feature)) {
+            WakeSource[] values = WakeSource.values();
+            if (event.code >= 1 && event.code <= values.length) {
+                return values[event.code - 1].name();
+            }
+            return WakeSource.OTHER.name();
+        }
+        return "";
+    }
+
+    private static String decisionFor(String result, DecisionTrace trace) {
+        if (trace != null) return trace.reason().name();
+        if (DiagnosticsResult.BLOCKED.equals(result)) return "BLOCK_ACTION";
+        if (DiagnosticsResult.THROTTLE_BLOCKED.equals(result)) return "THROTTLE_BLOCK";
+        if (DiagnosticsResult.THROTTLE_ALLOWED.equals(result)) return "THROTTLE_ALLOW";
+        if (DiagnosticsResult.OBSERVED.equals(result)) return "DRY_RUN";
+        if (DiagnosticsResult.CANDIDATE_FILTERED.equals(result)) return "FILTER_CANDIDATE";
+        if (DiagnosticsResult.RECOVERED.equals(result)) return "RECOVER";
+        if (DiagnosticsResult.NO_ACTION_NEEDED.equals(result)) return "NO_ACTION";
+        if (DiagnosticsResult.SAFETY_ABORTED.equals(result)) return "SAFETY_ABORT";
+        if (DiagnosticsResult.countsAsFailOpen(result)) return "FAIL_OPEN";
+        return "ALLOW_SYSTEM";
+    }
+
+    private static boolean identityResolved(DecisionTrace trace, HookEvent event) {
+        if (trace == null) return event.uid >= 0 && !event.packageName.isEmpty();
+        IdentityResolutionStatus status = trace.identity().status();
+        return status == IdentityResolutionStatus.EXACT_PACKAGE
+                || status == IdentityResolutionStatus.UID_SINGLE_RULE
+                || status == IdentityResolutionStatus.SHARED_UID_SAME_POLICY;
+    }
+
+    private static String modeFor(DecisionTrace trace) {
+        if (trace == null) return "";
+        return trace.identity().policy().map(value -> value.mode().name()).orElse("");
+    }
+
+    private static int diagnosticRevision(long revision) {
+        if (revision < 0L) return -1;
+        return revision > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) revision;
+    }
+
+    private static String stableId(String value, String fallback) {
+        if (value == null || value.isEmpty()) return fallback == null ? "" : fallback;
+        StringBuilder sanitized = new StringBuilder(value.length());
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
+            if ((current >= 'a' && current <= 'z')
+                    || (current >= 'A' && current <= 'Z')
+                    || (current >= '0' && current <= '9')
+                    || current == '_' || current == '.' || current == '-') {
+                sanitized.append(current);
+            } else {
+                sanitized.append('_');
+            }
+        }
+        return sanitized.length() == 0
+                ? (fallback == null ? "" : fallback)
+                : sanitized.toString();
+    }
+
+    private static String createSenderInstanceId() {
+        int processId = 0;
+        try {
+            processId = Math.max(0, Process.myPid());
+        } catch (Throwable ignored) {
+            // Plain JVM tests and early platform startup may not expose android.os.Process.
+        }
+        String nonce;
+        try {
+            nonce = UUID.randomUUID().toString();
+        } catch (Throwable ignored) {
+            nonce = Long.toHexString(System.nanoTime());
+        }
+        return "p" + processId + "-" + nonce;
     }
 
     private static String errorText(Throwable error) {
@@ -258,39 +1020,297 @@ public final class HookDiagnostics {
         return error.getClass().getSimpleName() + (message == null ? "" : ":" + message);
     }
 
-    private static final class Counter {
-        final AtomicInteger observed = new AtomicInteger();
-        final AtomicInteger blocked = new AtomicInteger();
-        final AtomicInteger failOpen = new AtomicInteger();
-        final AtomicReference<LastEvent> last = new AtomicReference<>();
-    }
-
-    private static final class LastEvent {
-        final HookEvent event;
-        final String result;
-        final long timestamp;
-        LastEvent(HookEvent event, String result, long timestamp) {
-            this.event = event;
-            this.result = result == null ? "passed" : result;
-            this.timestamp = timestamp;
+    private static long elapsedRealtimeNanos() {
+        try {
+            return Math.max(0L, sElapsedRealtimeNanosProbe.elapsedRealtimeNanos());
+        } catch (Throwable ignored) {
+            return TimeUnit.MILLISECONDS.toNanos(
+                    Math.max(0L, SystemClock.elapsedRealtime()));
         }
     }
 
-    private static final class DrainedCounter {
-        final Counter counter;
-        final int observed;
-        final int blocked;
-        final int failOpen;
-        DrainedCounter(Counter counter, int observed, int blocked, int failOpen) {
-            this.counter = counter;
-            this.observed = observed;
-            this.blocked = blocked;
-            this.failOpen = failOpen;
+    private static void logTransportFailure(String operation, Throwable error) {
+        long now = SystemClock.elapsedRealtime();
+        if (now - sLastTransportLogAt < 60_000L) return;
+        sLastTransportLogAt = now;
+        Log.w(ModuleSettings.TAG, "diagnostics transport failed operation=" + operation, error);
+    }
+
+    private static final class OutboxState {
+        private final ConcurrentLinkedQueue<OutboxItem<RawHookHit>> rawHits =
+                new ConcurrentLinkedQueue<>();
+        private final ConcurrentLinkedQueue<OutboxItem<NormalizedDiagnosticsEvent>> events =
+                new ConcurrentLinkedQueue<>();
+        private final AtomicInteger rawHitCount = new AtomicInteger();
+        private final AtomicInteger eventCount = new AtomicInteger();
+        private final AtomicLong minimumRecordedAtElapsedNanos = new AtomicLong(-1L);
+
+        private OfferResult offerRawHit(RawHookHit rawHit, long recordedAtElapsedNanos) {
+            if (rawHit == null || !rawHit.isStorable()
+                    || !reserve(rawHitCount, MAX_PENDING_RAW_HITS)) {
+                return OfferResult.UNAVAILABLE;
+            }
+            return offerItem(rawHits, rawHitCount,
+                    new OutboxItem<>(recordedAtElapsedNanos, rawHit));
         }
-        void restore() {
-            counter.observed.addAndGet(observed);
-            counter.blocked.addAndGet(blocked);
-            counter.failOpen.addAndGet(failOpen);
+
+        private OfferResult offerNormalizedEvent(
+                NormalizedDiagnosticsEvent event, long recordedAtElapsedNanos) {
+            if (event == null || !event.isStorable()
+                    || !reserve(eventCount, MAX_PENDING_NORMALIZED_EVENTS)) {
+                return OfferResult.UNAVAILABLE;
+            }
+            try {
+                NormalizedDiagnosticsEvent accepted = event.copyBuilder()
+                        .eventToken(SENDER_INSTANCE_ID + ":"
+                                + EVENT_SEQUENCE.getAndIncrement())
+                        .build();
+                return offerItem(events, eventCount,
+                        new OutboxItem<>(recordedAtElapsedNanos, accepted));
+            } catch (Throwable ignored) {
+                // Diagnostics admission is fail-open and never changes Hook behavior.
+            }
+            eventCount.decrementAndGet();
+            return OfferResult.UNAVAILABLE;
+        }
+
+        private int pendingItemCount() {
+            return rawHitCount.get() + eventCount.get();
+        }
+
+        private Snapshot snapshot(int limit) {
+            if (limit <= 0) return Snapshot.empty();
+            int rawPending = Math.min(rawHitCount.get(), limit);
+            int eventPending = Math.min(eventCount.get(), limit);
+            int rawLimit = Math.min(rawPending, (limit + 1) / 2);
+            int eventLimit = Math.min(eventPending, limit - rawLimit);
+            int remaining = limit - rawLimit - eventLimit;
+            int extraRaw = Math.min(Math.max(0, rawPending - rawLimit), remaining);
+            rawLimit += extraRaw;
+            remaining -= extraRaw;
+            eventLimit += Math.min(Math.max(0, eventPending - eventLimit), remaining);
+            return new Snapshot(
+                    snapshotQueue(rawHits, rawLimit),
+                    snapshotQueue(events, eventLimit));
+        }
+
+        private void commit(Snapshot snapshot) {
+            commitQueue(rawHits, rawHitCount, snapshot.rawHits);
+            commitQueue(events, eventCount, snapshot.events);
+        }
+
+        private void discardAtOrBefore(long cutoffElapsedNanos) {
+            minimumRecordedAtElapsedNanos.accumulateAndGet(
+                    cutoffElapsedNanos, Math::max);
+            discardQueue(rawHits, rawHitCount, cutoffElapsedNanos);
+            discardQueue(events, eventCount, cutoffElapsedNanos);
+        }
+
+        private static boolean reserve(AtomicInteger count, int capacity) {
+            for (int attempt = 0; attempt < MAX_OUTBOX_CAS_ATTEMPTS; attempt++) {
+                int current = count.get();
+                if (current >= capacity) return false;
+                if (count.compareAndSet(current, current + 1)) return true;
+            }
+            return false;
+        }
+
+        private <T> OfferResult offerItem(
+                ConcurrentLinkedQueue<OutboxItem<T>> queue,
+                AtomicInteger count,
+                OutboxItem<T> item) {
+            try {
+                if (!queue.offer(item)) {
+                    count.decrementAndGet();
+                    return OfferResult.UNAVAILABLE;
+                }
+            } catch (Throwable ignored) {
+                count.decrementAndGet();
+                return OfferResult.UNAVAILABLE;
+            }
+            if (item.recordedAtElapsedNanos > minimumRecordedAtElapsedNanos.get()) {
+                return OfferResult.ACCEPTED;
+            }
+            if (queue.remove(item)) count.decrementAndGet();
+            return OfferResult.STALE_CUTOFF;
+        }
+
+        private static <T> List<OutboxItem<T>> snapshotQueue(
+                ConcurrentLinkedQueue<OutboxItem<T>> queue, int limit) {
+            if (limit <= 0) return Collections.emptyList();
+            ArrayList<OutboxItem<T>> values = new ArrayList<>(limit);
+            for (OutboxItem<T> value : queue) {
+                if (values.size() >= limit) break;
+                values.add(value);
+            }
+            return values;
+        }
+
+        private static <T> void commitQueue(
+                ConcurrentLinkedQueue<OutboxItem<T>> queue,
+                AtomicInteger count,
+                List<OutboxItem<T>> items) {
+            int removed = 0;
+            for (OutboxItem<T> item : items) {
+                if (queue.remove(item)) removed++;
+            }
+            if (removed > 0) count.addAndGet(-removed);
+        }
+
+        private static <T> void discardQueue(
+                ConcurrentLinkedQueue<OutboxItem<T>> queue,
+                AtomicInteger count,
+                long cutoffElapsedNanos) {
+            int removed = 0;
+            for (OutboxItem<T> item : queue) {
+                if (item.recordedAtElapsedNanos <= cutoffElapsedNanos
+                        && queue.remove(item)) {
+                    removed++;
+                }
+            }
+            if (removed > 0) count.addAndGet(-removed);
+        }
+    }
+
+    private static final class OutboxItem<T> {
+        final long recordedAtElapsedNanos;
+        final T value;
+
+        OutboxItem(long recordedAtElapsedNanos, T value) {
+            this.recordedAtElapsedNanos = Math.max(0L, recordedAtElapsedNanos);
+            this.value = value;
+        }
+    }
+
+    private enum OfferResult {
+        ACCEPTED,
+        STALE_CUTOFF,
+        UNAVAILABLE
+    }
+
+    private enum FlushOutcome {
+        PROGRESSED,
+        TRANSPORT_DEFERRED,
+        NO_BATCH
+    }
+
+    private static final class DrainResult {
+        boolean progressed;
+        boolean transportDeferred;
+    }
+
+    private static final class Snapshot {
+        final List<OutboxItem<RawHookHit>> rawHits;
+        final List<OutboxItem<NormalizedDiagnosticsEvent>> events;
+
+        Snapshot(
+                List<OutboxItem<RawHookHit>> rawHits,
+                List<OutboxItem<NormalizedDiagnosticsEvent>> events) {
+            this.rawHits = rawHits;
+            this.events = events;
+        }
+
+        static Snapshot empty() {
+            return new Snapshot(Collections.emptyList(), Collections.emptyList());
+        }
+
+        boolean isEmpty() { return rawHits.isEmpty() && events.isEmpty(); }
+    }
+
+    private static final class RevisionPair {
+        final int configRevision;
+        final int policyRevision;
+
+        RevisionPair(int configRevision, int policyRevision) {
+            this.configRevision = configRevision;
+            this.policyRevision = policyRevision;
+        }
+
+        static RevisionPair unknown() { return new RevisionPair(-1, -1); }
+    }
+
+    private static final class InFlightBatch {
+        final Bundle payload;
+        final OutboxState outbox;
+        final int rawHitCount;
+        final int normalizedEventCount;
+        final long stickyGeneration;
+        final int itemCount;
+        final long epoch;
+        final long sequence;
+        final Snapshot snapshot;
+
+        InFlightBatch(
+                Bundle payload, OutboxState outbox, Snapshot snapshot,
+                long stickyGeneration, int itemCount, long epoch, long sequence) {
+            this.payload = payload;
+            this.outbox = outbox;
+            this.rawHitCount = snapshot.rawHits.size();
+            this.normalizedEventCount = snapshot.events.size();
+            this.stickyGeneration = stickyGeneration;
+            this.itemCount = itemCount;
+            this.epoch = epoch;
+            this.sequence = sequence;
+            this.snapshot = snapshot;
+        }
+    }
+
+    static final class IdentityReportState {
+        final String processId;
+        final String status;
+        final int configRevision;
+        final int policyRevision;
+        final String error;
+        final long updatedAt;
+        final boolean reported;
+
+        IdentityReportState(
+                String processId,
+                String status,
+                int configRevision,
+                int policyRevision,
+                String error,
+                long updatedAt) {
+            this.processId = processId == null ? "" : processId;
+            this.status = status == null ? "IDENTITY_UNKNOWN" : status;
+            this.configRevision = configRevision;
+            this.policyRevision = policyRevision;
+            this.error = error == null ? "" : error;
+            this.updatedAt = updatedAt;
+            this.reported = !this.processId.isEmpty();
+        }
+
+        static IdentityReportState empty() {
+            return new IdentityReportState("", "IDENTITY_UNKNOWN", -1, -1, "", 0L);
+        }
+    }
+
+    static final class ConfigReportState {
+        final int revision;
+        final String source;
+        final String path;
+        final long reloadLatencyMs;
+        final String error;
+
+        ConfigReportState(
+                int revision,
+                String source,
+                String path,
+                long reloadLatencyMs,
+                String error) {
+            this.revision = revision;
+            this.source = Objects.requireNonNull(source, "source");
+            this.path = Objects.requireNonNull(path, "path");
+            this.reloadLatencyMs = reloadLatencyMs;
+            this.error = Objects.requireNonNull(error, "error");
+        }
+
+        boolean sameConfigurationAs(ConfigReportState that) {
+            if (that == null) return false;
+            return revision == that.revision
+                    && source.equals(that.source)
+                    && path.equals(that.path)
+                    && error.equals(that.error);
         }
     }
 }

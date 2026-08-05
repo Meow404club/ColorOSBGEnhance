@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="residency_mode_filters">
+        <item>全部模式</item>
+        <item>系统管理</item>
+        <item>均衡</item>
+        <item>低功耗</item>
+        <item>活跃</item>
+        <item>自定义</item>
+    </string-array>
+    <string-array name="residency_policy_modes">
+        <item>系统管理</item>
+        <item>均衡</item>
+        <item>低功耗</item>
+        <item>活跃</item>
+        <item>自定义</item>
+    </string-array>
+    <string-array name="residency_kill_section_presets">
+        <item>@string/residency_preset_follow_system</item>
+        <item>@string/residency_preset_full_protection</item>
+        <item>@string/residency_preset_custom</item>
+    </string-array>
+    <string-array name="residency_freeze_section_presets">
+        <item>@string/residency_preset_follow_system</item>
+        <item>@string/residency_preset_power_saving_freeze</item>
+        <item>@string/residency_preset_screen_on</item>
+        <item>@string/residency_preset_never_freeze</item>
+        <item>@string/residency_preset_custom</item>
+    </string-array>
+    <string-array name="residency_wake_section_presets">
+        <item>@string/residency_preset_normal_wake</item>
+        <item>@string/residency_preset_reduced_wake</item>
+        <item>@string/residency_preset_strict_power_saving</item>
+        <item>@string/residency_preset_custom</item>
+    </string-array>
+    <string-array name="residency_resource_section_presets">
+        <item>@string/residency_preset_follow_system</item>
+        <item>@string/residency_preset_message_sync</item>
+        <item>@string/residency_preset_audio_playback</item>
+        <item>@string/residency_preset_navigation</item>
+        <item>@string/residency_preset_custom</item>
+    </string-array>
+    <string-array name="residency_refreeze_section_presets">
+        <item>@string/residency_preset_follow_system</item>
+        <item>@string/residency_preset_after_wake</item>
+        <item>@string/residency_preset_refreeze_disabled</item>
+        <item>@string/residency_preset_custom</item>
+    </string-array>
+    <string-array name="residency_status_filters">
+        <item>全部状态</item>
+        <item>已启用</item>
+        <item>已停用</item>
+    </string-array>
+</resources>

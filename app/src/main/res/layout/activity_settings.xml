@@ -51,13 +51,14 @@
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        android:accessibilityLiveRegion="polite"
                         android:gravity="center_vertical"
                         android:orientation="horizontal">
 
                         <ImageView
                             android:layout_width="46dp"
                             android:layout_height="46dp"
-                            android:contentDescription="@string/status_title"
+                    android:contentDescription="@null"
                             android:src="@drawable/ic_shield" />
 
                         <LinearLayout
@@ -96,25 +97,28 @@
                         android:layout_height="wrap_content"
                         android:foreground="?attr/selectableItemBackground"
                         android:gravity="center_vertical"
-                        android:minHeight="86dp"
+                        android:importantForAccessibility="no"
+                        android:minHeight="@dimen/setting_row_min_height"
                         android:orientation="horizontal">
 
                         <LinearLayout
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
+                            android:importantForAccessibility="noHideDescendants"
                             android:orientation="vertical"
                             android:paddingEnd="14dp">
                             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/master_title" android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" />
                             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="@string/master_summary" android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
                         </LinearLayout>
-                        <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/switch_master" android:layout_width="wrap_content" android:layout_height="wrap_content" android:showText="false" />
+                        <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/switch_master" android:layout_width="wrap_content" android:layout_height="wrap_content" android:contentDescription="@string/master_title" android:showText="false" />
                     </LinearLayout>
 
 <TextView
                         android:id="@+id/text_effect_notice"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        android:accessibilityLiveRegion="polite"
                         android:layout_marginTop="12dp"
                         android:background="@drawable/bg_notice_warning"
                         android:padding="12dp"
@@ -125,11 +129,23 @@
             </com.google.android.material.card.MaterialCardView>
 
             <TextView
+                android:id="@+id/banner_master_disabled"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/card_spacing"
+                android:background="@drawable/bg_notice_info"
+                android:padding="16dp"
+                android:text="@string/master_disabled_banner"
+                android:textColor="@color/brand"
+                android:textSize="14sp"
+                android:visibility="gone" />
+
+            <TextView
                 android:id="@+id/banner_dry_run"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="@dimen/card_spacing"
-                android:background="@color/banner_warning"
+                android:background="@drawable/bg_notice_warning"
                 android:padding="16dp"
                 android:text="@string/dry_run_banner"
                 android:textColor="@color/banner_warning_text"
@@ -170,6 +186,14 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="@dimen/card_spacing">
+
+                <include layout="@layout/view_nav_residency" />
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/card_spacing">
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="@dimen/card_padding">
                     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/preset_title" android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" />
                     <com.google.android.material.button.MaterialButtonToggleGroup
@@ -180,9 +204,9 @@
                         app:checkedButton="@id/button_preset_balanced"
                         app:selectionRequired="true"
                         app:singleSelection="true">
-                        <com.google.android.material.button.MaterialButton android:id="@+id/button_preset_balanced" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/preset_balanced" />
-                        <com.google.android.material.button.MaterialButton android:id="@+id/button_preset_strong" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/preset_strong" />
-                        <com.google.android.material.button.MaterialButton android:id="@+id/button_preset_custom" style="@style/Widget.Material3.Button.OutlinedButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/preset_custom" />
+                        <com.google.android.material.button.MaterialButton android:id="@+id/button_preset_balanced" style="@style/Widget.ColorOSBgEnhance.SegmentedButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/preset_balanced" />
+                        <com.google.android.material.button.MaterialButton android:id="@+id/button_preset_strong" style="@style/Widget.ColorOSBgEnhance.SegmentedButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/preset_strong" />
+                        <com.google.android.material.button.MaterialButton android:id="@+id/button_preset_custom" style="@style/Widget.ColorOSBgEnhance.SegmentedButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="@string/preset_custom" />
                     </com.google.android.material.button.MaterialButtonToggleGroup>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
@@ -240,9 +264,9 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="@dimen/card_spacing">
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
-                    <LinearLayout android:id="@+id/row_dry_run" android:layout_width="match_parent" android:layout_height="wrap_content" android:foreground="?attr/selectableItemBackground" android:gravity="center_vertical" android:minHeight="86dp" android:orientation="horizontal" android:paddingStart="20dp" android:paddingEnd="16dp">
-                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:paddingEnd="14dp"><TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/dry_run_title" android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" /><TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="@string/dry_run_summary" android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" /></LinearLayout>
-                        <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/switch_dry_run" android:layout_width="wrap_content" android:layout_height="wrap_content" android:showText="false" />
+                    <LinearLayout android:id="@+id/row_dry_run" android:layout_width="match_parent" android:layout_height="wrap_content" android:foreground="?attr/selectableItemBackground" android:gravity="center_vertical" android:importantForAccessibility="no" android:minHeight="@dimen/setting_row_min_height" android:orientation="horizontal" android:paddingStart="20dp" android:paddingTop="14dp" android:paddingEnd="16dp" android:paddingBottom="14dp">
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:importantForAccessibility="noHideDescendants" android:orientation="vertical" android:paddingEnd="14dp"><TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/dry_run_title" android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" /><TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="@string/dry_run_summary" android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" /></LinearLayout>
+                        <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/switch_dry_run" android:layout_width="wrap_content" android:layout_height="wrap_content" android:contentDescription="@string/dry_run_title" android:showText="false" />
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>

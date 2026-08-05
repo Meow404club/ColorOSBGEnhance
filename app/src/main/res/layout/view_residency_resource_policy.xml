@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="@dimen/card_padding">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="4dp"
+            android:layout_marginBottom="8dp"
+            android:text="@string/residency_resource_summary"
+            android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_resource_network"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_resource_network" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_resource_service"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_resource_service" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_resource_broadcast"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_resource_broadcast" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_resource_job"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_resource_job" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_resource_sensor"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_resource_sensor" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_resource_binder"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_resource_binder" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_resource_alarm"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_resource_alarm" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_resource_wakelock"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_resource_wakelock" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_resource_gps"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_resource_gps" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_resource_audio"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_resource_audio" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_resource_bluetooth"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_resource_bluetooth" />
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

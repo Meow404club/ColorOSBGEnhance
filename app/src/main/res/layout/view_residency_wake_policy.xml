@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="@dimen/card_padding">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:text="@string/residency_wake_summary"
+            android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/residency_wake_packet"
+            android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" />
+
+        <com.google.android.material.button.MaterialButtonToggleGroup
+            android:id="@+id/residency_packet_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal"
+            app:checkedButton="@id/residency_packet_allow"
+            app:selectionRequired="true"
+            app:singleSelection="true">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/residency_packet_allow"
+                style="@style/Widget.ColorOSBgEnhance.SegmentedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/residency_wake_allow" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/residency_packet_throttle"
+                style="@style/Widget.ColorOSBgEnhance.SegmentedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/residency_wake_throttle" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/residency_packet_block"
+                style="@style/Widget.ColorOSBgEnhance.SegmentedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/residency_wake_block" />
+        </com.google.android.material.button.MaterialButtonToggleGroup>
+
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.ColorOSBgEnhance.InputField"
+            android:id="@+id/residency_packet_cooldown_layout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:hint="@string/residency_wake_cooldown"
+            android:visibility="gone">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/residency_packet_cooldown_value"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="numberDecimal"
+                android:maxLines="1" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="20dp"
+            android:layout_marginBottom="20dp"
+            android:background="@color/divider" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/residency_wake_alarm"
+            android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" />
+
+        <com.google.android.material.button.MaterialButtonToggleGroup
+            android:id="@+id/residency_alarm_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal"
+            app:checkedButton="@id/residency_alarm_allow"
+            app:selectionRequired="true"
+            app:singleSelection="true">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/residency_alarm_allow"
+                style="@style/Widget.ColorOSBgEnhance.SegmentedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/residency_wake_allow" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/residency_alarm_throttle"
+                style="@style/Widget.ColorOSBgEnhance.SegmentedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/residency_wake_throttle" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/residency_alarm_block"
+                style="@style/Widget.ColorOSBgEnhance.SegmentedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/residency_wake_block" />
+        </com.google.android.material.button.MaterialButtonToggleGroup>
+
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.ColorOSBgEnhance.InputField"
+            android:id="@+id/residency_alarm_cooldown_layout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:hint="@string/residency_wake_cooldown"
+            android:visibility="gone">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/residency_alarm_cooldown_value"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="numberDecimal"
+                android:maxLines="1" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:layout_marginBottom="6dp"
+            android:text="@string/residency_wake_other_title"
+            android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.SettingTitle" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_wake_async"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_wake_block_async" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_wake_transaction"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_wake_block_transaction" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_wake_signal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_wake_block_signal" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_wake_service"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_wake_block_service" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_wake_broadcast"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_wake_block_broadcast" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_wake_job"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_wake_block_job" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_wake_wakelock"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_wake_block_wakelock" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_wake_audio"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_wake_block_audio" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_wake_connectivity"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_wake_block_connectivity" />
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

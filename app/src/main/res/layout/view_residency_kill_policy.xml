@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="@dimen/card_padding">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="4dp"
+            android:layout_marginBottom="8dp"
+            android:text="@string/residency_kill_summary"
+            android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_kill_power"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_kill_power" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_kill_force_stop"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_kill_force_stop" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_kill_periodic"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_kill_periodic" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_kill_fast_clear"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_kill_fast_clear" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_kill_tournament"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_kill_tournament" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_kill_memory"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_kill_memory" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_kill_grouped"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_kill_grouped" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/residency_kill_process"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/residency_kill_process" />
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

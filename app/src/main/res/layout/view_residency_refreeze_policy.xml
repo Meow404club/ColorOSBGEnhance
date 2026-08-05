@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="@dimen/card_padding">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            android:text="@string/residency_refreeze_summary"
+            android:textAppearance="@style/TextAppearance.ColorOSBgEnhance.Summary" />
+
+        <RadioGroup
+            android:id="@+id/residency_refreeze_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:checkedButton="@id/residency_refreeze_system"
+            android:orientation="vertical">
+
+            <com.google.android.material.radiobutton.MaterialRadioButton
+                style="@style/Widget.ColorOSBgEnhance.RadioOption"
+                android:id="@+id/residency_refreeze_system"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/residency_refreeze_system" />
+
+            <com.google.android.material.radiobutton.MaterialRadioButton
+                style="@style/Widget.ColorOSBgEnhance.RadioOption"
+                android:id="@+id/residency_refreeze_after_wake"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/residency_refreeze_after_wake" />
+
+            <com.google.android.material.radiobutton.MaterialRadioButton
+                style="@style/Widget.ColorOSBgEnhance.RadioOption"
+                android:id="@+id/residency_refreeze_disabled"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/residency_refreeze_disabled" />
+        </RadioGroup>
+
+        <LinearLayout
+            android:id="@+id/residency_refreeze_fields"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingTop="8dp"
+            android:visibility="gone">
+
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.ColorOSBgEnhance.InputField"
+                android:id="@+id/residency_refreeze_default_layout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="@string/residency_refreeze_default_delay">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/residency_refreeze_default_value"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberDecimal"
+                    android:maxLines="1" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.ColorOSBgEnhance.InputField"
+                android:id="@+id/residency_refreeze_packet_layout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:hint="@string/residency_refreeze_packet_delay">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/residency_refreeze_packet_value"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberDecimal"
+                    android:maxLines="1" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.ColorOSBgEnhance.InputField"
+                android:id="@+id/residency_refreeze_alarm_layout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:hint="@string/residency_refreeze_alarm_delay">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/residency_refreeze_alarm_value"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberDecimal"
+                    android:maxLines="1" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.ColorOSBgEnhance.InputField"
+                android:id="@+id/residency_refreeze_binder_layout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:hint="@string/residency_refreeze_binder_delay">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/residency_refreeze_binder_value"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberDecimal"
+                    android:maxLines="1" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.ColorOSBgEnhance.InputField"
+                android:id="@+id/residency_refreeze_service_layout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:hint="@string/residency_refreeze_service_delay">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/residency_refreeze_service_value"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberDecimal"
+                    android:maxLines="1" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.ColorOSBgEnhance.InputField"
+                android:id="@+id/residency_refreeze_broadcast_layout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:hint="@string/residency_refreeze_broadcast_delay">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/residency_refreeze_broadcast_value"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberDecimal"
+                    android:maxLines="1" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.ColorOSBgEnhance.InputField"
+                android:id="@+id/residency_refreeze_job_layout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:hint="@string/residency_refreeze_job_delay">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/residency_refreeze_job_value"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberDecimal"
+                    android:maxLines="1" />
+            </com.google.android.material.textfield.TextInputLayout>
+        </LinearLayout>
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

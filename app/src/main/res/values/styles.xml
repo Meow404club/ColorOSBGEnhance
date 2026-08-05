@@ -8,11 +8,27 @@
         <item name="android:windowLightStatusBar">true</item>
         <item name="colorPrimary">@color/brand</item>
         <item name="colorOnPrimary">@android:color/white</item>
+        <item name="colorPrimaryContainer">@color/brand_soft</item>
+        <item name="colorOnPrimaryContainer">@color/item_title</item>
         <item name="colorSecondary">@color/brand</item>
+        <item name="colorSecondaryContainer">@color/brand_soft</item>
+        <item name="colorOnSecondaryContainer">@color/item_title</item>
         <item name="colorSurface">@color/card_bg</item>
+        <item name="colorSurfaceContainerLowest">@color/page_bg</item>
+        <item name="colorSurfaceContainerLow">@color/card_bg</item>
+        <item name="colorSurfaceContainer">@color/card_bg</item>
+        <item name="colorSurfaceContainerHigh">@color/field_bg</item>
+        <item name="colorSurfaceContainerHighest">@color/chip_neutral</item>
         <item name="colorOnSurface">@color/item_title</item>
+        <item name="colorSurfaceVariant">@color/field_bg</item>
+        <item name="colorOnSurfaceVariant">@color/item_summary</item>
+        <item name="colorOutline">@color/item_summary</item>
+        <item name="colorOutlineVariant">@color/divider</item>
+        <item name="colorError">@color/error</item>
+        <item name="colorOnError">@android:color/white</item>
         <item name="android:textColorPrimary">@color/title_text</item>
         <item name="materialCardViewStyle">@style/Widget.ColorOSBgEnhance.Card</item>
+        <item name="materialSwitchStyle">@style/Widget.ColorOSBgEnhance.MaterialSwitch</item>
     </style>
 
     <style name="Widget.ColorOSBgEnhance.Card" parent="Widget.Material3.CardView.Elevated">
@@ -37,5 +53,111 @@
     <style name="TextAppearance.ColorOSBgEnhance.Summary" parent="TextAppearance.Material3.BodyMedium">
         <item name="android:textColor">@color/item_summary</item>
         <item name="android:textSize">@dimen/setting_summary_size</item>
+    </style>
+
+    <style name="TextAppearance.ColorOSBgEnhance.CardTitle" parent="TextAppearance.Material3.TitleLarge">
+        <item name="android:textColor">@color/item_title</item>
+        <item name="android:textSize">@dimen/card_title_size</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="TextAppearance.ColorOSBgEnhance.SectionLabel" parent="TextAppearance.Material3.LabelLarge">
+        <item name="android:textColor">@color/item_summary</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="TextAppearance.ColorOSBgEnhance.Option" parent="TextAppearance.Material3.BodyLarge">
+        <item name="android:textColor">@color/item_title</item>
+        <item name="android:textSize">16sp</item>
+    </style>
+
+    <style name="TextAppearance.ColorOSBgEnhance.DropdownValue" parent="TextAppearance.ColorOSBgEnhance.SettingTitle" />
+
+    <style name="TextAppearance.ColorOSBgEnhance.DropdownOption" parent="TextAppearance.ColorOSBgEnhance.Option">
+        <item name="android:textSize">@dimen/setting_title_size</item>
+    </style>
+
+    <style name="Widget.ColorOSBgEnhance.SearchField" parent="Widget.Material3.TextInputLayout.FilledBox">
+        <item name="boxBackgroundColor">@color/card_bg</item>
+        <item name="boxCornerRadiusTopStart">@dimen/field_radius</item>
+        <item name="boxCornerRadiusTopEnd">@dimen/field_radius</item>
+        <item name="boxCornerRadiusBottomStart">@dimen/field_radius</item>
+        <item name="boxCornerRadiusBottomEnd">@dimen/field_radius</item>
+        <item name="boxStrokeWidth">0dp</item>
+        <item name="boxStrokeWidthFocused">0dp</item>
+        <item name="hintEnabled">false</item>
+        <item name="startIconTint">@color/item_summary</item>
+    </style>
+
+    <style name="Widget.ColorOSBgEnhance.Dropdown" parent="Widget.Material3.TextInputLayout.FilledBox.ExposedDropdownMenu">
+        <item name="boxBackgroundColor">@color/field_bg</item>
+        <item name="boxCornerRadiusTopStart">@dimen/field_radius</item>
+        <item name="boxCornerRadiusTopEnd">@dimen/field_radius</item>
+        <item name="boxCornerRadiusBottomStart">@dimen/field_radius</item>
+        <item name="boxCornerRadiusBottomEnd">@dimen/field_radius</item>
+        <item name="boxStrokeWidth">0dp</item>
+        <item name="boxStrokeWidthFocused">0dp</item>
+        <item name="hintEnabled">false</item>
+        <item name="endIconTint">@color/item_summary</item>
+    </style>
+
+    <style name="Widget.ColorOSBgEnhance.DropdownValue" parent="Widget.Material3.AutoCompleteTextView.FilledBox">
+        <item name="android:dropDownVerticalOffset">4dp</item>
+        <item name="android:ellipsize">none</item>
+        <item name="android:gravity">center</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:inputType">none</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:minHeight">@dimen/field_min_height</item>
+        <item name="android:popupBackground">@drawable/bg_residency_dropdown_popup</item>
+        <item name="android:popupElevation">8dp</item>
+        <item name="android:textAlignment">center</item>
+        <item name="android:textAppearance">@style/TextAppearance.ColorOSBgEnhance.DropdownValue</item>
+        <item name="android:textStyle">bold</item>
+        <item name="dropDownBackgroundTint">@color/card_bg</item>
+        <item name="simpleItemLayout">@layout/item_residency_dropdown_option</item>
+    </style>
+
+    <style name="Widget.ColorOSBgEnhance.InputField" parent="Widget.Material3.TextInputLayout.FilledBox">
+        <item name="boxBackgroundColor">@color/field_bg</item>
+        <item name="boxCornerRadiusTopStart">@dimen/field_radius</item>
+        <item name="boxCornerRadiusTopEnd">@dimen/field_radius</item>
+        <item name="boxCornerRadiusBottomStart">@dimen/field_radius</item>
+        <item name="boxCornerRadiusBottomEnd">@dimen/field_radius</item>
+        <item name="boxStrokeWidth">0dp</item>
+        <item name="boxStrokeWidthFocused">2dp</item>
+    </style>
+
+    <style name="Widget.ColorOSBgEnhance.MaterialSwitch" parent="Widget.Material3.CompoundButton.MaterialSwitch">
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:textAppearance">@style/TextAppearance.ColorOSBgEnhance.Option</item>
+    </style>
+
+    <style name="Widget.ColorOSBgEnhance.InlineSwitch" parent="Widget.ColorOSBgEnhance.MaterialSwitch">
+        <item name="android:minHeight">@dimen/setting_option_min_height</item>
+    </style>
+
+    <style name="Widget.ColorOSBgEnhance.RadioOption" parent="Widget.Material3.CompoundButton.RadioButton">
+        <item name="android:minHeight">@dimen/setting_option_min_height</item>
+        <item name="android:textAppearance">@style/TextAppearance.ColorOSBgEnhance.Option</item>
+    </style>
+
+    <style name="Widget.ColorOSBgEnhance.SegmentedButton" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="android:minHeight">48dp</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:maxLines">2</item>
+        <item name="android:ellipsize">none</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingStart">4dp</item>
+        <item name="android:paddingEnd">4dp</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:autoSizeTextType">uniform</item>
+        <item name="android:autoSizeMinTextSize">10sp</item>
+        <item name="android:autoSizeMaxTextSize">14sp</item>
+        <item name="android:autoSizeStepGranularity">1sp</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
     </style>
 </resources>
