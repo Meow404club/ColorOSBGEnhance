@@ -486,7 +486,7 @@ public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
         partial |= setProtectionSwitchEnabled(
                 R.id.residency_kill_memory, HookTargetIds.MEMORY_GUARD_DISPATCH, true);
         partial |= setProtectionSwitchEnabled(
-                R.id.residency_kill_grouped, HookTargetIds.OSENSE_PROCESS_KILL, true);
+                R.id.residency_kill_grouped, HookTargetIds.OSENSE_GROUP_CLEAN, true);
         partial |= setProtectionSwitchEnabled(
                 R.id.residency_kill_process, HookTargetIds.OSENSE_PROCESS_KILL, true);
         return partial;

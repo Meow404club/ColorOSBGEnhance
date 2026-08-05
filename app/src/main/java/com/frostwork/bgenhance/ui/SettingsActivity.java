@@ -13,9 +13,8 @@ import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
 import com.frostwork.bgenhance.ui.residency.ResidencyAppsActivity;
 import com.frostwork.bgenhance.ui.residency.ResidencyRuleStore;
-import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
-import com.frostwork.bgenhance.residency.model.ResidencyMode;
 import com.frostwork.bgenhance.residency.model.ResidencyPolicyDocument;
+import com.frostwork.bgenhance.residency.runtime.ResidencyHookRequirements;
 import com.google.android.material.button.MaterialButtonToggleGroup;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.materialswitch.MaterialSwitch;
@@ -447,18 +446,8 @@ public final class SettingsActivity extends AppCompatActivity {
                 result.add(spec.hookTargetId);
             }
         }
-        if (hasActiveResidencyRule(residency)) {
-            result.addAll(HookTargetIds.residencyRequired());
-        }
+        result.addAll(ResidencyHookRequirements.forDocument(residency));
         return result;
-    }
-
-    private static boolean hasActiveResidencyRule(ResidencyPolicyDocument residency) {
-        if (residency == null || !residency.enabled()) return false;
-        for (AppResidencyPolicy policy : residency.rules()) {
-            if (policy.enabled() && policy.mode() != ResidencyMode.SYSTEM) return true;
-        }
-        return false;
     }
 
     private void refreshNavigationCounts() {

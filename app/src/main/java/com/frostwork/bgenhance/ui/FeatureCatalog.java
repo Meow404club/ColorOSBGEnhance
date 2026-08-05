@@ -76,7 +76,7 @@ public final class FeatureCatalog {
     );
 
     private static final List<FeatureSpec> NIRVANA = Arrays.asList(
-            new FeatureSpec(FeatureIds.NIRVANA, HookTargetIds.OSENSE_PROCESS_KILL,
+            new FeatureSpec(FeatureIds.NIRVANA, HookTargetIds.OSENSE_GROUP_CLEAN,
                     ModuleSettings.KEY_NIRVANA, R.string.nirvana_title,
                     R.string.nirvana_summary, R.string.nirvana_detail, Risk.VERY_HIGH, false, false),
             new FeatureSpec(FeatureIds.CAMERA_LOW_FREE, HookTargetIds.OSENSE_PROCESS_KILL,

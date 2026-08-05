@@ -48,7 +48,7 @@ public final class FeatureCatalogIdentifierTest {
                 HookTargetIds.MEMORY_GUARD_DISPATCH,
                 HookTargetIds.MEMORY_GUARD_DISPATCH);
         assertGroupTargets(FeatureCatalog.GROUP_NIRVANA,
-                HookTargetIds.OSENSE_PROCESS_KILL,
+                HookTargetIds.OSENSE_GROUP_CLEAN,
                 HookTargetIds.OSENSE_PROCESS_KILL,
                 HookTargetIds.OSENSE_PROCESS_KILL);
         assertGroupTargets(FeatureCatalog.GROUP_FREEZE,

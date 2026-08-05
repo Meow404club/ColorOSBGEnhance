@@ -14,12 +14,15 @@ import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
 import com.frostwork.bgenhance.ui.HookStatusViewModel;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import org.junit.Test;
 
 public final class ResidencyApplyStatusTest {
     private static final String CURRENT_BOOT = "current-boot";
+    private static final List<String> REQUIRED_HOOKS = HookTargetIds.residencyRequired();
 
     @Test
     public void loadingAndDatabaseFailureNeverPromiseImmediateApplication() {
@@ -28,13 +31,13 @@ public final class ResidencyApplyStatusTest {
         HookStatusViewModel viewModel = viewModel(source, states);
 
         viewModel.refresh();
-        int loading = ResidencyApplyStatus.message(
+        int loading = message(
                 last(states), true, false, 7, true, true);
         assertEquals(R.string.status_checking_summary, loading);
         assertNotEquals(R.string.residency_apply_without_restart, loading);
 
         source.future.complete(DiagnosticsQuery.HookStatePage.empty("database_unavailable"));
-        int failed = ResidencyApplyStatus.message(
+        int failed = message(
                 last(states), true, false, 7, true, true);
         assertEquals(R.string.effect_runtime_unavailable, failed);
         assertNotEquals(R.string.residency_apply_without_restart, failed);
@@ -47,37 +50,59 @@ public final class ResidencyApplyStatusTest {
 
         HookStatusViewModel.State state = ready(rows);
         assertEquals(R.string.residency_apply_sync_pending,
-                ResidencyApplyStatus.message(state, true, false, 7, true, true));
+                message(state, true, false, 7, true, true));
 
         replaceConfig(rows, BridgeContract.PROCESS_ATHENA, 7);
         state = ready(rows);
         assertEquals(R.string.residency_apply_without_restart,
-                ResidencyApplyStatus.message(state, true, false, 7, true, true));
+                message(state, true, false, 7, true, true));
     }
 
     @Test
     public void everyRequiredHookMustBeInstalled() {
         List<DiagnosticsHookState> rows = completeRows(7);
-        String missing = ResidencyApplyStatus.REQUIRED_HOOKS.iterator().next();
+        String missing = REQUIRED_HOOKS.iterator().next();
         rows.removeIf(row -> missing.equals(row.hookTargetId));
 
         assertEquals(R.string.residency_apply_partial,
-                ResidencyApplyStatus.message(
+                message(
                         ready(rows), true, false, 7, true, true));
-        assertTrue(ResidencyApplyStatus.REQUIRED_HOOKS.contains(
+        assertTrue(REQUIRED_HOOKS.contains(
                 HookTargetIds.HANS_CORE_EXEMPTION));
+    }
+
+    @Test
+    public void unusedUnsupportedHookDoesNotMakeResidencyPartial() {
+        List<DiagnosticsHookState> rows = completeRows(7);
+        rows.removeIf(row -> HookTargetIds.HANS_CORE_EXEMPTION.equals(row.hookTargetId));
+        rows.add(DiagnosticsHookState.builder()
+                .processId(BridgeContract.PROCESS_SYSTEM_SERVER)
+                .hookTargetId(HookTargetIds.HANS_CORE_EXEMPTION)
+                .installStatus("UNSUPPORTED_FREEZE_GATE_INCOMPLETE")
+                .bootId(CURRENT_BOOT)
+                .build());
+
+        HookStatusViewModel.State state = ready(rows);
+        assertEquals(R.string.residency_apply_without_restart,
+                ResidencyApplyStatus.message(
+                        state, true, false, 7, 4L, true, true,
+                        Collections.emptySet()));
+        assertEquals(R.string.residency_apply_partial,
+                ResidencyApplyStatus.message(
+                        state, true, false, 7, 4L, true, true,
+                        Collections.singleton(HookTargetIds.HANS_CORE_EXEMPTION)));
     }
 
     @Test
     public void missingCurrentBootProcessRequiresActivationOrRestart() {
         HookStatusViewModel.State empty = ready(new ArrayList<>());
         assertEquals(R.string.residency_apply_after_activation,
-                ResidencyApplyStatus.message(empty, false, false, 7, true, true));
+                message(empty, false, false, 7, true, true));
 
         List<DiagnosticsHookState> oneProcess = new ArrayList<>();
         oneProcess.add(process(BridgeContract.PROCESS_SYSTEM_SERVER));
         assertEquals(R.string.residency_apply_after_restart,
-                ResidencyApplyStatus.message(
+                message(
                         ready(oneProcess), true, false, 7, true, true));
     }
 
@@ -91,7 +116,7 @@ public final class ResidencyApplyStatusTest {
                 ModuleRuntimeStatus.featuresInstalled(BuildConfig.VERSION_CODE + 1)));
 
         assertEquals(R.string.residency_apply_after_restart,
-                ResidencyApplyStatus.message(
+                message(
                         ready(rows), true, false, 7, true, true));
     }
 
@@ -100,9 +125,9 @@ public final class ResidencyApplyStatusTest {
         HookStatusViewModel.State state = ready(completeRows(7));
 
         assertEquals(R.string.residency_apply_master_disabled,
-                ResidencyApplyStatus.message(state, true, false, 7, false, true));
+                message(state, true, false, 7, false, true));
         assertEquals(R.string.residency_apply_disabled,
-                ResidencyApplyStatus.message(state, true, false, 7, true, false));
+                message(state, true, false, 7, true, false));
     }
 
     @Test
@@ -113,7 +138,7 @@ public final class ResidencyApplyStatusTest {
         rows.add(configError(BridgeContract.PROCESS_ATHENA));
 
         assertEquals(R.string.residency_apply_config_error,
-                ResidencyApplyStatus.message(
+                message(
                         ready(rows), true, false, 7, true, true));
     }
 
@@ -123,14 +148,14 @@ public final class ResidencyApplyStatusTest {
         replaceIdentity(rows, BridgeContract.PROCESS_ATHENA,
                 "FAILED_FAIL_OPEN_IDENTITY_REBUILD", 7, 4);
         assertEquals(R.string.residency_apply_identity_error,
-                ResidencyApplyStatus.message(
+                message(
                         ready(rows), true, false, 7, 4L, true, true));
 
         rows = completeRows(7);
         replaceIdentity(rows, BridgeContract.PROCESS_SYSTEM_SERVER,
                 "IDENTITY_READY", 7, 3);
         assertEquals(R.string.residency_apply_identity_pending,
-                ResidencyApplyStatus.message(
+                message(
                         ready(rows), true, false, 7, 4L, true, true));
     }
 
@@ -139,13 +164,13 @@ public final class ResidencyApplyStatusTest {
         HookStatusViewModel.State state = ready(completeRows(7));
 
         assertEquals(R.string.residency_apply_config_error,
-                ResidencyApplyStatus.message(state, true, true, 7, true, true));
+                message(state, true, true, 7, true, true));
     }
 
     @Test
     public void disabledPolicyDoesNotHideActivationOrConfigurationFailures() {
         assertEquals(R.string.residency_apply_after_activation,
-                ResidencyApplyStatus.message(
+                message(
                         ready(new ArrayList<>()), false, false, 7, false, false));
 
         List<DiagnosticsHookState> rows = completeRows(7);
@@ -153,7 +178,7 @@ public final class ResidencyApplyStatusTest {
                 && DiagnosticsTargetIds.RUNTIME_CONFIG.equals(row.hookTargetId));
         rows.add(configError(BridgeContract.PROCESS_ATHENA));
         assertEquals(R.string.residency_apply_config_error,
-                ResidencyApplyStatus.message(
+                message(
                         ready(rows), true, false, 7, false, false));
     }
 
@@ -179,7 +204,7 @@ public final class ResidencyApplyStatusTest {
         rows.add(config(BridgeContract.PROCESS_ATHENA, revision));
         rows.add(identity(BridgeContract.PROCESS_SYSTEM_SERVER, revision, 4));
         rows.add(identity(BridgeContract.PROCESS_ATHENA, revision, 4));
-        for (String hookTargetId : ResidencyApplyStatus.REQUIRED_HOOKS) {
+        for (String hookTargetId : REQUIRED_HOOKS) {
             rows.add(DiagnosticsHookState.builder()
                     .processId(HookTargetIds.expectedProcessId(hookTargetId))
                     .hookTargetId(hookTargetId)
@@ -188,6 +213,32 @@ public final class ResidencyApplyStatusTest {
                     .build());
         }
         return rows;
+    }
+
+    private static int message(
+            HookStatusViewModel.State state,
+            boolean serviceConnected,
+            boolean localConfigError,
+            int localConfigRevision,
+            boolean masterEnabled,
+            boolean residencyEnabled) {
+        return ResidencyApplyStatus.message(
+                state, serviceConnected, localConfigError, localConfigRevision,
+                masterEnabled, residencyEnabled, Set.copyOf(REQUIRED_HOOKS));
+    }
+
+    private static int message(
+            HookStatusViewModel.State state,
+            boolean serviceConnected,
+            boolean localConfigError,
+            int localConfigRevision,
+            long localPolicyRevision,
+            boolean masterEnabled,
+            boolean residencyEnabled) {
+        return ResidencyApplyStatus.message(
+                state, serviceConnected, localConfigError, localConfigRevision,
+                localPolicyRevision, masterEnabled, residencyEnabled,
+                Set.copyOf(REQUIRED_HOOKS));
     }
 
     private static void replaceConfig(

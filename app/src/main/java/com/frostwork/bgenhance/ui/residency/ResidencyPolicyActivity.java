@@ -14,8 +14,10 @@ import com.frostwork.bgenhance.ModuleApplication;
 import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
 import com.frostwork.bgenhance.residency.model.ResidencyMode;
+import com.frostwork.bgenhance.residency.model.ResidencyPolicyDocument;
 import com.frostwork.bgenhance.residency.model.ResidencySectionPresets;
 import com.frostwork.bgenhance.residency.model.WakeSource;
+import com.frostwork.bgenhance.residency.runtime.ResidencyHookRequirements;
 import com.frostwork.bgenhance.ui.HookStatusViewModel;
 import com.frostwork.bgenhance.ui.UiUtils;
 import com.google.android.material.button.MaterialButton;
@@ -542,14 +544,16 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
 
     private void updateApplyNotice() {
         if (applyNotice == null) return;
+        ResidencyPolicyDocument residency = ModuleSettings.getResidencyPolicy(this);
         int message = ResidencyApplyStatus.message(
                 hookStatus,
                 ModuleApplication.isServiceConnected(),
                 ModuleApplication.hasConfigSyncError(),
                 ModuleSettings.getConfigRevision(this),
-                ModuleSettings.getResidencyPolicy(this).policyRevision(),
+                residency.policyRevision(),
                 ModuleSettings.getLocalBoolean(this, ModuleSettings.KEY_MASTER_ENABLE),
-                ModuleSettings.getResidencyPolicy(this).enabled());
+                residency.enabled(),
+                ResidencyHookRequirements.forDocument(residency));
         applyNotice.setText(message);
         switch (ResidencyApplyStatus.tone(message)) {
             case SUCCESS:

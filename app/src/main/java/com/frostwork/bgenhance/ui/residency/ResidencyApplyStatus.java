@@ -5,12 +5,11 @@ import com.frostwork.bgenhance.BuildConfig;
 import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.R;
 import com.frostwork.bgenhance.ui.HookStatusViewModel;
-import java.util.List;
+import java.util.Collections;
+import java.util.Set;
 
 /** Maps current Hook and configuration state to the save-effect notice. */
 final class ResidencyApplyStatus {
-    static final List<String> REQUIRED_HOOKS = HookTargetIds.residencyRequired();
-
     enum Tone { INFO, WARNING, ERROR, SUCCESS }
 
     private ResidencyApplyStatus() {}
@@ -21,9 +20,10 @@ final class ResidencyApplyStatus {
             boolean localConfigError,
             int localConfigRevision,
             boolean masterEnabled,
-            boolean residencyEnabled) {
+            boolean residencyEnabled,
+            Set<String> requiredHooks) {
         return message(state, serviceConnected, localConfigError, localConfigRevision,
-                -1L, masterEnabled, residencyEnabled);
+                -1L, masterEnabled, residencyEnabled, requiredHooks);
     }
 
     static int message(
@@ -33,7 +33,8 @@ final class ResidencyApplyStatus {
             int localConfigRevision,
             long localPolicyRevision,
             boolean masterEnabled,
-            boolean residencyEnabled) {
+            boolean residencyEnabled,
+            Set<String> requiredHooks) {
         if (state == null
                 || state.status() == HookStatusViewModel.Status.IDLE
                 || state.status() == HookStatusViewModel.Status.LOADING) {
@@ -76,7 +77,10 @@ final class ResidencyApplyStatus {
         if (!serviceConnected) {
             return R.string.residency_apply_sync_unavailable;
         }
-        for (String hookTargetId : REQUIRED_HOOKS) {
+        Set<String> requested = requiredHooks == null
+                ? Collections.emptySet() : requiredHooks;
+        for (String hookTargetId : requested) {
+            if (!HookTargetIds.all().contains(hookTargetId)) continue;
             if (!state.isInstalled(hookTargetId)) {
                 return R.string.residency_apply_partial;
             }
