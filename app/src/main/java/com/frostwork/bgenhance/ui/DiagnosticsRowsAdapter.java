@@ -220,6 +220,8 @@ final class DiagnosticsRowsAdapter
             }
 
             ArrayList<String> details = new ArrayList<>();
+            int statusDetail = hookStatusDetailResource(row.status);
+            if (statusDetail != 0) details.add(context.getString(statusDetail));
             if (row.configRevision >= 0) {
                 details.add(context.getString(
                         R.string.diagnostics_hook_config_revision,
@@ -240,6 +242,20 @@ final class DiagnosticsRowsAdapter
                 details.add(context.getString(R.string.diagnostics_hook_error_hint));
             }
             setDetail(joinLines(details));
+        }
+
+        static int hookStatusDetailResource(DiagnosticsUiMapper.HookStatus status) {
+            if (status == null) return 0;
+            switch (status) {
+                case ENTRY_LOADED:
+                    return R.string.diagnostics_status_entry_loaded_detail;
+                case BOOTSTRAP_FAILED:
+                    return R.string.diagnostics_status_bootstrap_failed_detail;
+                case VERSION_MISMATCH:
+                    return R.string.diagnostics_status_version_mismatch_detail;
+                default:
+                    return 0;
+            }
         }
 
         private void resetOptionalViews() {

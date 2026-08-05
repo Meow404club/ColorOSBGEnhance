@@ -161,6 +161,22 @@ public final class DiagnosticsRowsAdapterTest {
         }
     }
 
+    @Test
+    public void runtimeTransitionStatusesExplainTheRequiredUserAction() {
+        assertEquals(R.string.diagnostics_status_entry_loaded_detail,
+                DiagnosticsRowsAdapter.RowViewHolder.hookStatusDetailResource(
+                        DiagnosticsUiMapper.HookStatus.ENTRY_LOADED));
+        assertEquals(R.string.diagnostics_status_bootstrap_failed_detail,
+                DiagnosticsRowsAdapter.RowViewHolder.hookStatusDetailResource(
+                        DiagnosticsUiMapper.HookStatus.BOOTSTRAP_FAILED));
+        assertEquals(R.string.diagnostics_status_version_mismatch_detail,
+                DiagnosticsRowsAdapter.RowViewHolder.hookStatusDetailResource(
+                        DiagnosticsUiMapper.HookStatus.VERSION_MISMATCH));
+        assertEquals(0,
+                DiagnosticsRowsAdapter.RowViewHolder.hookStatusDetailResource(
+                        DiagnosticsUiMapper.HookStatus.READY));
+    }
+
     private static DiagnosticsDataSource.ResolvedApplication application(
             String packageName, String displayName) {
         return new DiagnosticsDataSource.ResolvedApplication(

@@ -103,6 +103,9 @@
     <string name="diagnostics_status_entry_loaded">入口已加载</string>
     <string name="diagnostics_status_bootstrap_failed">启动失败</string>
     <string name="diagnostics_status_version_mismatch">版本不一致</string>
+    <string name="diagnostics_status_entry_loaded_detail">模块入口已加载，功能仍在加载中</string>
+    <string name="diagnostics_status_bootstrap_failed_detail">模块功能加载失败，请查看运行诊断中的错误信息</string>
+    <string name="diagnostics_status_version_mismatch_detail">系统进程仍在运行旧版本模块，更新后需要重启手机</string>
     <string name="diagnostics_status_failed">加载失败</string>
     <string name="diagnostics_status_unsupported">不支持</string>
     <string name="diagnostics_status_skipped">未启用</string>
