@@ -50,8 +50,33 @@ public final class HookTargetIds {
             HANS_ACTIVE_RECOVERY
     ));
 
+    private static final List<String> RESIDENCY_REQUIRED =
+            Collections.unmodifiableList(Arrays.asList(
+                    ATHENA_PERIODIC,
+                    OGUARD_KILL,
+                    OGUARD_FORCE_STOP,
+                    FAST_CLEAR_DISPATCH,
+                    TOURNAMENT,
+                    MEMORY_GUARD_DISPATCH,
+                    OSENSE_PROCESS_KILL,
+                    HANS_FREEZE_DISPATCH,
+                    HANS_FAST_FREEZE_DISPATCH,
+                    HANS_WAKE_DISPATCH,
+                    ALARM_WAKE_DELIVERY,
+                    HANS_RESOURCE_DISPATCH,
+                    HANS_R_TO_M_TIMING,
+                    HANS_M_TO_F_TIMING,
+                    HANS_CORE_EXEMPTION,
+                    HANS_LCD_ON_EXEMPTION,
+                    HANS_ACTIVE_RECOVERY));
+
     public static List<String> all() {
         return ALL;
+    }
+
+    /** Physical targets needed to apply every application-residency policy section. */
+    public static List<String> residencyRequired() {
+        return RESIDENCY_REQUIRED;
     }
 
     /** Process that owns the physical Hook target, or an empty value for an unknown target. */

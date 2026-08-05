@@ -59,6 +59,12 @@ public final class HookStatusViewModel implements AutoCloseable {
             return new State(Status.LOADING, "", Collections.emptyList(), "");
         }
 
+        static State loading(State previous) {
+            return previous == null
+                    ? loading()
+                    : new State(Status.LOADING, previous.bootId, previous.rows, "");
+        }
+
         static State ready(String bootId, List<DiagnosticsHookState> rows) {
             ArrayList<DiagnosticsHookState> current = new ArrayList<>();
             if (bootId != null && !bootId.isEmpty() && rows != null) {
@@ -70,8 +76,15 @@ public final class HookStatusViewModel implements AutoCloseable {
         }
 
         static State error(String errorCode) {
+            return error(errorCode, null);
+        }
+
+        static State error(String errorCode, State previous) {
             String normalized = safe(errorCode);
-            return new State(Status.ERROR, "", Collections.emptyList(),
+            return new State(
+                    Status.ERROR,
+                    previous == null ? "" : previous.bootId,
+                    previous == null ? Collections.emptyList() : previous.rows,
                     normalized.isEmpty() ? "database_unavailable" : normalized);
         }
 
@@ -167,7 +180,7 @@ public final class HookStatusViewModel implements AutoCloseable {
         }
 
         public Installation installation(String hookTargetId) {
-            if (status != Status.READY || hookTargetId == null || hookTargetId.isEmpty()) {
+            if (hookTargetId == null || hookTargetId.isEmpty()) {
                 return Installation.UNKNOWN;
             }
             boolean failed = false;
@@ -266,48 +279,50 @@ public final class HookStatusViewModel implements AutoCloseable {
 
     public void refresh() {
         long requestGeneration;
+        State previous;
         synchronized (lock) {
             if (closed) return;
             requestGeneration = ++generation;
+            previous = state;
         }
-        publish(requestGeneration, State.loading());
+        publish(requestGeneration, State.loading(previous));
 
         String requestedBootId;
         CompletableFuture<DiagnosticsQuery.HookStatePage> future;
         try {
             requestedBootId = safeBootId(source.currentBootId());
             if (requestedBootId.isEmpty()) {
-                publish(requestGeneration, State.error("boot_unavailable"));
+                publishError(requestGeneration, "boot_unavailable");
                 return;
             }
             future = source.queryHookStatesAsync(MAX_HOOK_STATES);
         } catch (Throwable error) {
-            publish(requestGeneration, State.error("database_unavailable"));
+            publishError(requestGeneration, "database_unavailable");
             return;
         }
         if (future == null) {
-            publish(requestGeneration, State.error("database_unavailable"));
+            publishError(requestGeneration, "database_unavailable");
             return;
         }
 
         future.whenComplete((page, failure) -> {
             if (failure != null || page == null) {
-                publish(requestGeneration, State.error("database_unavailable"));
+                publishError(requestGeneration, "database_unavailable");
                 return;
             }
             if (!page.errorCode.isEmpty()) {
-                publish(requestGeneration, State.error(page.errorCode));
+                publishError(requestGeneration, page.errorCode);
                 return;
             }
             String completionBootId;
             try {
                 completionBootId = safeBootId(source.currentBootId());
             } catch (Throwable error) {
-                publish(requestGeneration, State.error("boot_unavailable"));
+                publishError(requestGeneration, "boot_unavailable");
                 return;
             }
             if (!requestedBootId.equals(completionBootId)) {
-                publish(requestGeneration, State.error("boot_changed"));
+                publishError(requestGeneration, "boot_changed");
                 return;
             }
             publish(requestGeneration, State.ready(requestedBootId, page.items));
@@ -336,6 +351,15 @@ public final class HookStatusViewModel implements AutoCloseable {
             state = next;
         }
         dispatch(requestGeneration, next);
+    }
+
+    private void publishError(long requestGeneration, String errorCode) {
+        State previous;
+        synchronized (lock) {
+            if (closed || generation != requestGeneration) return;
+            previous = state;
+        }
+        publish(requestGeneration, State.error(errorCode, previous));
     }
 
     private void dispatch(long requestGeneration, State expected) {

@@ -13,6 +13,9 @@ import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
 import com.frostwork.bgenhance.ui.residency.ResidencyAppsActivity;
 import com.frostwork.bgenhance.ui.residency.ResidencyRuleStore;
+import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
+import com.frostwork.bgenhance.residency.model.ResidencyMode;
+import com.frostwork.bgenhance.residency.model.ResidencyPolicyDocument;
 import com.google.android.material.button.MaterialButtonToggleGroup;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.materialswitch.MaterialSwitch;
@@ -20,8 +23,10 @@ import com.google.android.material.snackbar.Snackbar;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public final class SettingsActivity extends AppCompatActivity {
     private MaterialSwitch masterSwitch;
@@ -115,7 +120,10 @@ public final class SettingsActivity extends AppCompatActivity {
         findViewById(R.id.row_periodic).setOnClickListener(v -> { if (periodicSwitch.isEnabled()) periodicSwitch.toggle(); });
         findViewById(R.id.row_oguard_kill).setOnClickListener(v -> { if (oguardKillSwitch.isEnabled()) oguardKillSwitch.toggle(); });
         findViewById(R.id.row_oguard_stop).setOnClickListener(v -> { if (oguardStopSwitch.isEnabled()) oguardStopSwitch.toggle(); });
-        findViewById(R.id.row_dry_run).setOnClickListener(v -> dryRunSwitch.toggle());
+        findViewById(R.id.row_dry_run).setOnClickListener(
+                v -> {
+                    if (dryRunSwitch.isEnabled()) dryRunSwitch.toggle();
+                });
 
         masterSwitch.setOnCheckedChangeListener((button, checked) ->
                 persistBoolean(ModuleSettings.KEY_MASTER_ENABLE, checked, false));
@@ -194,11 +202,15 @@ public final class SettingsActivity extends AppCompatActivity {
         }
         Map<String, Boolean> values = presetValues(this, true);
         List<FeatureCatalog.FeatureSpec> pending = new ArrayList<>();
+        int newlyEnabledRiskCount = 0;
         for (FeatureCatalog.FeatureSpec spec : FeatureCatalog.all()) {
-            if (Boolean.TRUE.equals(values.get(spec.prefKey))
+            boolean newlyEnabledRisk = Boolean.TRUE.equals(values.get(spec.prefKey))
                     && FeatureCatalog.needsRiskConfirmation(spec)
-                    && !ModuleSettings.prefs(this).getBoolean(
-                            FeatureCatalog.riskConfirmationKey(spec), false)) {
+                    && !ModuleSettings.getLocalBoolean(this, spec.prefKey);
+            if (!newlyEnabledRisk) continue;
+            newlyEnabledRiskCount++;
+            if (!ModuleSettings.prefs(this).getBoolean(
+                    FeatureCatalog.riskConfirmationKey(spec), false)) {
                 pending.add(spec);
             }
         }
@@ -210,7 +222,8 @@ public final class SettingsActivity extends AppCompatActivity {
         refreshAll();
         new MaterialAlertDialogBuilder(this)
                 .setTitle(R.string.preset_risk_dialog_title)
-                .setMessage(getString(R.string.preset_risk_dialog_message, pending.size()))
+                .setMessage(getString(
+                        R.string.preset_risk_dialog_message, newlyEnabledRiskCount))
                 .setNegativeButton(R.string.cancel, (dialog, which) -> refreshAll())
                 .setPositiveButton(R.string.apply_anyway, (dialog, which) -> {
                     if (!applyPreset(ModuleSettings.PRESET_STRONG)) return;
@@ -309,12 +322,14 @@ public final class SettingsActivity extends AppCompatActivity {
         }
 
         int localRevision = ModuleSettings.getConfigRevision(this);
+        ResidencyPolicyDocument residency = ModuleSettings.getResidencyPolicy(this);
         HomeDiagnosticsStatus status = HomeDiagnosticsStatus.evaluate(
                 state.hookStates.items,
                 ModuleApplication.diagnosticsBootId(),
                 localRevision,
-                ModuleSettings.getResidencyPolicy(this).policyRevision(),
-                BuildConfig.VERSION_CODE);
+                residency.policyRevision(),
+                BuildConfig.VERSION_CODE,
+                enabledHookTargets(residency));
         applyHomeDiagnosticsStatus(status);
         renderActivation(status.activation);
         statsOverview.bind(
@@ -397,7 +412,9 @@ public final class SettingsActivity extends AppCompatActivity {
 
     private void updateEditableRow(MaterialSwitch switchView, int rowId, boolean editable) {
         switchView.setEnabled(editable);
-        findViewById(rowId).setAlpha(editable ? 1f : 0.55f);
+        View row = findViewById(rowId);
+        row.setEnabled(editable);
+        row.setAlpha(editable ? 1f : 0.55f);
     }
 
     private void updateBasicSwitch(
@@ -418,6 +435,30 @@ public final class SettingsActivity extends AppCompatActivity {
         effectNotice.setText(textRes);
         effectNotice.setTextColor(getColor(R.color.banner_warning_text));
         effectNotice.setBackgroundResource(R.drawable.bg_notice_warning);
+    }
+
+    private Set<String> enabledHookTargets(ResidencyPolicyDocument residency) {
+        if (!ModuleSettings.getLocalBoolean(this, ModuleSettings.KEY_MASTER_ENABLE)) {
+            return java.util.Collections.emptySet();
+        }
+        Set<String> result = new LinkedHashSet<>();
+        for (FeatureCatalog.FeatureSpec spec : FeatureCatalog.all()) {
+            if (ModuleSettings.getLocalBoolean(this, spec.prefKey)) {
+                result.add(spec.hookTargetId);
+            }
+        }
+        if (hasActiveResidencyRule(residency)) {
+            result.addAll(HookTargetIds.residencyRequired());
+        }
+        return result;
+    }
+
+    private static boolean hasActiveResidencyRule(ResidencyPolicyDocument residency) {
+        if (residency == null || !residency.enabled()) return false;
+        for (AppResidencyPolicy policy : residency.rules()) {
+            if (policy.enabled() && policy.mode() != ResidencyMode.SYSTEM) return true;
+        }
+        return false;
     }
 
     private void refreshNavigationCounts() {

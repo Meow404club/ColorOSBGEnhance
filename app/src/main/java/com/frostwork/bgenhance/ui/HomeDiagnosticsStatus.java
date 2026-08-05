@@ -34,6 +34,7 @@ final class HomeDiagnosticsStatus {
     final boolean athenaIdentityReady;
     final boolean systemIdentityError;
     final boolean athenaIdentityError;
+    final boolean enabledOptionalHooksReady;
     private final Set<String> unavailablePrimaryHooks;
 
     private HomeDiagnosticsStatus(
@@ -49,6 +50,7 @@ final class HomeDiagnosticsStatus {
             boolean athenaIdentityReady,
             boolean systemIdentityError,
             boolean athenaIdentityError,
+            boolean enabledOptionalHooksReady,
             Set<String> unavailablePrimaryHooks) {
         this.activation = activation;
         this.installedPrimaryHooks = installedPrimaryHooks;
@@ -62,6 +64,7 @@ final class HomeDiagnosticsStatus {
         this.athenaIdentityReady = athenaIdentityReady;
         this.systemIdentityError = systemIdentityError;
         this.athenaIdentityError = athenaIdentityError;
+        this.enabledOptionalHooksReady = enabledOptionalHooksReady;
         this.unavailablePrimaryHooks = Collections.unmodifiableSet(
                 new HashSet<>(unavailablePrimaryHooks));
     }
@@ -81,6 +84,22 @@ final class HomeDiagnosticsStatus {
             int localConfigRevision,
             long localPolicyRevision,
             int localModuleVersionCode) {
+        return evaluate(
+                rows,
+                currentBootId,
+                localConfigRevision,
+                localPolicyRevision,
+                localModuleVersionCode,
+                Collections.emptySet());
+    }
+
+    static HomeDiagnosticsStatus evaluate(
+            List<DiagnosticsHookState> rows,
+            String currentBootId,
+            int localConfigRevision,
+            long localPolicyRevision,
+            int localModuleVersionCode,
+            Set<String> enabledHookTargets) {
         boolean hasCurrentRows = false;
         boolean systemReady = false;
         boolean athenaReady = false;
@@ -92,6 +111,7 @@ final class HomeDiagnosticsStatus {
         IdentityStatus athenaIdentity = IdentityStatus.MISSING;
         Set<String> installedHooks = new HashSet<>();
         Set<String> unavailableHooks = new HashSet<>();
+        Set<String> enabledOptionalHooks = enabledOptionalHooks(enabledHookTargets);
 
         if (rows != null && currentBootId != null && !currentBootId.isEmpty()) {
             for (DiagnosticsHookState row : rows) {
@@ -125,7 +145,7 @@ final class HomeDiagnosticsStatus {
                     } else if (BridgeContract.PROCESS_ATHENA.equals(row.processId)) {
                         athenaIdentity = identity;
                     }
-                } else if (PRIMARY_HOOKS.contains(row.hookTargetId)) {
+                } else if (HookTargetIds.all().contains(row.hookTargetId)) {
                     String expectedProcessId = HookTargetIds.expectedProcessId(row.hookTargetId);
                     if (!expectedProcessId.isEmpty()
                             && !expectedProcessId.equals(row.processId)) {
@@ -142,12 +162,18 @@ final class HomeDiagnosticsStatus {
             }
         }
         unavailableHooks.removeAll(installedHooks);
+        Set<String> unavailablePrimaryHooks = new HashSet<>(unavailableHooks);
+        unavailablePrimaryHooks.retainAll(PRIMARY_HOOKS);
+        boolean optionalHooksReady = installedHooks.containsAll(enabledOptionalHooks);
 
         Activation activation;
         if (systemReady && athenaReady
+                && systemSynced && athenaSynced
+                && !systemConfigError && !athenaConfigError
                 && systemIdentity == IdentityStatus.READY
                 && athenaIdentity == IdentityStatus.READY
-                && installedHooks.containsAll(PRIMARY_HOOKS)) {
+                && installedHooks.containsAll(PRIMARY_HOOKS)
+                && optionalHooksReady) {
             activation = Activation.ACTIVE;
         } else if (hasCurrentRows) {
             activation = Activation.PARTIAL;
@@ -156,7 +182,7 @@ final class HomeDiagnosticsStatus {
         }
         return new HomeDiagnosticsStatus(
                 activation,
-                installedHooks.size(),
+                installedPrimaryHookCount(installedHooks),
                 systemReady,
                 athenaReady,
                 systemSynced,
@@ -167,7 +193,8 @@ final class HomeDiagnosticsStatus {
                 athenaIdentity == IdentityStatus.READY,
                 systemIdentity == IdentityStatus.FAILED,
                 athenaIdentity == IdentityStatus.FAILED,
-                unavailableHooks);
+                optionalHooksReady,
+                unavailablePrimaryHooks);
     }
 
     boolean hasConfigError() {
@@ -202,9 +229,10 @@ final class HomeDiagnosticsStatus {
         if (!systemIdentityReady || !athenaIdentityReady) {
             return R.string.effect_identity_pending;
         }
-        if (activation != Activation.ACTIVE) {
+        if (installedPrimaryHooks < PRIMARY_HOOKS.size()) {
             return R.string.effect_primary_hook_unavailable;
         }
+        if (!enabledOptionalHooksReady) return R.string.effect_optional_hook_unavailable;
         if (!serviceConnected) return R.string.effect_config_service_waiting;
         if (!localConfigSynced || !systemConfigSynced || !athenaConfigSynced) {
             return R.string.effect_config_pending;
@@ -214,6 +242,28 @@ final class HomeDiagnosticsStatus {
 
     private static String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private static Set<String> enabledOptionalHooks(Set<String> requested) {
+        if (requested == null || requested.isEmpty()) return Collections.emptySet();
+        Set<String> result = new HashSet<>();
+        for (String hookTargetId : requested) {
+            if (hookTargetId != null
+                    && HookTargetIds.all().contains(hookTargetId)
+                    && !PRIMARY_HOOKS.contains(hookTargetId)
+                    && !HookTargetIds.DIAGNOSTICS_BRIDGE_STARTUP.equals(hookTargetId)) {
+                result.add(hookTargetId);
+            }
+        }
+        return result;
+    }
+
+    private static int installedPrimaryHookCount(Set<String> installedHooks) {
+        int count = 0;
+        for (String hookTargetId : PRIMARY_HOOKS) {
+            if (installedHooks.contains(hookTargetId)) count++;
+        }
+        return count;
     }
 
     private static IdentityStatus identityStatus(

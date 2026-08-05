@@ -70,6 +70,29 @@ public final class HookStatusViewModelTest {
     }
 
     @Test
+    public void refreshKeepsLastReadyCapabilitiesWhileLoadingAndAfterError() {
+        SwitchingSource source = new SwitchingSource();
+        List<HookStatusViewModel.State> states = new ArrayList<>();
+        HookStatusViewModel viewModel = new HookStatusViewModel(source, Runnable::run);
+        viewModel.setListener(states::add);
+
+        CompletableFuture<DiagnosticsQuery.HookStatePage> first = source.nextFuture();
+        viewModel.refresh();
+        first.complete(page(hook(
+                CURRENT_BOOT, HookTargetIds.OGUARD_KILL, "UNSUPPORTED")));
+        assertTrue(last(states).isExplicitlyUnavailable(HookTargetIds.OGUARD_KILL));
+
+        CompletableFuture<DiagnosticsQuery.HookStatePage> second = source.nextFuture();
+        viewModel.refresh();
+        assertEquals(HookStatusViewModel.Status.LOADING, last(states).status());
+        assertTrue(last(states).isExplicitlyUnavailable(HookTargetIds.OGUARD_KILL));
+        second.complete(DiagnosticsQuery.HookStatePage.empty("database_unavailable"));
+
+        assertEquals(HookStatusViewModel.Status.ERROR, last(states).status());
+        assertTrue(last(states).isExplicitlyUnavailable(HookTargetIds.OGUARD_KILL));
+    }
+
+    @Test
     public void hookStatusFromTheWrongProcessCannotMaskExpectedProcessFailure() {
         Source source = new Source();
         List<HookStatusViewModel.State> states = new ArrayList<>();

@@ -11,6 +11,7 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.TextView;
 import androidx.appcompat.app.AlertDialog;
 import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
@@ -102,6 +103,41 @@ public final class SettingsProtectionControlsTest {
     }
 
     @Test
+    public void strongPresetConfirmationCountsAllNewlyEnabledRiskItems() {
+        SettingsActivity activity = Robolectric.buildActivity(SettingsActivity.class)
+                .setup()
+                .get();
+        Map<String, Boolean> strongValues = SettingsActivity.presetValues(activity, true);
+        FeatureCatalog.FeatureSpec alreadyConfirmed = null;
+        int newlyEnabledRiskCount = 0;
+        for (FeatureCatalog.FeatureSpec spec : FeatureCatalog.all()) {
+            if (!Boolean.TRUE.equals(strongValues.get(spec.prefKey))
+                    || !FeatureCatalog.needsRiskConfirmation(spec)
+                    || ModuleSettings.getLocalBoolean(activity, spec.prefKey)) {
+                continue;
+            }
+            newlyEnabledRiskCount++;
+            if (alreadyConfirmed == null) alreadyConfirmed = spec;
+        }
+        assertNotNull(alreadyConfirmed);
+        assertTrue(newlyEnabledRiskCount > 1);
+        ModuleSettings.prefs(activity).edit()
+                .putBoolean(FeatureCatalog.riskConfirmationKey(alreadyConfirmed), true)
+                .commit();
+
+        activity.findViewById(R.id.button_preset_strong).performClick();
+
+        AlertDialog confirmation = (AlertDialog) ShadowDialog.getLatestDialog();
+        TextView message = confirmation.findViewById(android.R.id.message);
+        assertNotNull(message);
+        assertEquals(activity.getString(
+                R.string.preset_risk_dialog_message, newlyEnabledRiskCount),
+                message.getText().toString());
+        confirmation.getButton(DialogInterface.BUTTON_NEGATIVE).performClick();
+        activity.finish();
+    }
+
+    @Test
     public void masterOffLocksProtectionEditorsButKeepsResidencyConfigurationAvailable() {
         Context context = RuntimeEnvironment.getApplication();
         ModuleSettings.prefs(context).edit()
@@ -124,6 +160,7 @@ public final class SettingsProtectionControlsTest {
         }
         assertFalse(((MaterialSwitch) activity.findViewById(R.id.switch_periodic)).isEnabled());
         assertFalse(((MaterialSwitch) activity.findViewById(R.id.switch_dry_run)).isEnabled());
+        assertFalse(activity.findViewById(R.id.row_dry_run).isEnabled());
         for (int rowId : new int[] {
                 R.id.row_fast_clear, R.id.row_memory, R.id.row_nirvana, R.id.row_freeze
         }) {
@@ -145,7 +182,25 @@ public final class SettingsProtectionControlsTest {
         }
         assertTrue(((MaterialSwitch) activity.findViewById(R.id.switch_periodic)).isEnabled());
         assertTrue(((MaterialSwitch) activity.findViewById(R.id.switch_dry_run)).isEnabled());
+        assertTrue(activity.findViewById(R.id.row_dry_run).isEnabled());
         assertEquals(1f, activity.findViewById(R.id.custom_advanced_section).getAlpha(), 0f);
+        activity.finish();
+    }
+
+    @Test
+    public void disabledDryRunRowCannotChangeTheStoredValue() {
+        Context context = RuntimeEnvironment.getApplication();
+        ModuleSettings.prefs(context).edit()
+                .putBoolean(ModuleSettings.KEY_MASTER_ENABLE, false)
+                .putBoolean(ModuleSettings.KEY_DRY_RUN, false)
+                .commit();
+        SettingsActivity activity = Robolectric.buildActivity(SettingsActivity.class)
+                .setup()
+                .get();
+
+        activity.findViewById(R.id.row_dry_run).performClick();
+        assertFalse(ModuleSettings.getLocalBoolean(
+                activity, ModuleSettings.KEY_DRY_RUN));
         activity.finish();
     }
 

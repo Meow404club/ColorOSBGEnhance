@@ -6,6 +6,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
+import com.frostwork.bgenhance.ModuleApplication;
 import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
 import com.google.android.material.card.MaterialCardView;
@@ -21,9 +22,24 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
     private String group;
     private LinearLayout container;
     private TextView masterDisabledBanner;
+    private TextView effectNotice;
     private boolean masterEnabled;
     private HookStatusViewModel hookStatusViewModel;
     private HookStatusViewModel.State hookStatus;
+    private final Runnable settledHookRefresh = () -> {
+        if (!isFinishing() && !isDestroyed() && hookStatusViewModel != null) {
+            hookStatusViewModel.refresh();
+        }
+    };
+    private final ModuleApplication.StateListener moduleStateListener = () ->
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                updateEffectNotice(FeatureCatalog.forGroup(group));
+                if (container != null) {
+                    container.removeCallbacks(settledHookRefresh);
+                    container.postDelayed(settledHookRefresh, 1_200L);
+                }
+            });
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -31,13 +47,16 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
         setContentView(R.layout.activity_feature_settings);
         UiUtils.applyWindowStyle(this);
         group = getIntent().getStringExtra(EXTRA_GROUP);
-        if (group == null) group = FeatureCatalog.GROUP_FAST_CLEAR;
+        if (FeatureCatalog.forGroup(group).isEmpty()) {
+            group = FeatureCatalog.GROUP_FAST_CLEAR;
+        }
         if (!ensureCustomMode()) return;
         ((com.google.android.material.appbar.MaterialToolbar) findViewById(R.id.toolbar))
                 .setNavigationOnClickListener(v -> finish());
         ((TextView) findViewById(R.id.page_title)).setText(FeatureCatalog.titleForGroup(group));
         ((TextView) findViewById(R.id.page_subtitle)).setText(FeatureCatalog.subtitleForGroup(group));
         masterDisabledBanner = findViewById(R.id.banner_master_disabled);
+        effectNotice = findViewById(R.id.feature_effect_notice);
         container = findViewById(R.id.card_container);
         hookStatusViewModel = HookStatusViewModel.create(this);
         hookStatusViewModel.setListener(state -> {
@@ -45,6 +64,12 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
             buildRows();
         });
         buildRows();
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        ModuleApplication.addStateListener(moduleStateListener);
     }
 
     @Override
@@ -60,7 +85,16 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onStop() {
+        ModuleApplication.removeStateListener(moduleStateListener);
+        if (container != null) container.removeCallbacks(settledHookRefresh);
+        super.onStop();
+    }
+
+    @Override
     protected void onDestroy() {
+        ModuleApplication.removeStateListener(moduleStateListener);
+        if (container != null) container.removeCallbacks(settledHookRefresh);
         if (hookStatusViewModel != null) hookStatusViewModel.close();
         super.onDestroy();
     }
@@ -80,6 +114,7 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
             List<FeatureCatalog.FeatureSpec> section = sections.get(sectionIndex);
             addRiskSection(section, sectionIndex < sections.size() - 1);
         }
+        updateEffectNotice(specs);
     }
 
     private List<List<FeatureCatalog.FeatureSpec>> groupByRisk(
@@ -188,11 +223,43 @@ public final class FeatureSettingsActivity extends AppCompatActivity {
         Snackbar.make(findViewById(android.R.id.content),
                 saved ? R.string.settings_saved : R.string.settings_save_failed,
                 saved ? Snackbar.LENGTH_SHORT : Snackbar.LENGTH_LONG).show();
+        updateEffectNotice(FeatureCatalog.forGroup(group));
+    }
+
+    private void updateEffectNotice(List<FeatureCatalog.FeatureSpec> specs) {
+        if (effectNotice == null) return;
+        List<FeatureCatalog.FeatureSpec> enabledSpecs = new ArrayList<>();
+        if (masterEnabled && specs != null) {
+            for (FeatureCatalog.FeatureSpec spec : specs) {
+                if (spec != null && !spec.diagnosticOnly
+                        && ModuleSettings.getLocalBoolean(this, spec.prefKey)) {
+                    enabledSpecs.add(spec);
+                }
+            }
+        }
+        int message = FeatureApplyStatus.message(
+                hookStatus,
+                ModuleApplication.isServiceConnected(),
+                ModuleApplication.hasConfigSyncError(),
+                ModuleSettings.getConfigRevision(this),
+                enabledSpecs);
+        if (message == 0) {
+            effectNotice.setVisibility(View.GONE);
+            return;
+        }
+        effectNotice.setText(message);
+        effectNotice.setVisibility(View.VISIBLE);
+        if (FeatureApplyStatus.tone(message) == FeatureApplyStatus.Tone.ERROR) {
+            effectNotice.setBackgroundResource(R.drawable.bg_notice_error);
+            effectNotice.setTextColor(getColor(R.color.status_error_text));
+        } else {
+            effectNotice.setBackgroundResource(R.drawable.bg_notice_warning);
+            effectNotice.setTextColor(getColor(R.color.banner_warning_text));
+        }
     }
 
     private boolean isExplicitlyUnsupported(FeatureCatalog.FeatureSpec spec) {
         return hookStatus != null
-                && hookStatus.status() == HookStatusViewModel.Status.READY
                 && hookStatus.isExplicitlyUnavailable(spec.hookTargetId);
     }
 

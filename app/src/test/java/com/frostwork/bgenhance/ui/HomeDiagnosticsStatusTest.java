@@ -13,6 +13,7 @@ import com.frostwork.bgenhance.R;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Set;
 import org.junit.Test;
 
 public final class HomeDiagnosticsStatusTest {
@@ -94,6 +95,46 @@ public final class HomeDiagnosticsStatusTest {
     }
 
     @Test
+    public void unavailableOptionalHookOnlyAffectsStatusWhenItsFeatureIsEnabled() {
+        java.util.List<DiagnosticsHookState> rows = Arrays.asList(
+                process(BridgeContract.PROCESS_SYSTEM_SERVER,
+                        currentStage(), CURRENT_BOOT),
+                process(BridgeContract.PROCESS_ATHENA,
+                        currentStage(), CURRENT_BOOT),
+                config(BridgeContract.PROCESS_SYSTEM_SERVER, 8),
+                config(BridgeContract.PROCESS_ATHENA, 8),
+                identity(BridgeContract.PROCESS_SYSTEM_SERVER, 8, 2),
+                identity(BridgeContract.PROCESS_ATHENA, 8, 2),
+                hook(HookTargetIds.OGUARD_KILL, "INSTALLED"),
+                hook(HookTargetIds.OGUARD_FORCE_STOP, "INSTALLED"),
+                hook(HookTargetIds.ATHENA_PERIODIC, "INSTALLED"),
+                hook(HookTargetIds.HANS_RESOURCE_DISPATCH, "FAILED_FAIL_OPEN"));
+
+        HomeDiagnosticsStatus unused = HomeDiagnosticsStatus.evaluate(
+                rows,
+                CURRENT_BOOT,
+                8,
+                2L,
+                BuildConfig.VERSION_CODE,
+                Collections.emptySet());
+        HomeDiagnosticsStatus enabled = HomeDiagnosticsStatus.evaluate(
+                rows,
+                CURRENT_BOOT,
+                8,
+                2L,
+                BuildConfig.VERSION_CODE,
+                Set.of(HookTargetIds.HANS_RESOURCE_DISPATCH));
+
+        assertEquals(HomeDiagnosticsStatus.Activation.ACTIVE, unused.activation);
+        assertTrue(unused.enabledOptionalHooksReady);
+        assertEquals(0, unused.effectNotice(true, true, false));
+        assertEquals(HomeDiagnosticsStatus.Activation.PARTIAL, enabled.activation);
+        assertFalse(enabled.enabledOptionalHooksReady);
+        assertEquals(R.string.effect_optional_hook_unavailable,
+                enabled.effectNotice(true, true, false));
+    }
+
+    @Test
     public void configMustBeReadyAtCurrentRevision() {
         HomeDiagnosticsStatus status = HomeDiagnosticsStatus.evaluate(
                 Arrays.asList(
@@ -114,6 +155,36 @@ public final class HomeDiagnosticsStatusTest {
         assertTrue(status.athenaConfigError);
         assertTrue(status.hasConfigError());
         assertEquals(R.string.effect_config_error, status.effectNotice(true, false, false));
+    }
+
+    @Test
+    public void configErrorPreventsActiveEvenWhenAllOtherRowsAreHealthy() {
+        HomeDiagnosticsStatus status = HomeDiagnosticsStatus.evaluate(
+                Arrays.asList(
+                        process(BridgeContract.PROCESS_SYSTEM_SERVER,
+                                currentStage(), CURRENT_BOOT),
+                        process(BridgeContract.PROCESS_ATHENA,
+                                currentStage(), CURRENT_BOOT),
+                        config(BridgeContract.PROCESS_SYSTEM_SERVER, 8),
+                        DiagnosticsHookState.builder()
+                                .processId(BridgeContract.PROCESS_ATHENA)
+                                .hookTargetId(DiagnosticsTargetIds.RUNTIME_CONFIG)
+                                .installStatus("CONFIG_ERROR")
+                                .configRevision(8)
+                                .bootId(CURRENT_BOOT)
+                                .build(),
+                        identity(BridgeContract.PROCESS_SYSTEM_SERVER, 8, 2),
+                        identity(BridgeContract.PROCESS_ATHENA, 8, 2),
+                        hook(HookTargetIds.OGUARD_KILL, "INSTALLED"),
+                        hook(HookTargetIds.OGUARD_FORCE_STOP, "INSTALLED"),
+                        hook(HookTargetIds.ATHENA_PERIODIC, "INSTALLED")),
+                CURRENT_BOOT,
+                8,
+                2L,
+                BuildConfig.VERSION_CODE);
+
+        assertEquals(HomeDiagnosticsStatus.Activation.PARTIAL, status.activation);
+        assertTrue(status.hasConfigError());
     }
 
     @Test
