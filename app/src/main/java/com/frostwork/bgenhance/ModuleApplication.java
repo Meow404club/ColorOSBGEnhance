@@ -38,10 +38,12 @@ public final class ModuleApplication extends Application
     private static final RuntimeConfigCodec RUNTIME_CONFIG_CODEC = new RuntimeConfigCodec();
     private static final CopyOnWriteArraySet<StateListener> STATE_LISTENERS =
             new CopyOnWriteArraySet<>();
+    private static final Object SERVICE_LOCK = new Object();
     private static final Object DIAGNOSTICS_LOCK = new Object();
     private static final AtomicLong DIAGNOSTICS_EPOCH = new AtomicLong(-1L);
 
     private static volatile XposedService sService;
+    private static long sServiceGeneration;
     private static volatile int sServiceApi = -1;
     private static volatile int sSyncedRevision = -1;
     private static volatile String sSyncError = "service_not_connected";
@@ -79,14 +81,27 @@ public final class ModuleApplication extends Application
 
     @Override
     public void onServiceBind(@NonNull XposedService service) {
-        sService = service;
-        sSyncedRevision = -1;
-        try {
-            sServiceApi = service.getApiVersion();
-            sSyncError = "";
-        } catch (Throwable t) {
+        final long generation;
+        synchronized (SERVICE_LOCK) {
+            sService = service;
+            generation = ++sServiceGeneration;
             sServiceApi = -1;
-            sSyncError = errorText(t);
+            sSyncedRevision = -1;
+            sSyncError = "";
+        }
+        int apiVersion;
+        String error;
+        try {
+            apiVersion = service.getApiVersion();
+            error = "";
+        } catch (Throwable t) {
+            apiVersion = -1;
+            error = errorText(t);
+        }
+        synchronized (SERVICE_LOCK) {
+            if (!isCurrentServiceLocked(service, generation)) return;
+            sServiceApi = apiVersion;
+            sSyncError = error;
         }
         notifyStateChanged();
         requestConfigSync();
@@ -94,13 +109,17 @@ public final class ModuleApplication extends Application
 
     @Override
     public void onServiceDied(@NonNull XposedService service) {
-        if (sService == service) {
+        boolean changed = false;
+        synchronized (SERVICE_LOCK) {
+            if (sService != service) return;
             sService = null;
+            sServiceGeneration++;
             sServiceApi = -1;
             sSyncedRevision = -1;
             sSyncError = "service_disconnected";
-            notifyStateChanged();
+            changed = true;
         }
+        if (changed) notifyStateChanged();
     }
 
     @Override
@@ -222,9 +241,14 @@ public final class ModuleApplication extends Application
     }
 
     private void syncConfigNow() {
-        XposedService service = sService;
+        ServiceSession session = currentServiceSession();
+        XposedService service = session.service;
         if (service == null) {
-            sSyncError = "service_not_connected";
+            synchronized (SERVICE_LOCK) {
+                if (isCurrentServiceLocked(null, session.generation)) {
+                    sSyncError = "service_not_connected";
+                }
+            }
             return;
         }
         ModuleSettings.ensureDefaults(this);
@@ -262,14 +286,32 @@ public final class ModuleApplication extends Application
                     || !encoded.equals(RUNTIME_CONFIG_CODEC.encode(verified))) {
                 throw new IllegalStateException("remote runtime configuration verification failed");
             }
-            sSyncedRevision = revision;
-            sSyncError = "";
+            synchronized (SERVICE_LOCK) {
+                if (!isCurrentServiceLocked(service, session.generation)) return;
+                sSyncedRevision = revision;
+                sSyncError = "";
+            }
             notifyStateChanged();
         } catch (Throwable t) {
-            sSyncError = errorText(t);
+            String error = errorText(t);
+            synchronized (SERVICE_LOCK) {
+                if (!isCurrentServiceLocked(service, session.generation)) return;
+                sSyncError = error;
+            }
             notifyStateChanged();
             Log.w(ModuleSettings.TAG, "remote config sync failed", t);
         }
+    }
+
+    private static ServiceSession currentServiceSession() {
+        synchronized (SERVICE_LOCK) {
+            return new ServiceSession(sService, sServiceGeneration);
+        }
+    }
+
+    private static boolean isCurrentServiceLocked(
+            XposedService service, long generation) {
+        return sService == service && sServiceGeneration == generation;
     }
 
     private static String errorText(Throwable error) {
@@ -287,5 +329,15 @@ public final class ModuleApplication extends Application
         return serviceConnected
                 && (syncedRevision < localRevision
                         || syncError != null && !syncError.isEmpty());
+    }
+
+    private static final class ServiceSession {
+        final XposedService service;
+        final long generation;
+
+        ServiceSession(XposedService service, long generation) {
+            this.service = service;
+            this.generation = generation;
+        }
     }
 }

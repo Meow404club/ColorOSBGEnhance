@@ -22,6 +22,12 @@ public final class ModuleConfigRepository {
     private ModuleConfigRepository() {}
 
     public static void ensureInitialized(Context context) {
+        synchronized (ModuleSettings.class) {
+            ensureInitializedLocked(context);
+        }
+    }
+
+    private static void ensureInitializedLocked(Context context) {
         Objects.requireNonNull(context, "context");
         SharedPreferences preferences = ModuleSettings.prefs(context);
         SharedPreferences.Editor editor = preferences.edit();
@@ -66,6 +72,12 @@ public final class ModuleConfigRepository {
     }
 
     public static ResidencyPolicyDocument readResidencyPolicy(Context context) {
+        synchronized (ModuleSettings.class) {
+            return readResidencyPolicyLocked(context);
+        }
+    }
+
+    private static ResidencyPolicyDocument readResidencyPolicyLocked(Context context) {
         Objects.requireNonNull(context, "context");
         SharedPreferences preferences = ModuleSettings.prefs(context);
         String encoded = preferences.getString(ModuleSettings.KEY_RESIDENCY_POLICY_JSON, null);
@@ -76,6 +88,12 @@ public final class ModuleConfigRepository {
     }
 
     public static RuntimeConfigDocument readRuntimeConfig(Context context) {
+        synchronized (ModuleSettings.class) {
+            return readRuntimeConfigLocked(context);
+        }
+    }
+
+    private static RuntimeConfigDocument readRuntimeConfigLocked(Context context) {
         Objects.requireNonNull(context, "context");
         SharedPreferences preferences = ModuleSettings.prefs(context);
         Map<String, Boolean> featureFlags = new LinkedHashMap<>();
@@ -108,19 +126,28 @@ public final class ModuleConfigRepository {
                 preferences.getInt(ModuleSettings.KEY_CONFIG_REVISION, 1),
                 preferences.getLong(ModuleSettings.KEY_CONFIG_UPDATED_AT, 0L),
                 global,
-                readResidencyPolicy(context));
+                readResidencyPolicyLocked(context));
     }
 
     public static String readRuntimeConfigJson(Context context) {
-        return RUNTIME_CODEC.encode(readRuntimeConfig(context));
+        synchronized (ModuleSettings.class) {
+            return RUNTIME_CODEC.encode(readRuntimeConfigLocked(context));
+        }
     }
 
     public static boolean writeResidencyPolicy(
             Context context, ResidencyPolicyDocument candidate) {
+        synchronized (ModuleSettings.class) {
+            return writeResidencyPolicyLocked(context, candidate);
+        }
+    }
+
+    private static boolean writeResidencyPolicyLocked(
+            Context context, ResidencyPolicyDocument candidate) {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(candidate, "candidate");
         SharedPreferences preferences = ModuleSettings.prefs(context);
-        ResidencyPolicyDocument current = readResidencyPolicy(context);
+        ResidencyPolicyDocument current = readResidencyPolicyLocked(context);
         ResidencyPolicyDocument next = nextPolicy(current, candidate);
         if (next == current) return true;
 
