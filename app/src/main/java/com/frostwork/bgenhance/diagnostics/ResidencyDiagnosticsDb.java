@@ -18,7 +18,7 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
     private static final long MAX_WAL_BYTES = 2L * 1_024L * 1_024L;
 
     public static final String DATABASE_NAME = "residency_diagnostics.db";
-    public static final int SCHEMA_VERSION = 8;
+    public static final int SCHEMA_VERSION = 9;
 
     static final String TABLE_EVENTS = "normalized_events";
     static final String TABLE_AGGREGATES = "event_aggregates";
@@ -118,6 +118,10 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         if (current == 7 && newVersion >= 8) {
             migrateVersionSevenToEight(db);
             current = 8;
+        }
+        if (current == 8 && newVersion >= 9) {
+            migrateVersionEightToNine(db);
+            current = 9;
         }
         if (current != newVersion) {
             throw new IllegalStateException(
@@ -684,6 +688,7 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         values.put("policy_revision", state.policyRevision);
         values.put("install_error", authoritative ? state.lastError : "");
         values.put("runtime_error", authoritative ? "" : state.lastError);
+        values.put("installation_updated_at", authoritative ? state.updatedAt : 0L);
         values.put("updated_at", state.updatedAt);
         long inserted = db.insertWithOnConflict(
                 TABLE_HOOK_STATES, null, values, SQLiteDatabase.CONFLICT_IGNORE);
@@ -702,7 +707,7 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
         }
         db.execSQL("UPDATE " + TABLE_HOOK_STATES + " SET "
                         + "feature_id=CASE WHEN ?<>'' THEN ? ELSE feature_id END,"
-                        + "install_status=CASE WHEN ?=1 AND ?>=updated_at "
+                        + "install_status=CASE WHEN ?=1 AND ?>=installation_updated_at "
                         + "THEN ? ELSE install_status END,"
                         + "boot_id=CASE WHEN ?<>'' THEN ? ELSE boot_id END,"
                         + "last_hook_at=MAX(last_hook_at,?),"
@@ -713,10 +718,13 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                         + "THEN ? ELSE config_revision END,"
                         + "policy_revision=CASE WHEN ?>=0 AND ?>=updated_at "
                         + "THEN ? ELSE policy_revision END,"
-                        + "install_error=CASE WHEN ?=1 AND ?>=updated_at "
+                        + "install_error=CASE WHEN ?=1 AND ?>=installation_updated_at "
                         + "THEN ? ELSE install_error END,"
                         + "runtime_error=CASE WHEN ?=0 AND ?>=last_hook_at "
                         + "THEN ? ELSE runtime_error END,"
+                        + "installation_updated_at=CASE WHEN ?=1 "
+                        + "THEN MAX(installation_updated_at,?) "
+                        + "ELSE installation_updated_at END,"
                         + "updated_at=MAX(updated_at,?) WHERE process_id=? AND hook_target_id=? "
                         + "AND (boot_id=? OR boot_id='' OR ?='')",
                 new Object[] {
@@ -732,6 +740,7 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                         state.policyRevision, state.updatedAt, state.policyRevision,
                         authoritative ? 1 : 0, state.updatedAt, state.lastError,
                         authoritative ? 1 : 0, state.lastHookAt, state.lastError,
+                        authoritative ? 1 : 0, state.updatedAt,
                         state.updatedAt,
                         state.processId,
                         state.hookTargetId,
@@ -1318,6 +1327,14 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                 + " SET install_error=last_error");
     }
 
+    private static void migrateVersionEightToNine(SQLiteDatabase db) {
+        db.execSQL("ALTER TABLE " + TABLE_HOOK_STATES
+                + " ADD COLUMN installation_updated_at INTEGER NOT NULL DEFAULT 0");
+        db.execSQL("UPDATE " + TABLE_HOOK_STATES
+                + " SET installation_updated_at=CASE "
+                + "WHEN install_status='UNKNOWN' THEN 0 ELSE updated_at END");
+    }
+
     private static void normalizeLegacySharedUidPackages(SQLiteDatabase db) {
         db.execSQL("UPDATE " + TABLE_EVENTS
                 + " SET package_name='' WHERE instr(package_name, ',')>0");
@@ -1355,6 +1372,11 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
 
     static void createVersionSevenForTest(SQLiteDatabase db) {
         createVersionSevenSchemaForTest(db);
+    }
+
+    static void createVersionEightForTest(SQLiteDatabase db) {
+        createVersionSevenSchemaForTest(db);
+        migrateVersionSevenToEight(db);
     }
 
     private static void createVersionSevenSchemaForTest(SQLiteDatabase db) {
@@ -1439,7 +1461,9 @@ public final class ResidencyDiagnosticsDb extends SQLiteOpenHelper
                 + "config_revision INTEGER NOT NULL DEFAULT -1,"
                 + "policy_revision INTEGER NOT NULL DEFAULT -1,"
                 + "install_error TEXT NOT NULL DEFAULT '',"
-                + "runtime_error TEXT NOT NULL DEFAULT '',updated_at INTEGER NOT NULL,"
+                + "runtime_error TEXT NOT NULL DEFAULT '',"
+                + "installation_updated_at INTEGER NOT NULL DEFAULT 0,"
+                + "updated_at INTEGER NOT NULL,"
                 + "PRIMARY KEY(process_id,hook_target_id))");
     }
 

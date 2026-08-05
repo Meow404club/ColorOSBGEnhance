@@ -123,6 +123,25 @@ public final class ResidencyDiagnosticsDbTest {
     }
 
     @Test
+    public void newerRuntimeActivityCannotBlockAuthoritativeInstallationState() {
+        database = open(policy(20, 20, 20, 60_000L));
+        long now = System.currentTimeMillis();
+        database.writeBatch(DiagnosticsWriteBatch.builder()
+                .addRawHit(raw(now + 10L, true, true, ""))
+                .build());
+        assertEquals("UNKNOWN", database.queryHookStates(10).get(0).installStatus);
+
+        database.writeBatch(DiagnosticsWriteBatch.builder()
+                .addHookState(authoritativeState(
+                        now, "INSTALLED", 9, 11, ""))
+                .build());
+
+        DiagnosticsHookState current = database.queryHookStates(10).get(0);
+        assertEquals("INSTALLED", current.installStatus);
+        assertEquals(now + 10L, current.updatedAt);
+    }
+
+    @Test
     public void rawSummaryErrorComesFromLatestHitAndSuccessClearsIt() {
         database = open(policy(20, 20, 20, 60_000L));
         long firstDay = DiagnosticsValues.dayBucket(System.currentTimeMillis())
@@ -1098,13 +1117,53 @@ public final class ResidencyDiagnosticsDbTest {
                 null)) {
             boolean installErrorFound = false;
             boolean runtimeErrorFound = false;
+            boolean installationUpdatedAtFound = false;
             while (columns.moveToNext()) {
                 if ("install_error".equals(columns.getString(1))) installErrorFound = true;
                 if ("runtime_error".equals(columns.getString(1))) runtimeErrorFound = true;
+                if ("installation_updated_at".equals(columns.getString(1))) {
+                    installationUpdatedAtFound = true;
+                }
             }
             assertTrue(installErrorFound);
             assertTrue(runtimeErrorFound);
+            assertTrue(installationUpdatedAtFound);
         }
+    }
+
+    @Test
+    public void migrationFromVersionEightRepairsUnknownInstallationAuthority() {
+        long now = System.currentTimeMillis();
+        SQLiteDatabase legacy = context.openOrCreateDatabase(
+                databaseName, Context.MODE_PRIVATE, null);
+        ResidencyDiagnosticsDb.createVersionEightForTest(legacy);
+        ContentValues state = new ContentValues();
+        state.put("process_id", "system_server");
+        state.put("hook_target_id", "freeze_target");
+        state.put("feature_id", "freeze");
+        state.put("install_status", "UNKNOWN");
+        state.put("boot_id", "42");
+        state.put("updated_at", now + 10L);
+        legacy.insertOrThrow(ResidencyDiagnosticsDb.TABLE_HOOK_STATES, null, state);
+        legacy.setVersion(8);
+        legacy.close();
+
+        database = open(policy(20, 20, 20, 60_000L));
+        SQLiteDatabase upgraded = database.getWritableDatabase();
+        assertEquals(0L, DatabaseUtils.longForQuery(
+                upgraded,
+                "SELECT installation_updated_at FROM "
+                        + ResidencyDiagnosticsDb.TABLE_HOOK_STATES,
+                null));
+
+        database.writeBatch(DiagnosticsWriteBatch.builder()
+                .addHookState(authoritativeState(
+                        now, "INSTALLED", 9, 11, ""))
+                .build());
+
+        DiagnosticsHookState current = database.queryHookStates(10).get(0);
+        assertEquals("INSTALLED", current.installStatus);
+        assertEquals(now + 10L, current.updatedAt);
     }
 
     private ResidencyDiagnosticsDb open(DiagnosticsRetentionPolicy policy) {
