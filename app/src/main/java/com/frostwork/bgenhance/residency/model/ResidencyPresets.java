@@ -12,14 +12,18 @@ public final class ResidencyPresets {
     private ResidencyPresets() {}
 
     public static AppResidencyPolicy create(String packageName, ResidencyMode mode) {
+        return create(packageName, AppResidencyPolicy.PRIMARY_USER_ID, mode);
+    }
+
+    public static AppResidencyPolicy create(String packageName, int userId, ResidencyMode mode) {
         if (mode == null) throw new NullPointerException("mode");
         switch (mode) {
             case SYSTEM:
-                return policy(packageName, mode, KillPolicy.none(), FreezePolicy.followSystem(),
+                return policy(packageName, userId, mode, KillPolicy.none(), FreezePolicy.followSystem(),
                         WakePolicy.allowAll(), ResourcePolicy.followSystem(),
                         RefreezePolicy.followSystem());
             case BALANCED:
-                return policy(packageName, mode, KillPolicy.all(), FreezePolicy.followSystem(),
+                return policy(packageName, userId, mode, KillPolicy.all(), FreezePolicy.followSystem(),
                         WakePolicy.allowAll(), ResourcePolicy.followSystem(),
                         RefreezePolicy.followSystem());
             case LOW_POWER:
@@ -39,16 +43,16 @@ public final class ResidencyPresets {
                         ONE_MINUTE_MS,
                         ONE_MINUTE_MS,
                         ONE_MINUTE_MS);
-                return policy(packageName, mode, KillPolicy.all(), lowPowerFreeze,
+                return policy(packageName, userId, mode, KillPolicy.all(), lowPowerFreeze,
                         lowPowerWake, ResourcePolicy.followSystem(), lowPowerRefreeze);
             case ACTIVE:
                 FreezePolicy activeFreeze = new FreezePolicy(
                         false, false, false, false, false, 0L, 0L, true, true, true);
-                return policy(packageName, mode, KillPolicy.all(), activeFreeze,
+                return policy(packageName, userId, mode, KillPolicy.all(), activeFreeze,
                         WakePolicy.allowAll(), ResourcePolicy.followSystem(),
                         new RefreezePolicy(RefreezeMode.DISABLED, 0L, 0L, 0L, 0L, 0L, 0L, 0L));
             case CUSTOM:
-                return policy(packageName, mode, KillPolicy.all(), FreezePolicy.followSystem(),
+                return policy(packageName, userId, mode, KillPolicy.all(), FreezePolicy.followSystem(),
                         WakePolicy.allowAll(), ResourcePolicy.followSystem(),
                         RefreezePolicy.followSystem());
             default:
@@ -58,13 +62,14 @@ public final class ResidencyPresets {
 
     private static AppResidencyPolicy policy(
             String packageName,
+            int userId,
             ResidencyMode mode,
             KillPolicy kill,
             FreezePolicy freeze,
             WakePolicy wake,
             ResourcePolicy resources,
             RefreezePolicy refreeze) {
-        return new AppResidencyPolicy(packageName, true, mode, kill, freeze, wake, resources,
-                refreeze);
+        return new AppResidencyPolicy(
+                packageName, userId, true, mode, kill, freeze, wake, resources, refreeze);
     }
 }

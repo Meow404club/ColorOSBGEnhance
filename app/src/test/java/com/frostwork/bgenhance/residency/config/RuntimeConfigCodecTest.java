@@ -26,7 +26,7 @@ public final class RuntimeConfigCodecTest {
                 + "\"global\":{\"masterEnabled\":true,\"dryRun\":false,"
                 + "\"verboseDiagnostics\":false,\"activePreset\":\"balanced\","
                 + "\"legacyFeatures\":{}},"
-                + "\"residency\":{\"schemaVersion\":1,\"policyRevision\":0,"
+                + "\"residency\":{\"schemaVersion\":2,\"policyRevision\":0,"
                 + "\"enabled\":true,\"defaultNewRuleMode\":\"BALANCED\",\"rules\":[]}}";
 
         assertEquals(expected, codec.encode(RuntimeConfigDocument.empty()));

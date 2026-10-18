@@ -1,5 +1,6 @@
 package com.frostwork.bgenhance.residency.codec;
 
+import com.frostwork.bgenhance.residency.model.AppInstanceKey;
 import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
 import com.frostwork.bgenhance.residency.model.FreezePolicy;
 import com.frostwork.bgenhance.residency.model.RefreezePolicy;
@@ -42,19 +43,20 @@ public final class ResidencyPolicyValidator {
         }
 
         List<AppResidencyPolicy> canonicalRules = new ArrayList<>(document.rules().size());
-        Set<String> packages = new HashSet<>();
+        Set<AppInstanceKey> identities = new HashSet<>();
         for (int index = 0; index < document.rules().size(); index++) {
             AppResidencyPolicy rule = document.rules().get(index);
             if (rule == null) {
                 throw invalid("rules[" + index + "] must not be null");
             }
             validateRule(rule, index);
-            if (!packages.add(rule.packageName())) {
-                throw invalid("Duplicate packageName: " + rule.packageName());
+            if (!identities.add(rule.instanceKey())) {
+                throw invalid("Duplicate packageName and userId: " + rule.packageName()
+                        + " userId " + rule.userId());
             }
             canonicalRules.add(rule);
         }
-        canonicalRules.sort(Comparator.comparing(AppResidencyPolicy::packageName));
+        canonicalRules.sort(Comparator.comparing(AppResidencyPolicy::instanceKey));
 
         return new ResidencyPolicyDocument(
                 document.schemaVersion(),
@@ -81,6 +83,9 @@ public final class ResidencyPolicyValidator {
         if (packageName.length() > MAX_PACKAGE_NAME_LENGTH
                 || !PACKAGE_NAME.matcher(packageName).matches()) {
             throw invalid(prefix + ".packageName is not a valid Android package name");
+        }
+        if (!AppInstanceKey.isRepresentableUserId(rule.userId())) {
+            throw invalid(prefix + ".userId cannot form a non-negative UID");
         }
 
         FreezePolicy freeze = rule.freezePolicy();

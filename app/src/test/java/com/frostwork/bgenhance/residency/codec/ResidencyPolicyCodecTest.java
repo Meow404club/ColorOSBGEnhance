@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import com.frostwork.bgenhance.residency.model.AppInstanceKey;
 import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
 import com.frostwork.bgenhance.residency.model.FreezePolicy;
 import com.frostwork.bgenhance.residency.model.KillPolicy;
@@ -30,7 +31,7 @@ public final class ResidencyPolicyCodecTest {
 
     @Test
     public void emptyDocumentHasStableCanonicalEncoding() {
-        String expected = "{\"schemaVersion\":1,\"policyRevision\":0,\"enabled\":true,"
+        String expected = "{\"schemaVersion\":2,\"policyRevision\":0,\"enabled\":true,"
                 + "\"defaultNewRuleMode\":\"BALANCED\",\"rules\":[]}";
 
         assertEquals(expected, codec.encode(ResidencyPolicyDocument.empty()));
@@ -49,7 +50,7 @@ public final class ResidencyPolicyCodecTest {
     @Test
     public void canonicalEncodingSortsRulesAndEnumSets() {
         ResidencyPolicyDocument unsorted = new ResidencyPolicyDocument(
-                1,
+                ResidencyPolicyDocument.CURRENT_SCHEMA_VERSION,
                 3L,
                 true,
                 ResidencyMode.BALANCED,
@@ -118,7 +119,7 @@ public final class ResidencyPolicyCodecTest {
     public void duplicatePackagesAreRejectedForEncodingAndDecoding() {
         AppResidencyPolicy rule = completePolicy("com.example.duplicate");
         ResidencyPolicyDocument duplicateDocument = new ResidencyPolicyDocument(
-                1, 1L, true, ResidencyMode.BALANCED, List.of(rule, rule));
+                ResidencyPolicyDocument.CURRENT_SCHEMA_VERSION, 1L, true, ResidencyMode.BALANCED, List.of(rule, rule));
         assertThrows(ResidencyPolicyValidationException.class,
                 () -> codec.encode(duplicateDocument));
 
@@ -176,11 +177,11 @@ public final class ResidencyPolicyCodecTest {
     @Test
     public void revisionMustBeANonNegativeSignedInteger() {
         ResidencyPolicyDocument maximum = new ResidencyPolicyDocument(
-                1, Long.MAX_VALUE, true, ResidencyMode.BALANCED, Collections.emptyList());
+                ResidencyPolicyDocument.CURRENT_SCHEMA_VERSION, Long.MAX_VALUE, true, ResidencyMode.BALANCED, Collections.emptyList());
         assertEquals(maximum, codec.decode(codec.encode(maximum)));
 
         ResidencyPolicyDocument negative = new ResidencyPolicyDocument(
-                1, -1L, true, ResidencyMode.BALANCED, Collections.emptyList());
+                ResidencyPolicyDocument.CURRENT_SCHEMA_VERSION, -1L, true, ResidencyMode.BALANCED, Collections.emptyList());
         assertThrows(ResidencyPolicyValidationException.class, () -> codec.encode(negative));
 
         String empty = codec.encode(ResidencyPolicyDocument.empty());
@@ -193,9 +194,14 @@ public final class ResidencyPolicyCodecTest {
 
     @Test
     public void schemaTypesRequiredFieldsAndPackageNamesAreStrict() {
-        ResidencyPolicyDocument unsupported = new ResidencyPolicyDocument(
-                2, 0L, true, ResidencyMode.BALANCED, Collections.emptyList());
-        assertThrows(ResidencyPolicyValidationException.class, () -> codec.encode(unsupported));
+        assertEquals(2, ResidencyPolicyDocument.CURRENT_SCHEMA_VERSION);
+        ResidencyPolicyDocument legacy = new ResidencyPolicyDocument(
+                ResidencyPolicyDocument.LEGACY_SCHEMA_VERSION,
+                0L, true, ResidencyMode.BALANCED, Collections.emptyList());
+        assertThrows(ResidencyPolicyValidationException.class, () -> codec.encode(legacy));
+        ResidencyPolicyDocument future = new ResidencyPolicyDocument(
+                3, 0L, true, ResidencyMode.BALANCED, Collections.emptyList());
+        assertThrows(ResidencyPolicyValidationException.class, () -> codec.encode(future));
         assertThrows(ResidencyPolicyValidationException.class,
                 () -> codec.encode(document(1L, completePolicy("invalid"))));
         assertThrows(ResidencyPolicyValidationException.class,
@@ -217,13 +223,13 @@ public final class ResidencyPolicyCodecTest {
                     ResidencyMode.BALANCED));
         }
         ResidencyPolicyDocument atLimit = new ResidencyPolicyDocument(
-                1, 1L, true, ResidencyMode.BALANCED, rules);
+                ResidencyPolicyDocument.CURRENT_SCHEMA_VERSION, 1L, true, ResidencyMode.BALANCED, rules);
         assertEquals(ResidencyPolicyValidator.MAX_RULES,
                 codec.decode(codec.encode(atLimit)).rules().size());
 
         rules.add(ResidencyPresets.create("com.example.overflow", ResidencyMode.BALANCED));
         ResidencyPolicyDocument overLimit = new ResidencyPolicyDocument(
-                1, 2L, true, ResidencyMode.BALANCED, rules);
+                ResidencyPolicyDocument.CURRENT_SCHEMA_VERSION, 2L, true, ResidencyMode.BALANCED, rules);
         assertThrows(ResidencyPolicyValidationException.class, () -> codec.encode(overLimit));
     }
 
@@ -257,10 +263,93 @@ public final class ResidencyPolicyCodecTest {
                 () -> decoded.rules().get(0).resourcePolicy().keptResources().clear());
     }
 
+    @Test
+    public void samePackageOnDifferentUsersRoundTripsInUserOrder() {
+        AppResidencyPolicy owner = completePolicy("com.example.reader");
+        AppResidencyPolicy clone = withUser(owner, 999);
+        AppResidencyPolicy laterPackage = completePolicy("com.example.zeta");
+        ResidencyPolicyDocument document = new ResidencyPolicyDocument(
+                ResidencyPolicyDocument.CURRENT_SCHEMA_VERSION,
+                4L,
+                true,
+                ResidencyMode.BALANCED,
+                List.of(clone, laterPackage, owner));
+
+        String encoded = codec.encode(document);
+        ResidencyPolicyDocument decoded = codec.decode(encoded);
+
+        assertEquals(encoded, codec.encode(decoded));
+        assertEquals(owner.instanceKey(), decoded.rules().get(0).instanceKey());
+        assertEquals(clone.instanceKey(), decoded.rules().get(1).instanceKey());
+        assertEquals(laterPackage.instanceKey(), decoded.rules().get(2).instanceKey());
+        assertEquals(999, decoded.rules().get(1).userId());
+        assertTrue(encoded.indexOf("\"userId\":0") < encoded.indexOf("\"userId\":999"));
+        assertTrue(encoded.indexOf("com.example.reader") < encoded.indexOf("com.example.zeta"));
+    }
+
+    @Test
+    public void samePackageAndSameUserIsRejected() {
+        AppResidencyPolicy first = withUser(completePolicy("com.example.reader"), 999);
+        AppResidencyPolicy second = withUser(completePolicy("com.example.reader"), 999);
+        ResidencyPolicyDocument duplicate = new ResidencyPolicyDocument(
+                ResidencyPolicyDocument.CURRENT_SCHEMA_VERSION,
+                1L,
+                true,
+                ResidencyMode.BALANCED,
+                List.of(first, second));
+
+        assertThrows(ResidencyPolicyValidationException.class, () -> codec.encode(duplicate));
+    }
+
+    @Test
+    public void schemaOneWithoutUserIdDecodesAsPrimaryUser() {
+        String current = codec.encode(document(4L, completePolicy("com.example.reader")));
+        String legacy = current
+                .replace("\"schemaVersion\":2", "\"schemaVersion\":1")
+                .replace("\"userId\":0,", "");
+
+        ResidencyPolicyDocument decoded = codec.decode(legacy);
+
+        assertEquals(ResidencyPolicyDocument.CURRENT_SCHEMA_VERSION, decoded.schemaVersion());
+        assertEquals(AppResidencyPolicy.PRIMARY_USER_ID, decoded.rules().get(0).userId());
+        assertEquals(current, codec.encode(decoded));
+    }
+
+    @Test
+    public void schemaOneThatAlreadyContainsUserIdIsRejected() {
+        String current = codec.encode(document(4L, completePolicy("com.example.reader")));
+        String mixed = current.replace("\"schemaVersion\":2", "\"schemaVersion\":1");
+
+        assertThrows(ResidencyPolicyCodecException.class, () -> codec.decode(mixed));
+    }
+
+    @Test
+    public void userIdMustBeAnIntegerInsideTheUidRange() {
+        String encoded = codec.encode(document(1L, completePolicy("com.example.reader")));
+
+        assertThrows(ResidencyPolicyCodecException.class,
+                () -> codec.decode(encoded.replace("\"userId\":0", "\"userId\":-1")));
+        assertThrows(ResidencyPolicyCodecException.class,
+                () -> codec.decode(encoded.replace("\"userId\":0", "\"userId\":1.5")));
+        assertThrows(ResidencyPolicyCodecException.class,
+                () -> codec.decode(encoded.replace("\"userId\":0", "\"userId\":null")));
+        assertThrows(ResidencyPolicyCodecException.class,
+                () -> codec.decode(encoded.replace("\"userId\":0,", "")));
+
+        AppResidencyPolicy top = withUser(
+                completePolicy("com.example.reader"), AppInstanceKey.MAX_USER_ID);
+        assertEquals(
+                AppInstanceKey.MAX_USER_ID,
+                codec.decode(codec.encode(document(1L, top))).rules().get(0).userId());
+        assertThrows(IllegalArgumentException.class, () -> withUser(
+                completePolicy("com.example.reader"), AppInstanceKey.MAX_USER_ID + 1));
+    }
+
     private static ResidencyPolicyDocument document(
             long revision, AppResidencyPolicy policy) {
         return new ResidencyPolicyDocument(
-                1, revision, true, ResidencyMode.BALANCED, List.of(policy));
+                ResidencyPolicyDocument.CURRENT_SCHEMA_VERSION,
+                revision, true, ResidencyMode.BALANCED, List.of(policy));
     }
 
     private static AppResidencyPolicy completePolicy(String packageName) {
@@ -313,5 +402,18 @@ public final class ResidencyPolicyCodecTest {
                         delay,
                         delay,
                         delay));
+    }
+
+    private static AppResidencyPolicy withUser(AppResidencyPolicy policy, int userId) {
+        return new AppResidencyPolicy(
+                policy.packageName(),
+                userId,
+                policy.enabled(),
+                policy.mode(),
+                policy.killPolicy(),
+                policy.freezePolicy(),
+                policy.wakePolicy(),
+                policy.resourcePolicy(),
+                policy.refreezePolicy());
     }
 }

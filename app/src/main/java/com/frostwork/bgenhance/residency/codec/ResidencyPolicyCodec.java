@@ -1,5 +1,6 @@
 package com.frostwork.bgenhance.residency.codec;
 
+import com.frostwork.bgenhance.residency.model.AppInstanceKey;
 import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
 import com.frostwork.bgenhance.residency.model.FreezePolicy;
 import com.frostwork.bgenhance.residency.model.KillPolicy;
@@ -75,11 +76,14 @@ public final class ResidencyPolicyCodec {
                 if (!(value instanceof JSONObject)) {
                     throw malformed(path + " must be an object");
                 }
-                rules.add(readRule((JSONObject) value, path));
+                rules.add(readRule((JSONObject) value, path, schemaVersion));
             }
 
+            int decodedSchema = schemaVersion == ResidencyPolicyDocument.LEGACY_SCHEMA_VERSION
+                    ? ResidencyPolicyDocument.CURRENT_SCHEMA_VERSION
+                    : schemaVersion;
             ResidencyPolicyDocument document = new ResidencyPolicyDocument(
-                    schemaVersion, policyRevision, enabled, defaultMode, rules);
+                    decodedSchema, policyRevision, enabled, defaultMode, rules);
             return validator.validate(document);
         } catch (JSONException exception) {
             throw new ResidencyPolicyCodecException("Malformed residency policy JSON", exception);
@@ -111,6 +115,9 @@ public final class ResidencyPolicyCodec {
         json.append('{');
         appendName(json, "packageName");
         appendQuoted(json, rule.packageName());
+        json.append(',');
+        appendName(json, "userId");
+        json.append(rule.userId());
         json.append(',');
         appendName(json, "enabled");
         json.append(rule.enabled()).append(',');
@@ -242,8 +249,21 @@ public final class ResidencyPolicyCodec {
         json.append(JSONObject.quote(value));
     }
 
-    private static AppResidencyPolicy readRule(JSONObject json, String path) {
+    private static AppResidencyPolicy readRule(JSONObject json, String path, int schemaVersion) {
         String packageName = requireString(json, "packageName", path + ".packageName");
+        int userId;
+        if (schemaVersion == ResidencyPolicyDocument.LEGACY_SCHEMA_VERSION) {
+            if (json.has("userId")) {
+                throw malformed(path + ".userId is not valid in schemaVersion "
+                        + ResidencyPolicyDocument.LEGACY_SCHEMA_VERSION);
+            }
+            userId = AppResidencyPolicy.PRIMARY_USER_ID;
+        } else {
+            userId = requireInt(json, "userId", path + ".userId");
+            if (!AppInstanceKey.isRepresentableUserId(userId)) {
+                throw malformed(path + ".userId cannot form a non-negative UID");
+            }
+        }
         boolean enabled = requireBoolean(json, "enabled", path + ".enabled");
         ResidencyMode mode = requireEnum(json, "mode", path + ".mode", ResidencyMode.class);
         KillPolicy kill = readKillPolicy(
@@ -260,7 +280,7 @@ public final class ResidencyPolicyCodec {
                 requireObject(json, "refreezePolicy", path + ".refreezePolicy"),
                 path + ".refreezePolicy");
         return new AppResidencyPolicy(
-                packageName, enabled, mode, kill, freeze, wake, resources, refreeze);
+                packageName, userId, enabled, mode, kill, freeze, wake, resources, refreeze);
     }
 
     private static KillPolicy readKillPolicy(JSONObject json, String path) {

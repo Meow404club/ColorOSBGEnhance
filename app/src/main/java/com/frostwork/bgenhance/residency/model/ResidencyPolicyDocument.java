@@ -5,9 +5,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
-/** Versioned, package-name keyed residency policy document. */
+/** Versioned residency policy document keyed by package name and Android user id. */
 public final class ResidencyPolicyDocument {
-    public static final int CURRENT_SCHEMA_VERSION = 1;
+    public static final int LEGACY_SCHEMA_VERSION = 1;
+    public static final int CURRENT_SCHEMA_VERSION = 2;
 
     private final int schemaVersion;
     private final long policyRevision;
