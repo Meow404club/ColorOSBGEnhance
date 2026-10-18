@@ -8,6 +8,7 @@ import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
 import com.frostwork.bgenhance.diagnostics.RecentBehaviorStats;
 import com.frostwork.bgenhance.diagnostics.RecentBehaviorStatsLoader;
 import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
+import com.frostwork.bgenhance.residency.model.AppInstanceKey;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -68,6 +69,7 @@ public interface DiagnosticsDataSource extends AutoCloseable {
 
     final class ManagedApplication {
         public final String packageName;
+        public final int userId;
         public final String displayName;
         public final boolean manageable;
 
@@ -77,10 +79,19 @@ public interface DiagnosticsDataSource extends AutoCloseable {
 
         public ManagedApplication(
                 String packageName, String displayName, boolean manageable) {
+            this(packageName, 0, displayName, manageable);
+        }
+
+        public ManagedApplication(
+                String packageName, int userId, String displayName, boolean manageable) {
             if (packageName == null || packageName.trim().isEmpty()) {
                 throw new IllegalArgumentException("packageName must not be empty");
             }
+            if (!AppInstanceKey.isRepresentableUserId(userId)) {
+                throw new IllegalArgumentException("invalid userId");
+            }
             this.packageName = packageName.trim();
+            this.userId = userId;
             this.displayName = displayName == null || displayName.trim().isEmpty()
                     ? this.packageName : displayName.trim();
             this.manageable = manageable;
@@ -100,6 +111,7 @@ public interface DiagnosticsDataSource extends AutoCloseable {
 
     final class ResolvedApplication {
         public final String packageName;
+        public final int userId;
         public final String displayName;
         public final boolean manageable;
         public final boolean currentUser;
@@ -116,18 +128,32 @@ public interface DiagnosticsDataSource extends AutoCloseable {
                 boolean manageable,
                 boolean currentUser,
                 boolean identityConfirmed) {
+            this(packageName, 0, displayName, manageable, currentUser, identityConfirmed);
+        }
+
+        public ResolvedApplication(
+                String packageName,
+                int userId,
+                String displayName,
+                boolean manageable,
+                boolean currentUser,
+                boolean identityConfirmed) {
             if (packageName == null || packageName.trim().isEmpty()) {
                 throw new IllegalArgumentException("packageName must not be empty");
             }
+            if (!AppInstanceKey.isRepresentableUserId(userId)) {
+                throw new IllegalArgumentException("invalid userId");
+            }
             this.packageName = packageName.trim();
+            this.userId = userId;
             this.displayName = displayName == null || displayName.trim().isEmpty()
                     ? this.packageName : displayName.trim();
             this.manageable = manageable;
             this.currentUser = currentUser;
             this.identityConfirmed = identityConfirmed;
-            if (manageable && (!currentUser || !identityConfirmed)) {
+            if (manageable && !identityConfirmed) {
                 throw new IllegalArgumentException(
-                        "manageable application identity must be confirmed for the current user");
+                        "manageable application identity must be confirmed");
             }
         }
     }
@@ -150,6 +176,10 @@ public interface DiagnosticsDataSource extends AutoCloseable {
                 for (ResolvedApplication application : applications) {
                     ResolvedApplication value = java.util.Objects.requireNonNull(
                             application, "application");
+                    if (value.identityConfirmed && (uid < 0 || value.userId != uid / AppInstanceKey.PER_USER_RANGE)) {
+                        throw new IllegalArgumentException(
+                                "confirmed application user does not match its UID");
+                    }
                     if (!packageNames.add(value.packageName)) {
                         throw new IllegalArgumentException(
                                 "duplicate application in UID resolution");

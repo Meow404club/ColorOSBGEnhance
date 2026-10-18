@@ -33,7 +33,7 @@ final class DiagnosticsRowsAdapter
     }
 
     interface ApplicationClickListener {
-        void onApplicationClicked(String packageName);
+        void onApplicationClicked(String packageName, int userId);
     }
 
     private final ResidencyAppIconLoader iconLoader;
@@ -107,6 +107,22 @@ final class DiagnosticsRowsAdapter
         iconLoader.close();
     }
 
+    private static boolean canOpenPolicy(DiagnosticsUiMapper.ApplicationRow row) {
+        if (row == null || !row.manageable || row.userId < 0 || row.packageName.isEmpty()) {
+            return false;
+        }
+        if (row.identityApplications.isEmpty()) return true;
+        for (DiagnosticsDataSource.ResolvedApplication application : row.identityApplications) {
+            if (application != null
+                    && application.identityConfirmed
+                    && row.userId == application.userId
+                    && row.packageName.equals(application.packageName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     final class RowViewHolder extends RecyclerView.ViewHolder {
         final ImageView icon;
         private final TextView title;
@@ -145,10 +161,8 @@ final class DiagnosticsRowsAdapter
             if (row.unidentified) {
                 DiagnosticsDataSource.ResolvedApplication application =
                         uniqueIdentityApplication(row);
-                if (application != null
-                        && application.currentUser
-                        && application.identityConfirmed) {
-                    iconLoader.bind(icon, application.packageName);
+                if (application != null && application.identityConfirmed) {
+                    bindPackageIcon(icon, application.packageName, application.userId);
                 } else {
                     icon.setImageResource(uidIdentityIcon(row));
                 }
@@ -161,20 +175,32 @@ final class DiagnosticsRowsAdapter
                 setSubtitle(uidIdentitySubtitle(context, row));
             } else {
                 icon.setVisibility(View.VISIBLE);
-                iconLoader.bind(icon, row.packageName);
+                bindPackageIcon(icon, row.packageName, row.userId);
                 title.setText(row.displayName);
-                if (!row.displayName.equals(row.packageName)) setSubtitle(row.packageName);
+                String userLabel = row.userId >= 0
+                        ? context.getString(R.string.residency_user_id_label, row.userId)
+                        : context.getString(R.string.diagnostics_user_unknown);
+                setSubtitle(row.packageName + "\n" + userLabel);
             }
             metrics.setText(metricsSummary(context, row.totals));
             setDetail(applicationDetail(context, row));
-            if (row.manageable && applicationClickListener != null) {
+            if (canOpenPolicy(row) && applicationClickListener != null) {
                 chevron.setVisibility(View.VISIBLE);
                 itemView.setClickable(true);
                 itemView.setFocusable(true);
                 actionDescriptionRes = R.string.diagnostics_manage_application;
                 itemView.setOnClickListener(view ->
-                        applicationClickListener.onApplicationClicked(row.packageName));
+                        applicationClickListener.onApplicationClicked(
+                                row.packageName, row.userId));
             }
+        }
+
+        private void bindPackageIcon(ImageView imageView, String packageName, int userId) {
+            if (packageName == null || packageName.isEmpty()) {
+                imageView.setImageResource(R.drawable.ic_residency_app);
+                return;
+            }
+            iconLoader.bind(imageView, packageName, userId);
         }
 
         private void bindBehavior(DiagnosticsUiMapper.BehaviorRow row) {

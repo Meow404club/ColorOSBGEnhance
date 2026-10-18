@@ -158,17 +158,20 @@ public final class DiagnosticsActivity extends AppCompatActivity {
         errorState = findViewById(R.id.diagnostics_error_state);
         adapter = new DiagnosticsRowsAdapter(
                 this,
-                packageName -> {
-                    Intent intent = new Intent(this, ResidencyPolicyActivity.class);
-                    intent.putExtra(
-                            ResidencyPolicyActivity.EXTRA_PACKAGE_NAME, packageName);
-                    startActivity(intent);
-                },
+                (packageName, userId) -> startActivity(
+                        createPolicyIntent(this, packageName, userId)),
                 behavior -> startActivity(
                         DiagnosticsBehaviorDetailActivity.createIntent(this, behavior)));
         list.setLayoutManager(new LinearLayoutManager(this));
         list.setAdapter(adapter);
         findViewById(R.id.diagnostics_retry).setOnClickListener(view -> viewModel.refresh());
+    }
+
+    static Intent createPolicyIntent(Context context, String packageName, int userId) {
+        if (userId < 0) throw new IllegalArgumentException("userId must be known");
+        return new Intent(context, ResidencyPolicyActivity.class)
+                .putExtra(ResidencyPolicyActivity.EXTRA_PACKAGE_NAME, packageName)
+                .putExtra(ResidencyPolicyActivity.EXTRA_USER_ID, userId);
     }
 
     private void bindToolbar() {

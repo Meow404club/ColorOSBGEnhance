@@ -300,7 +300,8 @@ final class ManagedCatalogDiagnosticsDataSource implements DiagnosticsDataSource
         for (ResidencyAppItem item : items) {
             if (item == null) continue;
             result.add(new ManagedApplication(
-                    item.packageName(), item.label(), !item.safety().isRestricted()));
+                    item.packageName(), item.userId(), item.label(),
+                    !item.safety().isRestricted()));
         }
         return result;
     }

@@ -3,6 +3,7 @@ package com.frostwork.bgenhance.ui.diagnostics;
 import com.frostwork.bgenhance.BuildConfig;
 import com.frostwork.bgenhance.DiagnosticsResult;
 import com.frostwork.bgenhance.ModuleRuntimeStatus;
+import com.frostwork.bgenhance.residency.model.AppInstanceKey;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
 import com.frostwork.bgenhance.diagnostics.BehaviorDetailStats;
@@ -112,6 +113,7 @@ public final class DiagnosticsUiMapper {
     public static final class ApplicationRow implements UiRow {
         public final String stableId;
         public final String packageName;
+        public final int userId;
         public final String displayName;
         public final boolean unidentified;
         public final boolean manageable;
@@ -125,6 +127,7 @@ public final class DiagnosticsUiMapper {
         private ApplicationRow(
                 String stableIdentity,
                 String packageName,
+                int userId,
                 String displayName,
                 boolean manageable,
                 int identityUid,
@@ -136,9 +139,10 @@ public final class DiagnosticsUiMapper {
             this.unidentified = packageName == null || packageName.isEmpty();
             this.stableId = "application:" + stableIdentity;
             this.packageName = packageName == null ? "" : packageName;
+            this.userId = userId;
             this.displayName = displayName == null || displayName.isEmpty()
                     ? unidentified ? "" : packageName : displayName;
-            this.manageable = !unidentified && manageable;
+            this.manageable = !unidentified && userId >= 0 && manageable;
             this.identityUid = identityUid;
             this.uidKind = Objects.requireNonNull(uidKind, "uidKind");
             this.identityApplications = identityApplications == null
@@ -324,15 +328,14 @@ public final class DiagnosticsUiMapper {
                 }
                 String identity = eventIdentity(
                         packageName, row.uid, resolution, hasResolution);
-                // A UID-scoped row must remain visually distinct even when the source event
-                // happened to carry a package label.  Keeping packageName empty also prevents
-                // the adapter from showing a current-user icon for another user's package.
+                // Ambiguous identities stay UID-scoped even when the event carries a label.
                 String resolvedPackageName = identity.startsWith("@uid:")
                         || "@unidentified".equals(identity) ? "" : packageName;
                 DiagnosticsBehavior behavior = DiagnosticsBehavior.fromWireId(row.behavior);
                 ApplicationAccumulator accumulator = applications.computeIfAbsent(
                         identity, ignored -> new ApplicationAccumulator(
-                                identity, resolvedPackageName, row.uid, resolution));
+                                identity, resolvedPackageName, userIdForUid(row.uid),
+                                row.uid, resolution));
                 accumulator.considerResolution(resolution);
                 accumulator.add(behavior, row);
             }
@@ -340,15 +343,16 @@ public final class DiagnosticsUiMapper {
 
         ArrayList<ApplicationRow> result = new ArrayList<>();
         if (managedApplications != null) {
-            LinkedHashSet<String> addedPackages = new LinkedHashSet<>();
+            LinkedHashSet<String> addedInstances = new LinkedHashSet<>();
             for (DiagnosticsDataSource.ManagedApplication application : managedApplications) {
-                if (application == null || !addedPackages.add(application.packageName)) continue;
-                ApplicationAccumulator accumulator = applications.remove(application.packageName);
+                if (application == null) continue;
+                String identity = new AppInstanceKey(
+                        application.packageName, application.userId).encode();
+                if (!addedInstances.add(identity)) continue;
+                ApplicationAccumulator accumulator = applications.remove(identity);
                 if (accumulator == null) {
                     accumulator = new ApplicationAccumulator(
-                            application.packageName,
-                            application.packageName,
-                            -1,
+                            identity, application.packageName, application.userId, -1,
                             DiagnosticsDataSource.UidResolution.classified(
                                     -1, DiagnosticsDataSource.UidKind.UNKNOWN));
                 }
@@ -405,7 +409,7 @@ public final class DiagnosticsUiMapper {
             DiagnosticsDataSource.UidResolution resolution) {
         return resolution.applications.size() == 1
                 && resolution.applications.get(0).identityConfirmed
-                && resolution.applications.get(0).currentUser;
+                && resolution.applications.get(0).userId == userIdForUid(resolution.uid);
     }
 
     private static String eventIdentity(
@@ -416,20 +420,23 @@ public final class DiagnosticsUiMapper {
         if (packageName.isEmpty()) {
             return uid >= 0 ? "@uid:" + uid : "@unidentified";
         }
-        if (!hasResolution || uid < 0 || resolution == null) return packageName;
-        // A package label from a different user must not be folded into the current user's
-        // policy row.  The complete UID is the only stable identity available to diagnostics.
+        if (uid < 0) return "@legacy:" + packageName;
+        if (!hasResolution || resolution == null) {
+            DiagnosticsDataSource.UidKind kind = DiagnosticsUidResolver.classifyUid(uid);
+            return kind == DiagnosticsDataSource.UidKind.SINGLE_APPLICATION
+                    || kind == DiagnosticsDataSource.UidKind.UNKNOWN
+                    ? AppInstanceKey.fromUid(packageName, uid).encode() : "@uid:" + uid;
+        }
         if (resolution.kind == DiagnosticsDataSource.UidKind.SINGLE_APPLICATION
-                && resolution.applications.size() == 1) {
-            DiagnosticsDataSource.ResolvedApplication application =
-                    resolution.applications.get(0);
-            if (!packageName.equals(application.packageName)
-                    || !application.currentUser || !application.identityConfirmed) {
-                return "@uid:" + uid;
-            }
-            return packageName;
+                && isMergeableSingleApplication(resolution)
+                && packageName.equals(resolution.applications.get(0).packageName)) {
+            return AppInstanceKey.fromUid(packageName, uid).encode();
         }
         return "@uid:" + uid;
+    }
+
+    private static int userIdForUid(int uid) {
+        return uid < 0 ? -1 : uid / AppInstanceKey.PER_USER_RANGE;
     }
 
     public List<BehaviorRow> mapBehaviors(List<DiagnosticsQuery.AggregateRow> rows) {
@@ -646,6 +653,7 @@ public final class DiagnosticsUiMapper {
     private static final class ApplicationAccumulator {
         final String stableIdentity;
         final String packageName;
+        final int userId;
         final int identityUid;
         final TreeSet<Integer> uids = new TreeSet<>();
         final EnumMap<DiagnosticsBehavior, MutableMetrics> behaviors = new EnumMap<>(
@@ -656,11 +664,13 @@ public final class DiagnosticsUiMapper {
         ApplicationAccumulator(
                 String stableIdentity,
                 String packageName,
+                int userId,
                 int identityUid,
                 DiagnosticsDataSource.UidResolution resolution) {
             this.stableIdentity = stableIdentity;
             this.packageName = packageName;
-            this.identityUid = packageName.isEmpty() ? identityUid : -1;
+            this.userId = userId;
+            this.identityUid = identityUid;
             this.resolution = resolution;
             for (DiagnosticsBehavior behavior : DiagnosticsBehavior.all()) {
                 behaviors.put(behavior, new MutableMetrics());
@@ -672,7 +682,8 @@ public final class DiagnosticsUiMapper {
             if (!packageName.isEmpty()
                     && candidate.kind == DiagnosticsDataSource.UidKind.SINGLE_APPLICATION
                     && (candidate.applications.size() != 1
-                    || !packageName.equals(candidate.applications.get(0).packageName))) {
+                    || !packageName.equals(candidate.applications.get(0).packageName)
+                    || userId != candidate.applications.get(0).userId)) {
                 return;
             }
             if (resolution == null
@@ -696,7 +707,8 @@ public final class DiagnosticsUiMapper {
             }
             DiagnosticsDataSource.ResolvedApplication next = candidate.applications.get(0);
             DiagnosticsDataSource.ResolvedApplication previous = current.applications.get(0);
-            return next.packageName.equals(previous.packageName) && !previous.manageable;
+            return next.packageName.equals(previous.packageName)
+                    && next.userId == previous.userId && !previous.manageable;
         }
 
         void add(DiagnosticsBehavior behavior, DiagnosticsQuery.AggregateRow row) {
@@ -721,6 +733,7 @@ public final class DiagnosticsUiMapper {
             return new ApplicationRow(
                     stableIdentity,
                     packageName,
+                    userId,
                     displayName,
                     manageable,
                     identityUid,
@@ -740,7 +753,8 @@ public final class DiagnosticsUiMapper {
             }
             DiagnosticsDataSource.ResolvedApplication application =
                     resolution.applications.get(0);
-            return packageName.isEmpty() || packageName.equals(application.packageName)
+            return packageName.isEmpty() || (packageName.equals(application.packageName)
+                    && userId == application.userId && application.identityConfirmed)
                     ? application : null;
         }
     }

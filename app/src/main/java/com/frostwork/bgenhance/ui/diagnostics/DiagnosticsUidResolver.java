@@ -9,6 +9,9 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Process;
 import android.os.SystemClock;
+import com.frostwork.bgenhance.residency.model.AppInstanceKey;
+import com.frostwork.bgenhance.ui.residency.ResidencyAppCatalog;
+import com.frostwork.bgenhance.ui.residency.ResidencyAppItem;
 import com.frostwork.bgenhance.ui.residency.ResidencyAppSafety;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -23,7 +26,11 @@ import java.util.TreeSet;
 /** Resolves diagnostic UIDs away from Hook and main threads. */
 final class DiagnosticsUidResolver implements AutoCloseable {
     private static final int MAX_CACHE_ENTRIES = 512;
-    private static final int PER_USER_RANGE = 100_000;
+    private static final int PER_USER_RANGE = AppInstanceKey.PER_USER_RANGE;
+
+    interface ApplicationLookup {
+        ResidencyAppItem load(String packageName, int userId);
+    }
     private static final int FIRST_APPLICATION_UID = 10_000;
     private static final int LAST_APPLICATION_UID = 19_999;
     private static final int FIRST_SDK_SANDBOX_UID = 20_000;
@@ -39,6 +46,8 @@ final class DiagnosticsUidResolver implements AutoCloseable {
     private final Object lock = new Object();
     private final Context context;
     private final PackageManager packageManager;
+    private final ResidencyAppCatalog applicationCatalog;
+    private final ApplicationLookup applicationLookup;
     private final LinkedHashMap<Integer, CacheEntry> cache =
             new LinkedHashMap<>();
     private long cacheEpoch;
@@ -52,10 +61,17 @@ final class DiagnosticsUidResolver implements AutoCloseable {
     private boolean closed;
 
     DiagnosticsUidResolver(Context context) {
+        this(context, null);
+    }
+
+    DiagnosticsUidResolver(Context context, ApplicationLookup applicationLookup) {
         Context requested = Objects.requireNonNull(context, "context");
         Context applicationContext = requested.getApplicationContext();
         this.context = applicationContext == null ? requested : applicationContext;
         this.packageManager = this.context.getPackageManager();
+        this.applicationCatalog = new ResidencyAppCatalog(this.context);
+        this.applicationLookup = applicationLookup != null
+                ? applicationLookup : this::lookupInstalledApplication;
         registerPackageChanges();
     }
 
@@ -192,26 +208,71 @@ final class DiagnosticsUidResolver implements AutoCloseable {
         }
     }
 
+    private ResidencyAppItem lookupInstalledApplication(String packageName, int userId) {
+        if (!AppInstanceKey.isRepresentableUserId(userId)) return null;
+        if (isCurrentProcessUser(userId)) return lookupCurrentUser(packageName, userId);
+        try {
+            return applicationCatalog.loadSingle(packageName, userId);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private ResidencyAppItem lookupCurrentUser(String packageName, int userId) {
+        try {
+            ApplicationInfo info = packageManager.getApplicationInfo(packageName, 0);
+            if (info == null || info.packageName == null || info.uid < 0
+                    || info.uid / PER_USER_RANGE != userId
+                    || !packageName.equals(info.packageName)) {
+                return null;
+            }
+            String label = packageName;
+            CharSequence loaded = info.loadLabel(packageManager);
+            if (loaded != null && loaded.length() > 0) label = loaded.toString();
+            int systemMask = ApplicationInfo.FLAG_SYSTEM
+                    | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP;
+            return new ResidencyAppItem(
+                    label,
+                    info.packageName,
+                    userId,
+                    info.uid,
+                    true,
+                    (info.flags & systemMask) != 0,
+                    false,
+                    ResidencyAppSafety.inspect(context, packageName),
+                    null);
+        } catch (PackageManager.NameNotFoundException | RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private static boolean isCurrentProcessUser(int userId) {
+        int uid = Process.myUid();
+        return uid >= 0 && uid / PER_USER_RANGE == userId;
+    }
+
     private DiagnosticsDataSource.ResolvedApplication resolveApplication(
             String packageName, int requestedUid, boolean allowManagement) {
         String label = packageName;
         boolean currentUser = isCurrentUserUid(requestedUid);
-        boolean localIdentityConfirmed = false;
-        if (currentUser) {
-            try {
-                ApplicationInfo info = packageManager.getApplicationInfo(packageName, 0);
-                localIdentityConfirmed = info.uid == requestedUid;
-                CharSequence loaded = info.loadLabel(packageManager);
-                if (loaded != null && loaded.length() > 0) label = loaded.toString();
-            } catch (PackageManager.NameNotFoundException | RuntimeException ignored) {
-                // The full UID membership is still known; package name remains the safe label.
+        int userId = requestedUid / PER_USER_RANGE;
+        boolean identityConfirmed = false;
+        boolean safeToManage = false;
+        try {
+            ResidencyAppItem item = applicationLookup.load(packageName, userId);
+            identityConfirmed = item != null && item.installed()
+                    && packageName.equals(item.packageName())
+                    && item.userId() == userId && item.uid() == requestedUid;
+            if (identityConfirmed) {
+                label = item.label();
+                safeToManage = !item.safety().isRestricted();
             }
+        } catch (RuntimeException ignored) {
+            // Full UID membership remains available when profile metadata cannot be read.
         }
-        boolean manageable = allowManagement
-                && localIdentityConfirmed
-                && !ResidencyAppSafety.inspect(context, packageName).isRestricted();
         return new DiagnosticsDataSource.ResolvedApplication(
-                packageName, label, manageable, currentUser, localIdentityConfirmed);
+                packageName, userId, label, allowManagement && safeToManage,
+                currentUser, identityConfirmed);
     }
 
     private void clearCache() {

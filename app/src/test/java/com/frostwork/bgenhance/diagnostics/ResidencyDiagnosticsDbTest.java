@@ -497,6 +497,43 @@ public final class ResidencyDiagnosticsDbTest {
     }
 
     @Test
+    public void applicationAggregationPreservesFullUidAndUnknownUserHistory() {
+        database = open(policy(20, 20, 20, 60_000L));
+        long now = System.currentTimeMillis();
+        String packageName = "com.example.reader";
+        int cloneUid = 99_910_123;
+        database.writeBatch(DiagnosticsWriteBatch.builder()
+                .addEvent(event(now, "main", packageName, 10_123, "FREEZE", "blocked"))
+                .addEvent(event(now + 1L, "clone-one", packageName, cloneUid,
+                        "FREEZE", "blocked"))
+                .addEvent(event(now + 2L, "clone-two", packageName, cloneUid,
+                        "FREEZE", "blocked"))
+                .addEvent(event(now + 3L, "legacy", packageName, -1, "FREEZE", "blocked"))
+                .build());
+
+        DiagnosticsQuery.AggregatePage aggregates = database.queryAggregates(
+                DiagnosticsQuery.AggregateQuery.builder()
+                        .dimension(DiagnosticsQuery.AggregateDimension.APPLICATION)
+                        .limit(20).build());
+        java.util.Map<Integer, Long> counts = new java.util.HashMap<>();
+        for (DiagnosticsQuery.AggregateRow row : aggregates.items) {
+            assertEquals(packageName, row.packageName);
+            counts.put(row.uid, row.eventCount);
+        }
+
+        assertEquals(3, aggregates.items.size());
+        assertEquals(Long.valueOf(1L), counts.get(10_123));
+        assertEquals(Long.valueOf(2L), counts.get(cloneUid));
+        assertEquals(Long.valueOf(1L), counts.get(-1));
+        DiagnosticsQuery.EventPage cloneEvents = database.queryEvents(
+                DiagnosticsQuery.EventFilter.builder().uid(cloneUid).build());
+        assertEquals(2, cloneEvents.items.size());
+        for (NormalizedDiagnosticsEvent event : cloneEvents.items) {
+            assertEquals(cloneUid, event.uid);
+        }
+    }
+
+    @Test
     public void aggregationSupportsApplicationBehaviorHookAndDecisionDimensions() {
         database = open(policy(20, 20, 20, 60_000L));
         long now = System.currentTimeMillis();

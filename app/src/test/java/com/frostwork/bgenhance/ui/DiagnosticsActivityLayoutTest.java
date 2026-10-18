@@ -36,6 +36,7 @@ import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
 import com.frostwork.bgenhance.diagnostics.NormalizedDiagnosticsEvent;
 import com.frostwork.bgenhance.diagnostics.ResidencyDiagnosticsBackend;
 import com.frostwork.bgenhance.ui.diagnostics.DiagnosticsViewModel;
+import com.frostwork.bgenhance.ui.residency.ResidencyPolicyActivity;
 import com.frostwork.bgenhance.ui.diagnostics.FullDiagnosticsExportViewModel;
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.appbar.AppBarLayout;

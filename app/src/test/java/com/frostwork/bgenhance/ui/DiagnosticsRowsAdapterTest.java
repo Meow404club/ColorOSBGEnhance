@@ -54,7 +54,8 @@ public final class DiagnosticsRowsAdapterTest {
                 .get(0);
         AtomicReference<String> clicked = new AtomicReference<>();
         DiagnosticsRowsAdapter adapter =
-                new DiagnosticsRowsAdapter(context, clicked::set, null);
+                new DiagnosticsRowsAdapter(context,
+                        (packageName, userId) -> clicked.set(packageName), null);
         try {
             DiagnosticsRowsAdapter.RowViewHolder holder = holder(adapter, context);
             holder.bind(row);
@@ -121,7 +122,8 @@ public final class DiagnosticsRowsAdapterTest {
                 .get(0);
         AtomicReference<String> clicked = new AtomicReference<>();
         DiagnosticsRowsAdapter adapter =
-                new DiagnosticsRowsAdapter(context, clicked::set, null);
+                new DiagnosticsRowsAdapter(context,
+                        (packageName, userId) -> clicked.set(packageName), null);
         try {
             DiagnosticsRowsAdapter.RowViewHolder holder = holder(adapter, context);
             holder.bind(row);
@@ -134,6 +136,56 @@ public final class DiagnosticsRowsAdapterTest {
             assertEquals(1, occurrences(
                     holder.itemView.getContentDescription().toString(),
                     context.getString(R.string.diagnostics_manage_application)));
+        } finally {
+            adapter.close();
+        }
+    }
+
+    @Test
+    public void cloneApplicationActionKeepsItsUserId() {
+        Context context = themedContext();
+        int cloneUid = 99_910_321;
+        DiagnosticsUiMapper.ApplicationRow row = new DiagnosticsUiMapper()
+                .mapApplications(
+                        Collections.singletonList(
+                                new DiagnosticsDataSource.ManagedApplication(
+                                        PACKAGE, 999, "Reader Clone", true)),
+                        Collections.singletonList(aggregate(PACKAGE, cloneUid, 2L)))
+                .get(0);
+        AtomicReference<String> clicked = new AtomicReference<>();
+        DiagnosticsRowsAdapter adapter = new DiagnosticsRowsAdapter(context,
+                (packageName, userId) -> clicked.set(packageName + ":" + userId), null);
+        try {
+            DiagnosticsRowsAdapter.RowViewHolder holder = holder(adapter, context);
+            holder.bind(row);
+
+            assertTrue(text(holder, R.id.diagnostics_row_subtitle).contains(
+                    context.getString(R.string.residency_user_id_label, 999)));
+            assertTrue(holder.itemView.performClick());
+            assertEquals(PACKAGE + ":999", clicked.get());
+        } finally {
+            adapter.close();
+        }
+    }
+
+    @Test
+    public void legacyNamedApplicationShowsUnknownUserWithoutPolicyAction() {
+        Context context = themedContext();
+        DiagnosticsUiMapper.ApplicationRow row = new DiagnosticsUiMapper()
+                .mapApplications(Collections.singletonList(aggregate(PACKAGE, -1, 2L)))
+                .get(0);
+        DiagnosticsRowsAdapter adapter = new DiagnosticsRowsAdapter(context,
+                (packageName, userId) -> { throw new AssertionError("legacy policy action"); },
+                null);
+        try {
+            DiagnosticsRowsAdapter.RowViewHolder holder = holder(adapter, context);
+            holder.bind(row);
+
+            assertTrue(text(holder, R.id.diagnostics_row_subtitle).contains(
+                    context.getString(R.string.diagnostics_user_unknown)));
+            assertFalse(holder.itemView.isClickable());
+            assertEquals(View.GONE, holder.itemView.findViewById(
+                    R.id.diagnostics_row_chevron).getVisibility());
         } finally {
             adapter.close();
         }

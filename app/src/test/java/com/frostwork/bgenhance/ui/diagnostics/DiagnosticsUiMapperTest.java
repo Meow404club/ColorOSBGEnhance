@@ -9,6 +9,7 @@ import com.frostwork.bgenhance.DiagnosticsResult;
 import com.frostwork.bgenhance.DiagnosticsTargetIds;
 import com.frostwork.bgenhance.HookTargetIds;
 import com.frostwork.bgenhance.ModuleRuntimeStatus;
+import com.frostwork.bgenhance.residency.model.AppInstanceKey;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsHookState;
 import com.frostwork.bgenhance.diagnostics.DiagnosticsQuery;
 import com.frostwork.bgenhance.diagnostics.RecentBehaviorStats;
@@ -23,12 +24,12 @@ public final class DiagnosticsUiMapperTest {
     private final DiagnosticsUiMapper mapper = new DiagnosticsUiMapper();
 
     @Test
-    public void applicationRowsMergeUidsAndPreserveLongCounters() {
+    public void applicationRowsPreserveLongCountersWithinOneUser() {
         DiagnosticsQuery.AggregateRow passed = row(
                 "com.example.reader", 10_101, "KILL", DiagnosticsResult.PASSED,
                 3_000_000_000L, 0L, 0L, 3_000_000_000L, 10L);
         DiagnosticsQuery.AggregateRow blocked = row(
-                "com.example.reader", 110_101, "FREEZE", DiagnosticsResult.BLOCKED,
+                "com.example.reader", 10_101, "FREEZE", DiagnosticsResult.BLOCKED,
                 3_000_000_001L, 3_000_000_001L, 0L, 3_000_000_001L, 20L);
 
         List<DiagnosticsUiMapper.ApplicationRow> rows = mapper.mapApplications(
@@ -40,13 +41,113 @@ public final class DiagnosticsUiMapperTest {
         DiagnosticsUiMapper.ApplicationRow item = rows.get(0);
         assertEquals("application:com.example.reader", item.stableId);
         assertEquals("Reader", item.displayName);
-        assertEquals(Arrays.asList(10_101, 110_101), item.observedUids);
+        assertEquals(Collections.singletonList(10_101), item.observedUids);
+        assertEquals(0, item.userId);
         assertEquals(6_000_000_001L, item.totals.observed);
         assertEquals(3_000_000_001L, item.totals.blocked);
         assertEquals(3_000_000_000L, item.totals.passed);
         assertEquals(6_000_000_001L, item.totals.rawHits);
         assertEquals(3_000_000_001L,
                 item.behavior(DiagnosticsBehavior.FREEZE).observed);
+    }
+
+    @Test
+    public void samePackageKeepsIndependentUserRowsWithoutUidResolution() {
+        String packageName = "com.example.reader";
+        int cloneUid = 99_910_101;
+        List<DiagnosticsUiMapper.ApplicationRow> rows = mapper.mapApplications(
+                Arrays.asList(
+                        new DiagnosticsDataSource.ManagedApplication(packageName, "Reader"),
+                        new DiagnosticsDataSource.ManagedApplication(
+                                packageName, 999, "Reader Clone", true)),
+                Arrays.asList(
+                        row(packageName, 10_101, "KILL", DiagnosticsResult.BLOCKED,
+                                2L, 2L, 0L, 2L, 10L),
+                        row(packageName, cloneUid, "WAKE", DiagnosticsResult.PASSED,
+                                5L, 0L, 0L, 5L, 20L)));
+
+        assertEquals(2, rows.size());
+        assertEquals(0, rows.get(0).userId);
+        assertEquals(2L, rows.get(0).totals.observed);
+        assertEquals(999, rows.get(1).userId);
+        assertEquals(5L, rows.get(1).totals.observed);
+        assertEquals("application:" + AppInstanceKey.fromUid(packageName, cloneUid).encode(),
+                rows.get(1).stableId);
+        assertEquals(Collections.singletonList(cloneUid), rows.get(1).observedUids);
+        assertTrue(rows.get(1).manageable);
+    }
+
+    @Test
+    public void legacyNamedEventsRemainSeparateFromKnownUsers() {
+        String packageName = "com.example.reader";
+        List<DiagnosticsUiMapper.ApplicationRow> rows = mapper.mapApplications(
+                Collections.singletonList(new DiagnosticsDataSource.ManagedApplication(
+                        packageName, "Reader")),
+                Arrays.asList(
+                        row(packageName, -1, "KILL", DiagnosticsResult.BLOCKED,
+                                7L, 7L, 0L, 7L, 10L),
+                        row(packageName, 10_101, "WAKE", DiagnosticsResult.PASSED,
+                                2L, 0L, 0L, 2L, 20L)));
+
+        assertEquals(2, rows.size());
+        assertEquals(2L, rows.get(0).totals.observed);
+        assertEquals("application:@legacy:" + packageName, rows.get(1).stableId);
+        assertEquals(packageName, rows.get(1).packageName);
+        assertEquals(-1, rows.get(1).userId);
+        assertEquals(7L, rows.get(1).totals.observed);
+        assertFalse(rows.get(1).manageable);
+    }
+
+    @Test
+    public void verifiedOtherUserUidOnlyEventsMergeIntoTheirOwnPolicyRow() {
+        String packageName = "com.example.reader";
+        int cloneUid = 99_910_101;
+        DiagnosticsDataSource.UidResolutionPage resolutions =
+                DiagnosticsDataSource.UidResolutionPage.success(Map.of(
+                        cloneUid,
+                        DiagnosticsDataSource.UidResolution.single(cloneUid,
+                                new DiagnosticsDataSource.ResolvedApplication(
+                                        packageName, 999, "Reader Clone", true, false, true))));
+        List<DiagnosticsUiMapper.ApplicationRow> rows = mapper.mapApplications(
+                Arrays.asList(
+                        new DiagnosticsDataSource.ManagedApplication(packageName, "Reader"),
+                        new DiagnosticsDataSource.ManagedApplication(
+                                packageName, 999, "Reader Clone", true)),
+                resolutions,
+                Arrays.asList(
+                        row("", cloneUid, "WAKE", DiagnosticsResult.PASSED,
+                                3L, 0L, 0L, 3L, 10L),
+                        row(packageName, cloneUid, "KILL", DiagnosticsResult.BLOCKED,
+                                2L, 2L, 0L, 2L, 20L)));
+
+        assertEquals(2, rows.size());
+        assertEquals(0L, rows.get(0).totals.observed);
+        assertEquals(999, rows.get(1).userId);
+        assertEquals(5L, rows.get(1).totals.observed);
+        assertTrue(rows.get(1).manageable);
+        assertFalse(rows.get(1).unidentified);
+    }
+
+    @Test
+    public void uidResolutionFailureKeepsFullUidIdentity() {
+        int cloneUid = 99_910_101;
+        List<DiagnosticsUiMapper.ApplicationRow> rows = mapper.mapApplications(
+                DiagnosticsDataSource.UidResolutionPage.success(Map.of(
+                        cloneUid, DiagnosticsDataSource.UidResolution.classified(
+                                cloneUid, DiagnosticsDataSource.UidKind.RESOLUTION_FAILED))),
+                Collections.singletonList(row("com.example.reader", cloneUid,
+                        "WAKE", DiagnosticsResult.PASSED, 3L, 0L, 0L, 3L, 10L)));
+
+        assertEquals(1, rows.size());
+        assertUidRow(rows.get(0), cloneUid, DiagnosticsDataSource.UidKind.RESOLUTION_FAILED);
+        assertEquals(999, rows.get(0).userId);
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void confirmedApplicationCannotClaimAnotherUserUid() {
+        DiagnosticsDataSource.UidResolution.single(110_101,
+                new DiagnosticsDataSource.ResolvedApplication(
+                        "com.example.reader", "Reader", true));
     }
 
     @Test
@@ -544,6 +645,32 @@ public final class DiagnosticsUiMapperTest {
                 .configRevision(revision)
                 .bootId("current_boot")
                 .build();
+    }
+
+    @Test
+    public void unconfirmedOtherUserStaysOffThePrimaryPolicyRow() {
+        String packageName = "com.example.reader";
+        int otherUid = 110_101;
+        List<DiagnosticsUiMapper.ApplicationRow> rows = mapper.mapApplications(
+                Collections.singletonList(new DiagnosticsDataSource.ManagedApplication(
+                        packageName, "Reader")),
+                DiagnosticsDataSource.UidResolutionPage.success(Map.of(
+                        otherUid,
+                        DiagnosticsDataSource.UidResolution.single(
+                                otherUid,
+                                new DiagnosticsDataSource.ResolvedApplication(
+                                        packageName, "Reader", false, false, false)))),
+                Collections.singletonList(row(
+                        packageName, otherUid, "WAKE", DiagnosticsResult.PASSED,
+                        4L, 0L, 0L, 4L, 10L)));
+
+        assertEquals(2, rows.size());
+        assertEquals(0, rows.get(0).userId);
+        assertEquals(0L, rows.get(0).totals.observed);
+        assertTrue(rows.get(0).manageable);
+        assertUidRow(rows.get(1), otherUid, DiagnosticsDataSource.UidKind.SINGLE_APPLICATION);
+        assertEquals(1, rows.get(1).userId);
+        assertEquals(4L, rows.get(1).totals.observed);
     }
 
     private static DiagnosticsQuery.AggregateRow row(

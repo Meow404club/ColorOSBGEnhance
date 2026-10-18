@@ -21,6 +21,8 @@ import com.frostwork.bgenhance.residency.model.WakeSource;
 import com.frostwork.bgenhance.residency.runtime.ResidencyIdentityIndex;
 import com.frostwork.bgenhance.residency.runtime.ResidencyTarget;
 import com.frostwork.bgenhance.residency.runtime.RuntimeConfigSnapshot;
+import com.frostwork.bgenhance.ui.residency.ResidencyAppItem;
+import com.frostwork.bgenhance.ui.residency.ResidencyAppSafety;
 import java.util.Collections;
 import java.time.Duration;
 import java.util.EnumSet;
@@ -56,6 +58,8 @@ public final class DiagnosticsUidResolverTest {
             assertEquals(1, resolution.applications.size());
             assertEquals(PACKAGE, resolution.applications.get(0).packageName);
             assertEquals("Reader", resolution.applications.get(0).displayName);
+            assertEquals(0, resolution.applications.get(0).userId);
+            assertTrue(resolution.applications.get(0).identityConfirmed);
             assertTrue(resolution.applications.get(0).manageable);
         } finally {
             resolver.close();
@@ -94,7 +98,59 @@ public final class DiagnosticsUidResolverTest {
             assertEquals(DiagnosticsDataSource.UidKind.SINGLE_APPLICATION,
                     resolution.kind);
             assertEquals(PACKAGE, resolution.applications.get(0).packageName);
+            assertEquals(1, resolution.applications.get(0).userId);
+            assertFalse(resolution.applications.get(0).identityConfirmed);
             assertFalse(resolution.applications.get(0).manageable);
+        } finally {
+            resolver.close();
+        }
+    }
+
+    @Test
+    public void verifiedCloneIdentityCanManageItsOwnUserPolicy() {
+        Application application = RuntimeEnvironment.getApplication();
+        int cloneUid = 99_900_000 + UID;
+        install(application, PACKAGE, "Reader Clone", cloneUid);
+        DiagnosticsUidResolver resolver = new DiagnosticsUidResolver(application,
+                (packageName, userId) -> {
+                    assertEquals(PACKAGE, packageName);
+                    assertEquals(999, userId);
+                    return new ResidencyAppItem("Reader Clone", PACKAGE, 999, cloneUid,
+                            true, false, true, ResidencyAppSafety.Result.allowed(), null);
+                });
+        try {
+            DiagnosticsDataSource.UidResolution resolution =
+                    resolver.resolve(Set.of(cloneUid)).items.get(cloneUid);
+            DiagnosticsDataSource.ResolvedApplication resolved = resolution.applications.get(0);
+
+            assertEquals(DiagnosticsDataSource.UidKind.SINGLE_APPLICATION, resolution.kind);
+            assertEquals(999, resolved.userId);
+            assertTrue(resolved.identityConfirmed);
+            assertTrue(resolved.manageable);
+            assertFalse(resolved.currentUser);
+            assertEquals("Reader Clone", resolved.displayName);
+        } finally {
+            resolver.close();
+        }
+    }
+
+    @Test
+    public void cloneIdentityRejectsMetadataForAnotherFullUid() {
+        Application application = RuntimeEnvironment.getApplication();
+        int cloneUid = 99_900_000 + UID;
+        install(application, PACKAGE, "Reader Clone", cloneUid);
+        DiagnosticsUidResolver resolver = new DiagnosticsUidResolver(application,
+                (packageName, userId) -> new ResidencyAppItem(
+                        "Reader", PACKAGE, 0, UID, true, false, true,
+                        ResidencyAppSafety.Result.allowed(), null));
+        try {
+            DiagnosticsDataSource.ResolvedApplication resolved =
+                    resolver.resolve(Set.of(cloneUid)).items.get(cloneUid).applications.get(0);
+
+            assertEquals(999, resolved.userId);
+            assertFalse(resolved.identityConfirmed);
+            assertFalse(resolved.manageable);
+            assertEquals(PACKAGE, resolved.displayName);
         } finally {
             resolver.close();
         }
