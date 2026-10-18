@@ -7,6 +7,6 @@ public final class ResidencyPackageChangeFilter {
     public static boolean shouldInvalidate(
             String packageName, RuntimeConfigSnapshot snapshot) {
         if (snapshot == null) return true;
-        return !snapshot.policiesByPackage().isEmpty();
+        return !snapshot.policiesByInstance().isEmpty();
     }
 }

@@ -144,7 +144,7 @@ public final class ResidencyIdentityIndexBuilderTest {
     }
 
     @Test
-    public void untrustedPackageViewBuildsOnlyPackageScopedIdentities() {
+    public void incompleteEnumerationStillAppliesTheVerifiedInstance() {
         FakePackageUidSource source = new FakePackageUidSource();
         source.completeUidEnumeration = false;
         source.uids.put(FIRST, FIRST_UID);
@@ -154,13 +154,90 @@ public final class ResidencyIdentityIndexBuilderTest {
                 snapshot(58L, FIRST));
 
         assertEquals(
-                IdentityResolutionStatus.EXACT_PACKAGE,
+                IdentityResolutionStatus.UNKNOWN,
                 index.resolve(ResidencyTarget.forPackage(FIRST)).status());
         assertEquals(
-                IdentityResolutionStatus.UNKNOWN,
-                index.resolveUidScoped(
-                        new ResidencyTarget(FIRST, FIRST_UID, -1)).status());
+                IdentityResolutionStatus.EXACT_PACKAGE,
+                index.resolve(new ResidencyTarget(FIRST, FIRST_UID, -1)).status());
+        assertEquals(
+                IdentityResolutionStatus.UID_SINGLE_RULE,
+                index.resolve(ResidencyTarget.forUid(FIRST_UID)).status());
         assertTrue(source.sharedUidQueries.isEmpty());
+    }
+
+    @Test
+    public void samePackageUsersMatchTheirOwnFullUids() {
+        FakePackageUidSource source = new FakePackageUidSource();
+        source.completeUidEnumeration = false;
+        source.uids.put(FIRST, FIRST_UID);
+        int cloneUid = 999 * 100_000 + FIRST_UID;
+        source.userScopedUids.put(FIRST + "#999", cloneUid);
+        AppResidencyPolicy primary = ResidencyPresets.create(FIRST, ResidencyMode.BALANCED);
+        AppResidencyPolicy clone = new AppResidencyPolicy(
+                FIRST,
+                999,
+                true,
+                ResidencyMode.ACTIVE,
+                primary.killPolicy(),
+                primary.freezePolicy(),
+                primary.wakePolicy(),
+                primary.resourcePolicy(),
+                primary.refreezePolicy());
+        Map<String, AppResidencyPolicy> encoded = new LinkedHashMap<>();
+        encoded.put(primary.instanceKey().encode(), primary);
+        encoded.put(clone.instanceKey().encode(), clone);
+
+        ResidencyIdentityIndex index = new ResidencyIdentityIndexBuilder(source).build(
+                RuntimeConfigSnapshot.available(1L, true, true, false, 60L, encoded));
+
+        ResidencyIdentityResolution primaryHit =
+                index.resolve(new ResidencyTarget(FIRST, FIRST_UID, -1));
+        ResidencyIdentityResolution cloneHit =
+                index.resolve(new ResidencyTarget(FIRST, cloneUid, -1));
+        assertEquals(IdentityResolutionStatus.EXACT_PACKAGE, primaryHit.status());
+        assertEquals(0, primaryHit.policy().get().userId());
+        assertEquals(IdentityResolutionStatus.EXACT_PACKAGE, cloneHit.status());
+        assertEquals(999, cloneHit.policy().get().userId());
+        assertEquals(
+                IdentityResolutionStatus.UID_SINGLE_RULE,
+                index.resolve(ResidencyTarget.forUid(cloneUid)).status());
+        assertEquals(
+                IdentityResolutionStatus.UNKNOWN,
+                index.resolve(ResidencyTarget.forPackage(FIRST)).status());
+    }
+
+    @Test
+    public void cloneOnlyRuleDoesNotApplyToThePrimaryUid() {
+        FakePackageUidSource source = new FakePackageUidSource();
+        source.completeUidEnumeration = false;
+        int cloneUid = 999 * 100_000 + FIRST_UID;
+        source.userScopedUids.put(FIRST + "#999", cloneUid);
+        AppResidencyPolicy base = ResidencyPresets.create(FIRST, ResidencyMode.ACTIVE);
+        AppResidencyPolicy clone = new AppResidencyPolicy(
+                FIRST,
+                999,
+                true,
+                ResidencyMode.ACTIVE,
+                base.killPolicy(),
+                base.freezePolicy(),
+                base.wakePolicy(),
+                base.resourcePolicy(),
+                base.refreezePolicy());
+        Map<String, AppResidencyPolicy> encoded = new LinkedHashMap<>();
+        encoded.put(clone.instanceKey().encode(), clone);
+
+        ResidencyIdentityIndex index = new ResidencyIdentityIndexBuilder(source).build(
+                RuntimeConfigSnapshot.available(1L, true, true, false, 61L, encoded));
+
+        assertEquals(
+                IdentityResolutionStatus.UNMANAGED,
+                index.resolve(new ResidencyTarget(FIRST, FIRST_UID, -1)).status());
+        assertEquals(
+                IdentityResolutionStatus.EXACT_PACKAGE,
+                index.resolve(new ResidencyTarget(FIRST, cloneUid, -1)).status());
+        assertEquals(
+                IdentityResolutionStatus.UNKNOWN,
+                index.resolve(ResidencyTarget.forUid(FIRST_UID)).status());
     }
 
     private static RuntimeConfigSnapshot snapshot(long policyRevision, String... packageNames) {
@@ -175,7 +252,8 @@ public final class ResidencyIdentityIndexBuilderTest {
     }
 
     private static final class FakePackageUidSource implements PackageUidSource {
-        final Map<String, Integer> uids = new LinkedHashMap<>();
+        final Map<String, Integer> uids = new LinkedHashMap();
+        final Map<String, Integer> userScopedUids = new LinkedHashMap<>();
         final Map<Integer, Set<String>> packagesByUid = new LinkedHashMap<>();
         final List<String> queries = new ArrayList<>();
         final List<Integer> sharedUidQueries = new ArrayList<>();
@@ -195,6 +273,13 @@ public final class ResidencyIdentityIndexBuilderTest {
             queries.add(packageName);
             if (packageName.equals(failurePackage)) throw failure;
             Integer uid = uids.get(packageName);
+            return uid == null ? OptionalInt.empty() : OptionalInt.of(uid);
+        }
+
+        @Override
+        public OptionalInt findUid(String packageName, int userId) {
+            if (userId == 0) return findUid(packageName);
+            Integer uid = userScopedUids.get(packageName + "#" + userId);
             return uid == null ? OptionalInt.empty() : OptionalInt.of(uid);
         }
 

@@ -361,8 +361,9 @@ public final class ResidencyIdentityIndexTest {
         ResidencyIdentityResolution uidResult = index.resolve(
                 ResidencyTarget.forUid(USER_TEN_FIRST_UID));
 
-        assertEquals(IdentityResolutionStatus.EXACT_PACKAGE, packageResult.status());
+        assertEquals(IdentityResolutionStatus.UNMANAGED, packageResult.status());
         assertEquals(USER_TEN_FIRST_UID, packageResult.target().uid());
+        assertFalse(packageResult.hasManagedPolicy());
         assertEquals(IdentityResolutionStatus.UNKNOWN, uidResult.status());
         assertEquals(Integer.valueOf(FIRST_UID), index.packageAppIds().get(FIRST));
 

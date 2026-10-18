@@ -29,6 +29,14 @@ public final class HookResidencyRuntimeSourceContractTest {
         assertTrue(source.contains("packageManager == sPackageManager"
                 + " && sPackageUidSource != null"));
         assertFalse(source.contains("if (packageManager == sPackageManager) return;"));
+        assertTrue(source.contains("registerReceiverAsUser"));
+        assertTrue(source.contains("getField(\"ALL\")"));
+        assertTrue(source.contains("android.intent.action.USER_ADDED"));
+        assertTrue(source.contains("android.intent.action.USER_REMOVED"));
+        assertFalse(source.contains("UserHandle.ALL"));
+        assertFalse(source.contains("Intent.ACTION_USER_ADDED"));
+        assertFalse(source.contains("Intent.ACTION_USER_REMOVED"));
+        assertFalse(source.contains("context.registerReceiver("));
     }
 
     private static String source(String relativePath) throws IOException {

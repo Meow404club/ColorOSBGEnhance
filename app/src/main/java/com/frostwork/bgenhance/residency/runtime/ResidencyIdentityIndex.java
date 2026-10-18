@@ -1,5 +1,6 @@
 package com.frostwork.bgenhance.residency.runtime;
 
+import com.frostwork.bgenhance.residency.model.AppInstanceKey;
 import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
 import com.frostwork.bgenhance.residency.model.FreezePolicy;
 import com.frostwork.bgenhance.residency.model.FreezeSource;
@@ -26,19 +27,22 @@ public final class ResidencyIdentityIndex {
     private static final int FIRST_APPLICATION_UID = 10_000;
 
     private final long policyRevision;
-    private final Map<String, AppResidencyPolicy> policiesByPackage;
+    private final Map<AppInstanceKey, AppResidencyPolicy> policiesByInstance;
+    private final Map<AppInstanceKey, Integer> instanceUids;
     private final Map<String, Integer> packageAppIds;
     private final Map<Integer, Set<String>> appIdPackages;
     private final Map<Integer, Set<String>> uidPackages;
 
     private ResidencyIdentityIndex(
             long policyRevision,
-            Map<String, AppResidencyPolicy> policiesByPackage,
+            Map<AppInstanceKey, AppResidencyPolicy> policiesByInstance,
+            Map<AppInstanceKey, Integer> instanceUids,
             Map<String, Integer> packageAppIds,
             Map<Integer, Set<String>> appIdPackages,
             Map<Integer, Set<String>> uidPackages) {
         this.policyRevision = policyRevision;
-        this.policiesByPackage = policiesByPackage;
+        this.policiesByInstance = policiesByInstance;
+        this.instanceUids = instanceUids;
         this.packageAppIds = packageAppIds;
         this.appIdPackages = appIdPackages;
         this.uidPackages = uidPackages;
@@ -48,6 +52,7 @@ public final class ResidencyIdentityIndex {
     public static ResidencyIdentityIndex invalidated() {
         return new ResidencyIdentityIndex(
                 INVALIDATED_POLICY_REVISION,
+                Collections.emptyMap(),
                 Collections.emptyMap(),
                 Collections.emptyMap(),
                 Collections.emptyMap(),
@@ -107,13 +112,40 @@ public final class ResidencyIdentityIndex {
                 immutablePackageSets(mutableAppIdPackages);
         Map<Integer, Set<String>> immutableUidPackages =
                 immutablePackageSets(mutableUidPackages);
+        Map<AppInstanceKey, Integer> instanceUids = verifiedInstanceUids(
+                snapshot.policiesByInstance(), immutableUidPackages);
 
         return new ResidencyIdentityIndex(
                 snapshot.policyRevision(),
-                snapshot.policiesByPackage(),
+                snapshot.policiesByInstance(),
+                Collections.unmodifiableMap(instanceUids),
                 Collections.unmodifiableMap(new LinkedHashMap<>(packageAppIdCopy)),
                 immutableAppIdPackages,
                 immutableUidPackages);
+    }
+
+    /** Binds a policy only to a full UID already supplied for that same user. */
+    private static Map<AppInstanceKey, Integer> verifiedInstanceUids(
+            Map<AppInstanceKey, AppResidencyPolicy> policies,
+            Map<Integer, Set<String>> uidPackages) {
+        Map<AppInstanceKey, Integer> instanceUids = new LinkedHashMap<>();
+        for (AppResidencyPolicy policy : policies.values()) {
+            AppInstanceKey key = policy.instanceKey();
+            Integer matched = null;
+            for (Map.Entry<Integer, Set<String>> entry : uidPackages.entrySet()) {
+                int uid = entry.getKey();
+                if (uid / PER_USER_RANGE != key.userId()) continue;
+                if (!entry.getValue().contains(key.packageName())) continue;
+                if (matched != null && matched.intValue() != uid) {
+                    throw new IllegalStateException(
+                            "multiple UIDs for " + key.packageName()
+                                    + " user " + key.userId());
+                }
+                matched = uid;
+            }
+            if (matched != null) instanceUids.put(key, matched);
+        }
+        return instanceUids;
     }
 
     private static void addPackageIdentity(
@@ -174,30 +206,37 @@ public final class ResidencyIdentityIndex {
                     null);
         }
 
-        if (packageName != null) {
-            AppResidencyPolicy policy = policiesByPackage.get(packageName);
-            if (policy == null) {
-                return resolution(
-                        IdentityResolutionStatus.UNMANAGED,
-                        target,
-                        null,
-                        Collections.singleton(packageName),
-                        null);
-            }
-            return resolution(
-                    IdentityResolutionStatus.EXACT_PACKAGE,
-                    target,
-                    packageName,
-                    Collections.singleton(packageName),
-                    policy);
-        }
-
         if (!target.hasUid()) {
             return resolution(
-                    IdentityResolutionStatus.UNKNOWN,
+                    packageName != null && !hasPolicyForPackage(packageName)
+                            ? IdentityResolutionStatus.UNMANAGED
+                            : IdentityResolutionStatus.UNKNOWN,
                     target,
                     null,
-                    Collections.emptySet(),
+                    packageName == null
+                            ? Collections.emptySet()
+                            : Collections.singleton(packageName),
+                    null);
+        }
+
+        if (packageName != null) {
+            AppResidencyPolicy policy = verifiedPolicy(packageName, target.uid());
+            if (policy != null) {
+                return resolution(
+                        IdentityResolutionStatus.EXACT_PACKAGE,
+                        target,
+                        packageName,
+                        Collections.singleton(packageName),
+                        policy);
+            }
+            AppInstanceKey key = AppInstanceKey.fromUid(packageName, target.uid());
+            return resolution(
+                    policiesByInstance.containsKey(key)
+                            ? IdentityResolutionStatus.UNKNOWN
+                            : IdentityResolutionStatus.UNMANAGED,
+                    target,
+                    null,
+                    Collections.singleton(packageName),
                     null);
         }
 
@@ -251,7 +290,7 @@ public final class ResidencyIdentityIndex {
                     null);
         }
         if (packageName != null) {
-            if (!policiesByPackage.containsKey(packageName)) {
+            if (!hasPolicyForPackage(packageName)) {
                 return resolution(
                         IdentityResolutionStatus.UNMANAGED,
                         target,
@@ -295,7 +334,7 @@ public final class ResidencyIdentityIndex {
 
         List<AppResidencyPolicy> managedPolicies = new ArrayList<>();
         for (String candidate : uidCandidates) {
-            AppResidencyPolicy policy = policiesByPackage.get(candidate);
+            AppResidencyPolicy policy = verifiedPolicy(candidate, target.uid());
             if (policy != null) managedPolicies.add(policy);
         }
         if (managedPolicies.isEmpty()) {
@@ -352,6 +391,22 @@ public final class ResidencyIdentityIndex {
     private Set<String> packagesForUid(int uid) {
         Set<String> packages = uidPackages.get(uid);
         return packages == null ? Collections.emptySet() : packages;
+    }
+
+    private boolean hasPolicyForPackage(String packageName) {
+        for (AppInstanceKey key : policiesByInstance.keySet()) {
+            if (packageName.equals(key.packageName())) return true;
+        }
+        return false;
+    }
+
+    private AppResidencyPolicy verifiedPolicy(String packageName, int uid) {
+        AppInstanceKey key = AppInstanceKey.fromUid(packageName, uid);
+        AppResidencyPolicy policy = policiesByInstance.get(key);
+        if (policy == null) return null;
+        Integer verifiedUid = instanceUids.get(key);
+        if (verifiedUid == null || verifiedUid.intValue() != uid) return null;
+        return policy;
     }
 
     private static ResidencyIdentityResolution resolution(
@@ -561,4 +616,5 @@ public final class ResidencyIdentityIndex {
     public Map<String, Integer> packageAppIds() { return packageAppIds; }
     public Map<Integer, Set<String>> appIdPackages() { return appIdPackages; }
     public Map<Integer, Set<String>> uidPackages() { return uidPackages; }
+    public Map<AppInstanceKey, Integer> instanceUids() { return instanceUids; }
 }

@@ -114,7 +114,7 @@ public final class ResidencyRuntimeController {
         ResidencyIdentityIndex currentIndex = current.identityIndex();
         if (!currentIndex.isInvalidated()
                 && currentIndex.policyRevision() == next.policyRevision()
-                && current.snapshot().policiesByPackage().equals(next.policiesByPackage())) {
+                && current.snapshot().policiesByInstance().equals(next.policiesByInstance())) {
             publish(next, currentIndex, ResidencyRuntimeState.Status.READY, token, "");
             return;
         }
@@ -135,6 +135,22 @@ public final class ResidencyRuntimeController {
         rebuild(snapshot, token);
     }
 
+    /** Drops package identity after all-user registration fails. Decisions stay fail-open. */
+    public synchronized void clearPackageUidSource() {
+        cancelIdentityRetry(true);
+        packageUidSource = null;
+        RuntimeConfigSnapshot snapshot = state.get().snapshot();
+        long token = generation.incrementAndGet();
+        publish(
+                snapshot,
+                ResidencyIdentityIndex.invalidated(),
+                snapshot.available()
+                        ? ResidencyRuntimeState.Status.IDENTITY_SOURCE_UNAVAILABLE
+                        : ResidencyRuntimeState.Status.CONFIG_UNAVAILABLE,
+                token,
+                "all_user_receiver_unavailable");
+    }
+
     public synchronized void invalidateIdentities() {
         cancelIdentityRetry(true);
         RuntimeConfigSnapshot snapshot = state.get().snapshot();
@@ -149,7 +165,7 @@ public final class ResidencyRuntimeController {
     }
 
     private void rebuild(RuntimeConfigSnapshot snapshot, long token) {
-        if (snapshot.policiesByPackage().isEmpty()) {
+        if (snapshot.policiesByInstance().isEmpty()) {
             ResidencyIdentityIndex empty = ResidencyIdentityIndex.build(
                     snapshot, Collections.emptyMap());
             cancelIdentityRetry(true);
@@ -188,6 +204,12 @@ public final class ResidencyRuntimeController {
                 public OptionalInt findUid(String packageName) {
                     throwIfStale(token);
                     return source.findUid(packageName);
+                }
+
+                @Override
+                public OptionalInt findUid(String packageName, int userId) {
+                    throwIfStale(token);
+                    return source.findUid(packageName, userId);
                 }
 
                 @Override

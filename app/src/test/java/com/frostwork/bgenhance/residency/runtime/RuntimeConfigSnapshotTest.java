@@ -28,11 +28,11 @@ public final class RuntimeConfigSnapshotTest {
                 12L, true, true, false, 34L, mutable);
         mutable.clear();
 
-        assertEquals(1, snapshot.policiesByPackage().size());
-        assertSame(policy, snapshot.policyForPackage(PACKAGE));
+        assertEquals(1, snapshot.policiesByInstance().size());
+        assertSame(policy, snapshot.policiesByInstance().get(policy.instanceKey()));
         assertThrows(
                 UnsupportedOperationException.class,
-                () -> snapshot.policiesByPackage().clear());
+                () -> snapshot.policiesByInstance().clear());
     }
 
     @Test
@@ -84,5 +84,30 @@ public final class RuntimeConfigSnapshotTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> RuntimeConfigSnapshot.available(6L, true, false, document));
+    }
+
+    @Test
+    public void keepsEveryUserOfOnePackageVisible() {
+        AppResidencyPolicy primary = ResidencyPresets.create(PACKAGE, ResidencyMode.BALANCED);
+        AppResidencyPolicy clone = new AppResidencyPolicy(
+                PACKAGE,
+                999,
+                true,
+                ResidencyMode.ACTIVE,
+                primary.killPolicy(),
+                primary.freezePolicy(),
+                primary.wakePolicy(),
+                primary.resourcePolicy(),
+                primary.refreezePolicy());
+        Map<String, AppResidencyPolicy> encoded = new LinkedHashMap<>();
+        encoded.put(primary.instanceKey().encode(), primary);
+        encoded.put(clone.instanceKey().encode(), clone);
+
+        RuntimeConfigSnapshot snapshot = RuntimeConfigSnapshot.available(
+                3L, true, true, false, 4L, encoded);
+
+        assertEquals(2, snapshot.policiesByInstance().size());
+        assertSame(primary, snapshot.policiesByInstance().get(primary.instanceKey()));
+        assertSame(clone, snapshot.policiesByInstance().get(clone.instanceKey()));
     }
 }

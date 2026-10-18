@@ -6,7 +6,10 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.net.Uri;
-import android.os.Build;
+import android.os.UserHandle;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import com.frostwork.bgenhance.residency.decision.FreezeContext;
 import com.frostwork.bgenhance.residency.decision.FreezeDecision;
 import com.frostwork.bgenhance.residency.decision.FreezeExemptionContext;
@@ -40,6 +43,9 @@ import java.util.concurrent.TimeUnit;
 
 /** Process-local facade used by hooks; all platform identity work stays on a background thread. */
 public final class HookResidencyRuntime {
+    private static final String ACTION_USER_ADDED = "android.intent.action.USER_ADDED";
+    private static final String ACTION_USER_REMOVED = "android.intent.action.USER_REMOVED";
+
     private HookResidencyRuntime() {}
 
     private static final ScheduledThreadPoolExecutor IDENTITY_EXECUTOR =
@@ -89,6 +95,11 @@ public final class HookResidencyRuntime {
     private static final BroadcastReceiver PACKAGE_CHANGE_RECEIVER = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
+            String action = intent == null ? null : intent.getAction();
+            if (ACTION_USER_ADDED.equals(action) || ACTION_USER_REMOVED.equals(action)) {
+                CONTROLLER.invalidateIdentities();
+                return;
+            }
             Uri data = intent == null ? null : intent.getData();
             String packageName = data == null ? null : data.getSchemeSpecificPart();
             RuntimeConfigSnapshot snapshot = CONTROLLER.state().snapshot();
@@ -109,7 +120,14 @@ public final class HookResidencyRuntime {
 
     private static void initializeHost(Context host) {
         attachPackageUidSource(host);
-        registerPackageReceiver(host);
+        try {
+            registerPackageReceiver(host);
+        } catch (RuntimeException error) {
+            sPackageManager = null;
+            sPackageUidSource = null;
+            CONTROLLER.clearPackageUidSource();
+            throw error;
+        }
     }
 
     private static void attachPackageUidSource(Context host) {
@@ -123,18 +141,81 @@ public final class HookResidencyRuntime {
     }
 
     private static void registerPackageReceiver(Context context) {
-        IntentFilter filter = new IntentFilter();
-        filter.addAction(Intent.ACTION_PACKAGE_ADDED);
-        filter.addAction(Intent.ACTION_PACKAGE_REMOVED);
-        filter.addAction(Intent.ACTION_PACKAGE_REPLACED);
-        filter.addAction(Intent.ACTION_PACKAGE_FULLY_REMOVED);
-        filter.addAction(Intent.ACTION_PACKAGE_CHANGED);
-        filter.addDataScheme("package");
-        if (Build.VERSION.SDK_INT >= 33) {
-            context.registerReceiver(
-                    PACKAGE_CHANGE_RECEIVER, filter, Context.RECEIVER_EXPORTED);
-        } else {
-            context.registerReceiver(PACKAGE_CHANGE_RECEIVER, filter);
+        IntentFilter packages = new IntentFilter();
+        packages.addAction(Intent.ACTION_PACKAGE_ADDED);
+        packages.addAction(Intent.ACTION_PACKAGE_REMOVED);
+        packages.addAction(Intent.ACTION_PACKAGE_REPLACED);
+        packages.addAction(Intent.ACTION_PACKAGE_FULLY_REMOVED);
+        packages.addAction(Intent.ACTION_PACKAGE_CHANGED);
+        packages.addDataScheme("package");
+        registerForAllUsers(context, PACKAGE_CHANGE_RECEIVER, packages);
+
+        IntentFilter users = new IntentFilter();
+        users.addAction(ACTION_USER_ADDED);
+        users.addAction(ACTION_USER_REMOVED);
+        registerForAllUsers(context, PACKAGE_CHANGE_RECEIVER, users);
+    }
+
+    /** Hidden Context.registerReceiverAsUser. Failure stays fail-closed for every user. */
+    private static void registerForAllUsers(
+            Context context, BroadcastReceiver receiver, IntentFilter filter) {
+        Object allUsers = allUsersHandle();
+        try {
+            Method method = allUserRegistration();
+            if (method.getParameterTypes().length == 6) {
+                method.invoke(
+                        context,
+                        receiver,
+                        allUsers,
+                        filter,
+                        null,
+                        null,
+                        Context.RECEIVER_EXPORTED);
+            } else {
+                method.invoke(context, receiver, allUsers, filter, null, null);
+            }
+        } catch (InvocationTargetException error) {
+            Throwable cause = error.getCause();
+            if (cause instanceof RuntimeException) throw (RuntimeException) cause;
+            if (cause instanceof Error) throw (Error) cause;
+            throw new IllegalStateException("all-user receiver registration failed", cause);
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("all-user receiver registration failed", error);
+        }
+    }
+
+    private static Method allUserRegistration() throws NoSuchMethodException {
+        try {
+            return Context.class.getMethod(
+                    "registerReceiverAsUser",
+                    BroadcastReceiver.class,
+                    UserHandle.class,
+                    IntentFilter.class,
+                    String.class,
+                    android.os.Handler.class,
+                    int.class);
+        } catch (NoSuchMethodException ignored) {
+            return Context.class.getMethod(
+                    "registerReceiverAsUser",
+                    BroadcastReceiver.class,
+                    UserHandle.class,
+                    IntentFilter.class,
+                    String.class,
+                    android.os.Handler.class);
+        }
+    }
+
+    /** Hidden all-users handle. A missing field fails host initialization. */
+    private static Object allUsersHandle() {
+        try {
+            Field field = UserHandle.class.getField("ALL");
+            Object value = field.get(null);
+            if (value == null) {
+                throw new IllegalStateException("all-users handle unavailable");
+            }
+            return value;
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("all-users handle unavailable", error);
         }
     }
 

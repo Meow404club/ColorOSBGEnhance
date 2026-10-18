@@ -1014,7 +1014,7 @@ public final class HansActiveRecoveryCoordinatorTest {
                 boolean master, List<AppResidencyPolicy> policies, long revision) {
             Map<String, AppResidencyPolicy> policiesByPackage = new LinkedHashMap<>();
             for (AppResidencyPolicy policy : policies) {
-                policiesByPackage.put(policy.packageName(), policy);
+                policiesByPackage.put(policy.instanceKey().encode(), policy);
             }
             controller.updateConfig(RuntimeConfigSnapshot.available(
                     revision,

@@ -1,5 +1,7 @@
 package com.frostwork.bgenhance.residency.runtime;
 
+import com.frostwork.bgenhance.residency.model.AppInstanceKey;
+import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -18,16 +20,32 @@ public final class ResidencyIdentityIndexBuilder {
 
     public ResidencyIdentityIndex build(RuntimeConfigSnapshot snapshot) {
         Objects.requireNonNull(snapshot, "snapshot");
-        Map<String, Integer> resolvedPackageUids = new LinkedHashMap<>();
+        Map<AppInstanceKey, Integer> instanceUids = new LinkedHashMap<>();
+        Map<String, Integer> packageAppIdSeeds = new LinkedHashMap<>();
         Map<Integer, Set<String>> verifiedUidPackages = new LinkedHashMap<>();
         Set<Integer> expandedUids = new HashSet<>();
         boolean completeUidEnumeration = packageUidSource.hasCompleteUidEnumeration();
-        for (String packageName : snapshot.policiesByPackage().keySet()) {
+        for (AppResidencyPolicy policy : snapshot.policiesByInstance().values()) {
+            String packageName = policy.packageName();
+            int userId = policy.userId();
             OptionalInt uid = Objects.requireNonNull(
-                    packageUidSource.findUid(packageName), "packageUidSource result");
+                    packageUidSource.findUid(packageName, userId),
+                    "packageUidSource result");
             if (!uid.isPresent()) continue;
             int resolvedUid = uid.getAsInt();
-            putPackageUid(resolvedPackageUids, packageName, resolvedUid);
+            if (resolvedUid < 0
+                    || resolvedUid / AppInstanceKey.PER_USER_RANGE != userId) {
+                continue;
+            }
+            Integer previousUid = instanceUids.put(policy.instanceKey(), resolvedUid);
+            if (previousUid != null && previousUid.intValue() != resolvedUid) {
+                throw new IllegalStateException(
+                        "multiple UIDs for " + packageName + " user " + userId);
+            }
+            verifiedUidPackages
+                    .computeIfAbsent(resolvedUid, ignored -> new LinkedHashSet<>())
+                    .add(packageName);
+            putPackageUid(packageAppIdSeeds, packageName, resolvedUid);
             if (!completeUidEnumeration) continue;
             Set<String> sharedPackages = verifiedUidPackages.get(resolvedUid);
             if (expandedUids.add(resolvedUid)) {
@@ -48,11 +66,11 @@ public final class ResidencyIdentityIndexBuilder {
                 if (sharedPackage == null || sharedPackage.isEmpty()) {
                     throw new IllegalArgumentException("invalid shared UID package");
                 }
-                putPackageUid(resolvedPackageUids, sharedPackage, resolvedUid);
+                putPackageUid(packageAppIdSeeds, sharedPackage, resolvedUid);
             }
         }
         return ResidencyIdentityIndex.build(
-                snapshot, resolvedPackageUids, verifiedUidPackages);
+                snapshot, packageAppIdSeeds, verifiedUidPackages);
     }
 
     private static void putPackageUid(
