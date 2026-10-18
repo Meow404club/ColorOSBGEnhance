@@ -5,6 +5,7 @@ import com.frostwork.bgenhance.residency.codec.ResidencyPolicyValidationExceptio
 import com.frostwork.bgenhance.residency.codec.ResidencyPolicyValidator;
 import com.frostwork.bgenhance.residency.config.ModuleConfigRepository;
 import com.frostwork.bgenhance.residency.legacy.LegacyHansImportResult;
+import com.frostwork.bgenhance.residency.model.AppInstanceKey;
 import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
 import com.frostwork.bgenhance.residency.model.ResidencyPolicyDocument;
 import java.util.Collection;
@@ -72,17 +73,19 @@ public final class ResidencyRuleStore {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(policy, "policy");
         synchronized (WRITE_LOCK) {
-            ResidencyAppSafety.Result safety = ResidencyAppSafety.inspect(
-                    context, policy.packageName());
-            if (safety.restriction() == ResidencyAppSafety.Restriction.NOT_INSTALLED) {
+            ResidencyAppItem installed = new ResidencyAppCatalog(context).loadSingle(
+                    policy.packageName(), policy.userId());
+            if (!installed.installed()
+                    || installed.uid() < 0
+                    || installed.userId() != policy.userId()) {
                 throw new StoreException(Failure.PACKAGE_UNAVAILABLE);
             }
-            if (safety.isRestricted()) {
+            if (installed.safety().isRestricted()) {
                 throw new StoreException(Failure.PACKAGE_RESTRICTED);
             }
 
             ResidencyPolicyDocument current = read(context);
-            if (ResidencyRuleMutation.find(current, policy.packageName()) == null
+            if (ResidencyRuleMutation.find(current, policy.instanceKey()) == null
                     && current.rules().size() >= ResidencyPolicyValidator.MAX_RULES) {
                 throw new StoreException(Failure.RULE_LIMIT);
             }
@@ -105,7 +108,7 @@ public final class ResidencyRuleStore {
             AppResidencyPolicy published;
             try {
                 published = ResidencyRuleMutation.find(
-                        ModuleConfigRepository.readResidencyPolicy(context), policy.packageName());
+                        ModuleConfigRepository.readResidencyPolicy(context), policy.instanceKey());
             } catch (RuntimeException exception) {
                 throw new StoreException(Failure.VERIFY_FAILED, exception);
             }
@@ -116,11 +119,15 @@ public final class ResidencyRuleStore {
     }
 
     public static void delete(Context context, String packageName) throws StoreException {
+        delete(context, new AppInstanceKey(packageName, AppResidencyPolicy.PRIMARY_USER_ID));
+    }
+
+    public static void delete(Context context, AppInstanceKey key) throws StoreException {
         Objects.requireNonNull(context, "context");
-        Objects.requireNonNull(packageName, "packageName");
+        Objects.requireNonNull(key, "key");
         synchronized (WRITE_LOCK) {
             ResidencyPolicyDocument current = read(context);
-            ResidencyPolicyDocument candidate = ResidencyRuleMutation.delete(current, packageName);
+            ResidencyPolicyDocument candidate = ResidencyRuleMutation.delete(current, key);
             if (candidate == current) return;
             try {
                 candidate = VALIDATOR.validate(candidate);
@@ -134,7 +141,7 @@ public final class ResidencyRuleStore {
             }
             try {
                 if (ResidencyRuleMutation.find(
-                        ModuleConfigRepository.readResidencyPolicy(context), packageName) != null) {
+                        ModuleConfigRepository.readResidencyPolicy(context), key) != null) {
                     throw new StoreException(Failure.VERIFY_FAILED);
                 }
             } catch (StoreException exception) {
@@ -229,11 +236,15 @@ public final class ResidencyRuleStore {
             ResidencyPolicyDocument current,
             LegacyHansImportResult legacy,
             Set<String> selection) {
-        Set<String> known = new HashSet<>();
-        for (AppResidencyPolicy policy : current.rules()) known.add(policy.packageName());
+        Set<AppInstanceKey> known = new HashSet<>();
+        for (AppResidencyPolicy policy : current.rules()) known.add(policy.instanceKey());
         int count = known.size();
         for (AppResidencyPolicy policy : legacy.policies()) {
-            if (selection.contains(policy.packageName()) && known.add(policy.packageName())) count++;
+            if (selection.contains(policy.packageName())
+                    && known.add(new AppInstanceKey(
+                            policy.packageName(), AppResidencyPolicy.PRIMARY_USER_ID))) {
+                count++;
+            }
         }
         return count > ResidencyPolicyValidator.MAX_RULES;
     }

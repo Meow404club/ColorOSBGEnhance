@@ -50,6 +50,22 @@ public final class ResidencyRuleMutationTest {
     }
 
     @Test
+    public void deleteRemovesOnlyTheRequestedUserOfTheSamePackage() {
+        AppResidencyPolicy primary = ResidencyPresets.create(
+                "com.gof.china", ResidencyMode.BALANCED);
+        AppResidencyPolicy clone = ResidencyPresets.create(
+                "com.gof.china", 999, ResidencyMode.LOW_POWER);
+        ResidencyPolicyDocument current = document(primary, clone);
+
+        ResidencyPolicyDocument deleted = ResidencyRuleMutation.delete(
+                current, clone.instanceKey());
+
+        assertEquals(1, deleted.rules().size());
+        assertEquals(primary, ResidencyRuleMutation.find(deleted, primary.packageName()));
+        assertNull(ResidencyRuleMutation.find(deleted, clone.instanceKey()));
+    }
+
+    @Test
     public void deletingUnknownPackageReturnsOriginalDocument() {
         ResidencyPolicyDocument current = document(ResidencyPresets.create(
                 "com.example.first", ResidencyMode.BALANCED));

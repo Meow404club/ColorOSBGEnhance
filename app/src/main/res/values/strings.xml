@@ -92,6 +92,8 @@
     <string name="diagnostics_uid_with_applications">UID %1$d · %2$s</string>
     <string name="diagnostics_uid_applications_more">%1$s等 %2$d 个应用</string>
     <string name="diagnostics_manage_application">管理应用</string>
+    <string name="diagnostics_user_unknown">用户未知</string>
+    <string name="residency_user_id_label">用户 %1$d</string>
     <string name="diagnostics_no_activity">尚无运行记录</string>
     <string name="diagnostics_recent_activity">最近触发：%1$s</string>
     <string name="diagnostics_hook_hits">已触发 %1$d · 成功读取 %2$d · 已识别应用 %3$d</string>

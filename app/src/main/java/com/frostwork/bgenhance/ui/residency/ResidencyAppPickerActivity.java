@@ -137,6 +137,7 @@ public final class ResidencyAppPickerActivity extends AppCompatActivity {
         }
         Intent intent = new Intent(this, ResidencyPolicyActivity.class);
         intent.putExtra(ResidencyPolicyActivity.EXTRA_PACKAGE_NAME, item.packageName());
+        intent.putExtra(ResidencyPolicyActivity.EXTRA_USER_ID, item.userId());
         policyLauncher.launch(intent);
     }
 }

@@ -6,6 +6,7 @@ import android.graphics.drawable.Drawable;
 import android.util.LruCache;
 import android.widget.ImageView;
 import com.frostwork.bgenhance.R;
+import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -13,6 +14,7 @@ import java.util.concurrent.Executors;
 /** Loads application icons asynchronously and keeps a bounded in-memory cache. */
 public final class ResidencyAppIconLoader implements AutoCloseable {
     private static final int CACHE_ENTRIES = 64;
+    private static final String KEY_SEPARATOR = "\u0000";
 
     private final PackageManager packageManager;
     private final LruCache<String, Drawable.ConstantState> cache =
@@ -30,10 +32,15 @@ public final class ResidencyAppIconLoader implements AutoCloseable {
     }
 
     public void bind(ImageView imageView, String packageName) {
+        bind(imageView, packageName, AppResidencyPolicy.PRIMARY_USER_ID);
+    }
+
+    public void bind(ImageView imageView, String packageName, int userId) {
         Objects.requireNonNull(imageView, "imageView");
         Objects.requireNonNull(packageName, "packageName");
-        imageView.setTag(R.id.tag_residency_icon_request, packageName);
-        Drawable.ConstantState cached = cache.get(packageName);
+        String requestKey = packageName + KEY_SEPARATOR + userId;
+        imageView.setTag(R.id.tag_residency_icon_request, requestKey);
+        Drawable.ConstantState cached = cache.get(requestKey);
         if (cached != null) {
             imageView.setImageDrawable(cached.newDrawable(imageView.getResources()));
             return;
@@ -49,11 +56,11 @@ public final class ResidencyAppIconLoader implements AutoCloseable {
             }
             Drawable.ConstantState state = icon.getConstantState();
             if (state == null || closed) return;
-            cache.put(packageName, state);
+            cache.put(requestKey, state);
             imageView.post(() -> {
                 if (closed) return;
                 Object request = imageView.getTag(R.id.tag_residency_icon_request);
-                if (packageName.equals(request)) {
+                if (requestKey.equals(request)) {
                     imageView.setImageDrawable(state.newDrawable(imageView.getResources()));
                 }
             });

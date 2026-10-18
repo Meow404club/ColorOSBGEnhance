@@ -36,6 +36,7 @@ public final class ResidencyAppsAdapter
         this.iconLoader = new ResidencyAppIconLoader(context);
         this.listener = Objects.requireNonNull(listener, "listener");
         this.roundedGroup = roundedGroup;
+        setHasStableIds(true);
     }
 
     public void submitList(List<ResidencyAppItem> nextItems) {
@@ -70,6 +71,13 @@ public final class ResidencyAppsAdapter
     }
 
     @Override
+    public long getItemId(int position) {
+        ResidencyAppItem item = items.get(position);
+        return (((long) item.packageName().hashCode()) << 32)
+                ^ (item.userId() & 0xffffffffL);
+    }
+
+    @Override
     public void close() {
         iconLoader.close();
     }
@@ -100,8 +108,13 @@ public final class ResidencyAppsAdapter
                 itemView.setClipToOutline(false);
             }
             name.setText(item.label());
-            packageName.setText(item.packageName());
-            iconLoader.bind(icon, item.packageName());
+            String subtitle = item.packageName();
+            if (item.userId() != 0) {
+                subtitle = item.packageName() + " · " + context.getString(
+                        R.string.residency_user_id_label, item.userId());
+            }
+            packageName.setText(subtitle);
+            iconLoader.bind(icon, item.packageName(), item.userId());
             String statusText = statusText(context, item);
             status.setText(statusText);
             itemView.setAlpha(1f);
@@ -147,8 +160,10 @@ public final class ResidencyAppsAdapter
 
         @Override
         public boolean areItemsTheSame(int oldPosition, int newPosition) {
-            return oldItems.get(oldPosition).packageName()
-                    .equals(newItems.get(newPosition).packageName());
+            ResidencyAppItem oldItem = oldItems.get(oldPosition);
+            ResidencyAppItem newItem = newItems.get(newPosition);
+            return oldItem.packageName().equals(newItem.packageName())
+                    && oldItem.userId() == newItem.userId();
         }
 
         @Override
@@ -159,6 +174,8 @@ public final class ResidencyAppsAdapter
                     && (oldPosition == oldItems.size() - 1)
                             == (newPosition == newItems.size() - 1)
                     && oldItem.label().equals(newItem.label())
+                    && oldItem.userId() == newItem.userId()
+                    && oldItem.uid() == newItem.uid()
                     && oldItem.installed() == newItem.installed()
                     && oldItem.systemApp() == newItem.systemApp()
                     && oldItem.launchable() == newItem.launchable()

@@ -13,6 +13,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.frostwork.bgenhance.ModuleApplication;
 import com.frostwork.bgenhance.ModuleSettings;
 import com.frostwork.bgenhance.R;
+import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
 import com.frostwork.bgenhance.residency.model.ResidencyMode;
 import com.frostwork.bgenhance.residency.model.ResidencyPolicyDocument;
 import com.frostwork.bgenhance.residency.model.ResidencySectionPresets;
@@ -31,12 +32,15 @@ import java.util.Set;
 /** Edits one application policy using compact presets and focused custom editors. */
 public final class ResidencyPolicyActivity extends AppCompatActivity {
     public static final String EXTRA_PACKAGE_NAME = "package_name";
+    public static final String EXTRA_USER_ID = "user_id";
     private static final String STATE_SELECTED_MODE = "selected_mode";
+    private static final String STATE_USER_ID = "user_id";
     private static final String STATE_FORM_READY = "form_ready";
     private static final String STATE_DRAFT = "draft";
     private static final String STATE_PENDING_SECTION = "pending_section";
 
     private String packageName;
+    private int userId;
     private String restoredDraft;
     private ResidencyPolicyEditorContract.Section pendingSection;
     private ResidencyPolicyViewModel viewModel;
@@ -63,7 +67,7 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
                 }
                 try {
                     workingDraft = ResidencyPolicyEditorContract.readResult(
-                            result.getData(), packageName, expected);
+                            result.getData(), packageName, userId, expected);
                     updateSectionRows();
                 } catch (IllegalArgumentException exception) {
                     Snackbar.make(
@@ -95,12 +99,16 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         packageName = getIntent().getStringExtra(EXTRA_PACKAGE_NAME);
+        userId = getIntent().getIntExtra(EXTRA_USER_ID, AppResidencyPolicy.PRIMARY_USER_ID);
         if (packageName == null || packageName.isEmpty()) {
             finish();
             return;
         }
         if (savedInstanceState != null) {
             selectedMode = parseMode(savedInstanceState.getString(STATE_SELECTED_MODE));
+            if (savedInstanceState.containsKey(STATE_USER_ID)) {
+                userId = savedInstanceState.getInt(STATE_USER_ID);
+            }
             restoredDraft = savedInstanceState.getString(STATE_DRAFT);
             pendingSection = parseSection(savedInstanceState.getString(STATE_PENDING_SECTION));
         }
@@ -115,7 +123,7 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
         });
         hookStatus = hookStatusViewModel.state();
         updateApplyNotice();
-        viewModel = new ResidencyPolicyViewModel(getApplicationContext(), packageName);
+        viewModel = new ResidencyPolicyViewModel(getApplicationContext(), packageName, userId);
         viewModel.setListener(this::render);
         bindInteractions();
         viewModel.load();
@@ -142,6 +150,7 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
     @Override
     protected void onSaveInstanceState(Bundle outState) {
         outState.putString(STATE_SELECTED_MODE, selectedMode.name());
+        outState.putInt(STATE_USER_ID, userId);
         outState.putBoolean(STATE_FORM_READY, bound && app != null && workingDraft != null);
         if (workingDraft != null) {
             ResidencyPolicyDraft snapshot = snapshotDraft();
@@ -309,7 +318,7 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
             bound = true;
             ((TextView) findViewById(R.id.residency_policy_app_name)).setText(app.label());
             ((TextView) findViewById(R.id.residency_policy_package)).setText(app.packageName());
-            iconLoader.bind(findViewById(R.id.residency_policy_icon), app.packageName());
+            iconLoader.bind(findViewById(R.id.residency_policy_icon), app.packageName(), app.userId());
             workingDraft = restoreDraftOrDefault(loadedDraft);
             enabledSwitch.setChecked(workingDraft.enabled());
             if (restoredDraft == null) selectedMode = loadedDraft.mode();
@@ -410,7 +419,7 @@ public final class ResidencyPolicyActivity extends AppCompatActivity {
         if (!isPolicyEditorEditable()) return;
         pendingSection = section;
         sectionEditor.launch(ResidencyPolicyEditorContract.createIntent(
-                this, packageName, section, workingDraft));
+                this, packageName, userId, section, workingDraft));
     }
 
     private void applyPreset(ResidencyPolicyEditorContract.Section section, int index) {

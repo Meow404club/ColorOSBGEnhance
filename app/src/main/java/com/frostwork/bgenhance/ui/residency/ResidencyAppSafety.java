@@ -3,6 +3,8 @@ package com.frostwork.bgenhance.ui.residency;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.os.Process;
+import android.os.Process;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -95,6 +97,9 @@ public final class ResidencyAppSafety {
 
             String[] uidPackages = context.getPackageManager().getPackagesForUid(info.uid);
             if (uidPackages == null || uidPackages.length == 0) {
+                int uidUser = info.uid < 0 ? -1 : info.uid / PER_USER_RANGE;
+                int currentUser = Process.myUid() / PER_USER_RANGE;
+                if (uidUser != currentUser) return Result.allowed();
                 return Result.restricted(Restriction.IDENTITY_UNAVAILABLE);
             }
             Set<String> uniquePackages = new HashSet<>(Arrays.asList(uidPackages));

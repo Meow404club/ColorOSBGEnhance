@@ -31,6 +31,7 @@ import java.util.Set;
 /** Edits one custom policy section without exposing unrelated low-level controls. */
 public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
     private String packageName;
+    private int userId;
     private ResidencyPolicyEditorContract.Section section;
     private ResidencyPolicyDraft draft;
     private HookStatusViewModel hookStatusViewModel;
@@ -48,6 +49,7 @@ public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
             return;
         }
         packageName = request.packageName();
+        userId = request.userId();
         section = request.section();
         draft = request.draft();
 
@@ -304,8 +306,8 @@ public final class ResidencyPolicyDetailActivity extends AppCompatActivity {
             if (!ResidencyPolicyFormValidator.isValid(packageName, updated)) {
                 throw new InvalidFormException();
             }
-            setResult(RESULT_OK,
-                    ResidencyPolicyEditorContract.createResult(packageName, section, updated));
+            setResult(RESULT_OK, ResidencyPolicyEditorContract.createResult(
+                    packageName, userId, section, updated));
             finish();
         } catch (InvalidFormException exception) {
             Snackbar.make(

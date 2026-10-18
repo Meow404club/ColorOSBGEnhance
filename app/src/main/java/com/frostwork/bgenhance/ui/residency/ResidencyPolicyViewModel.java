@@ -3,6 +3,7 @@ package com.frostwork.bgenhance.ui.residency;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
+import com.frostwork.bgenhance.residency.model.AppInstanceKey;
 import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
 import com.frostwork.bgenhance.residency.model.ResidencyMode;
 import com.frostwork.bgenhance.residency.model.ResidencyPolicyDocument;
@@ -62,15 +63,21 @@ public final class ResidencyPolicyViewModel implements AutoCloseable {
         return thread;
     });
     private final String packageName;
+    private final int userId;
     private Listener listener;
     private State current;
     private int generation;
     private boolean closed;
 
     public ResidencyPolicyViewModel(Context context, String packageName) {
+        this(context, packageName, AppResidencyPolicy.PRIMARY_USER_ID);
+    }
+
+    public ResidencyPolicyViewModel(Context context, String packageName, int userId) {
         this.context = Objects.requireNonNull(context, "context").getApplicationContext();
         this.catalog = new ResidencyAppCatalog(this.context);
         this.packageName = Objects.requireNonNull(packageName, "packageName");
+        this.userId = userId;
     }
 
     public void setListener(Listener listener) {
@@ -84,12 +91,13 @@ public final class ResidencyPolicyViewModel implements AutoCloseable {
         executor.execute(() -> {
             try {
                 ResidencyPolicyDocument document = ResidencyRuleStore.read(context);
-                ResidencyAppItem app = catalog.loadSingle(packageName);
-                AppResidencyPolicy policy = ResidencyRuleMutation.find(document, packageName);
+                ResidencyAppItem app = catalog.loadSingle(packageName, userId);
+                AppInstanceKey key = new AppInstanceKey(packageName, userId);
+                AppResidencyPolicy policy = ResidencyRuleMutation.find(document, key);
                 boolean existing = policy != null;
                 if (policy == null) {
                     ResidencyMode defaultMode = document.defaultNewRuleMode();
-                    policy = ResidencyPresets.create(packageName, defaultMode);
+                    policy = ResidencyPresets.create(packageName, userId, defaultMode);
                 }
                 State state = new State(
                         Status.READY, app, ResidencyPolicyDraft.from(policy), existing, null);
@@ -120,7 +128,7 @@ public final class ResidencyPolicyViewModel implements AutoCloseable {
                 null));
         executor.execute(() -> {
             try {
-                ResidencyRuleStore.save(context, draft.toPolicy(packageName));
+                ResidencyRuleStore.save(context, draft.toPolicy(packageName, userId));
                 State saved = new State(Status.SAVED, previous.app(), draft, true, null);
                 mainHandler.post(() -> {
                     if (!closed && requestGeneration == generation) publish(saved);
@@ -161,7 +169,7 @@ public final class ResidencyPolicyViewModel implements AutoCloseable {
                 null));
         executor.execute(() -> {
             try {
-                ResidencyRuleStore.delete(context, packageName);
+                ResidencyRuleStore.delete(context, new AppInstanceKey(packageName, userId));
                 State deleted = new State(
                         Status.DELETED, previous.app(), previous.draft(), false, null);
                 mainHandler.post(() -> {

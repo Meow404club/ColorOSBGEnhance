@@ -53,10 +53,15 @@ public final class ResidencyPolicyDraft {
     }
 
     public AppResidencyPolicy toPolicy(String packageName) {
+        return toPolicy(packageName, AppResidencyPolicy.PRIMARY_USER_ID);
+    }
+
+    public AppResidencyPolicy toPolicy(String packageName, int userId) {
         Objects.requireNonNull(packageName, "packageName");
         if (mode == ResidencyMode.CUSTOM) {
             return new AppResidencyPolicy(
                     packageName,
+                    userId,
                     enabled,
                     mode,
                     customKillPolicy,
@@ -65,9 +70,10 @@ public final class ResidencyPolicyDraft {
                     customResourcePolicy,
                     customRefreezePolicy);
         }
-        AppResidencyPolicy preset = ResidencyPresets.create(packageName, mode);
+        AppResidencyPolicy preset = ResidencyPresets.create(packageName, userId, mode);
         return new AppResidencyPolicy(
                 packageName,
+                userId,
                 enabled,
                 mode,
                 preset.killPolicy(),

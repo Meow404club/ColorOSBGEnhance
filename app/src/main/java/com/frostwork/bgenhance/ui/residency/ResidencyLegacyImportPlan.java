@@ -2,6 +2,7 @@ package com.frostwork.bgenhance.ui.residency;
 
 import com.frostwork.bgenhance.residency.codec.ResidencyPolicyValidator;
 import com.frostwork.bgenhance.residency.legacy.LegacyHansImportResult;
+import com.frostwork.bgenhance.residency.model.AppInstanceKey;
 import com.frostwork.bgenhance.residency.model.AppResidencyPolicy;
 import com.frostwork.bgenhance.residency.model.KillPolicy;
 import com.frostwork.bgenhance.residency.model.ResidencyPolicyDocument;
@@ -166,14 +167,19 @@ public final class ResidencyLegacyImportPlan {
                             + ResidencyPolicyValidator.MAX_RULES);
         }
 
-        TreeMap<String, AppResidencyPolicy> merged = new TreeMap<>();
+        TreeMap<AppInstanceKey, AppResidencyPolicy> merged = new TreeMap<>();
         for (AppResidencyPolicy rule : current.rules()) {
-            merged.put(rule.packageName(), rule);
+            if (merged.put(rule.instanceKey(), rule) != null) {
+                throw new IllegalArgumentException(
+                        "Duplicate current instance: " + rule.packageName() + " user " + rule.userId());
+            }
         }
         for (String packageName : selection) {
             AppResidencyPolicy imported = entriesByPackage.get(packageName).importedPolicy();
-            merged.put(packageName, enableKillProtection
-                    ? withKillPolicy(imported, KillPolicy.all()) : imported);
+            AppResidencyPolicy primary = enableKillProtection
+                    ? withKillPolicy(imported, KillPolicy.all()) : asPrimaryUser(imported);
+            merged.put(new AppInstanceKey(
+                    primary.packageName(), AppResidencyPolicy.PRIMARY_USER_ID), primary);
         }
 
         if (merged.size() > ResidencyPolicyValidator.MAX_RULES) {
@@ -214,6 +220,7 @@ public final class ResidencyLegacyImportPlan {
         Map<String, AppResidencyPolicy> indexed = new HashMap<>(rules.size());
         for (AppResidencyPolicy rule : rules) {
             Objects.requireNonNull(rule, "current.rules contains null");
+            if (rule.userId() != AppResidencyPolicy.PRIMARY_USER_ID) continue;
             if (indexed.put(rule.packageName(), rule) != null) {
                 throw new IllegalArgumentException(
                         "Duplicate current package: " + rule.packageName());
@@ -250,9 +257,23 @@ public final class ResidencyLegacyImportPlan {
             AppResidencyPolicy policy, KillPolicy killPolicy) {
         return new AppResidencyPolicy(
                 policy.packageName(),
+                AppResidencyPolicy.PRIMARY_USER_ID,
                 policy.enabled(),
                 policy.mode(),
                 killPolicy,
+                policy.freezePolicy(),
+                policy.wakePolicy(),
+                policy.resourcePolicy(),
+                policy.refreezePolicy());
+    }
+
+    private static AppResidencyPolicy asPrimaryUser(AppResidencyPolicy policy) {
+        if (policy.userId() == AppResidencyPolicy.PRIMARY_USER_ID) return policy;
+        return new AppResidencyPolicy(
+                policy.packageName(),
+                policy.enabled(),
+                policy.mode(),
+                policy.killPolicy(),
                 policy.freezePolicy(),
                 policy.wakePolicy(),
                 policy.resourcePolicy(),

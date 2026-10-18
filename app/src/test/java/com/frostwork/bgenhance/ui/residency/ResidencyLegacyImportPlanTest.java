@@ -199,6 +199,26 @@ public final class ResidencyLegacyImportPlanTest {
     }
 
     @Test
+    public void importingPrimaryUserKeepsAnExistingCloneRule() throws Exception {
+        LegacyHansImportResult legacy = legacyResult();
+        AppResidencyPolicy importedPrimary = imported(legacy, NEW_PACKAGE);
+        AppResidencyPolicy clone = ResidencyPresets.create(
+                NEW_PACKAGE, 999, ResidencyMode.ACTIVE);
+        ResidencyLegacyImportPlan plan = new ResidencyLegacyImportPlan(
+                document(clone), legacy, setOf(NEW_PACKAGE));
+
+        assertEquals(1, plan.newCount());
+        assertEquals(0, plan.updateCount());
+        assertEquals(0, plan.unchangedCount());
+        ResidencyPolicyDocument applied = plan.apply(
+                Collections.singletonList(NEW_PACKAGE), false);
+
+        assertEquals(2, applied.rules().size());
+        assertEquals(clone, ruleForUser(applied, NEW_PACKAGE, 999));
+        assertEquals(importedPrimary, ruleForUser(applied, NEW_PACKAGE, 0));
+    }
+
+    @Test
     public void applyRejectsSkippedUnknownDuplicateAndNullSelections() throws Exception {
         ResidencyLegacyImportPlan plan = new ResidencyLegacyImportPlan(
                 document(), legacyResult(),
@@ -268,6 +288,16 @@ public final class ResidencyLegacyImportPlanTest {
             if (policy.packageName().equals(packageName)) return policy;
         }
         throw new AssertionError("Missing imported policy: " + packageName);
+    }
+
+    private static AppResidencyPolicy ruleForUser(
+            ResidencyPolicyDocument document, String packageName, int userId) {
+        for (AppResidencyPolicy policy : document.rules()) {
+            if (policy.packageName().equals(packageName) && policy.userId() == userId) {
+                return policy;
+            }
+        }
+        return null;
     }
 
     private static AppResidencyPolicy find(

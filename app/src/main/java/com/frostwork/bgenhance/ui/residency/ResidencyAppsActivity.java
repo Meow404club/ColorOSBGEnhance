@@ -472,6 +472,7 @@ public final class ResidencyAppsActivity extends AppCompatActivity {
     private void openPolicy(ResidencyAppItem item) {
         Intent intent = new Intent(this, ResidencyPolicyActivity.class);
         intent.putExtra(ResidencyPolicyActivity.EXTRA_PACKAGE_NAME, item.packageName());
+        intent.putExtra(ResidencyPolicyActivity.EXTRA_USER_ID, item.userId());
         startActivity(intent);
     }
 }
